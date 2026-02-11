@@ -50,3 +50,32 @@ fn honors_result_limit() {
 
     assert_eq!(results.len(), 2);
 }
+
+#[test]
+fn recent_item_outranks_older_equivalent() {
+    let items = vec![
+        SearchItem::new("old", "file", "Report", "C:\\old-report.txt").with_usage(5, 1_000_000),
+        SearchItem::new("recent", "file", "Report", "C:\\recent-report.txt")
+            .with_usage(5, 2_000_000_000),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "report", 10);
+
+    assert_eq!(results[0].id, "recent");
+    assert_eq!(results[1].id, "old");
+}
+
+#[test]
+fn frequency_influences_ties_predictably() {
+    let items = vec![
+        SearchItem::new("low", "app", "Terminal", "C:\\terminal-low.exe")
+            .with_usage(1, 1_800_000_000),
+        SearchItem::new("high", "app", "Terminal", "C:\\terminal-high.exe")
+            .with_usage(12, 1_800_000_000),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "terminal", 10);
+
+    assert_eq!(results[0].id, "high");
+    assert_eq!(results[1].id, "low");
+}

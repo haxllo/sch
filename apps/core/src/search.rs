@@ -14,8 +14,7 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            score_normalized_title(item.normalized_title(), &normalized_query)
-                .map(|score| (score, index, item))
+            score_item(item, &normalized_query).map(|score| (score, index, item))
         })
         .collect();
 
@@ -26,6 +25,26 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         .take(limit)
         .map(|(_, _, item)| item.clone())
         .collect()
+}
+
+fn score_item(item: &SearchItem, normalized_query: &str) -> Option<i64> {
+    let text_score = score_normalized_title(item.normalized_title(), normalized_query)?;
+    let recency_bonus = recency_bonus(item.last_accessed_epoch_secs);
+    let frequency_bonus = frequency_bonus(item.use_count);
+
+    Some(text_score + recency_bonus + frequency_bonus)
+}
+
+fn recency_bonus(last_accessed_epoch_secs: i64) -> i64 {
+    if last_accessed_epoch_secs <= 0 {
+        return 0;
+    }
+
+    (last_accessed_epoch_secs / 86_400).clamp(0, 400)
+}
+
+fn frequency_bonus(use_count: u32) -> i64 {
+    ((use_count as i64) * 12).clamp(0, 400)
 }
 
 fn score_normalized_title(normalized_title: &str, query: &str) -> Option<i64> {
