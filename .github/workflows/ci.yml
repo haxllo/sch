@@ -6,7 +6,16 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout
@@ -16,18 +25,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+          cache: pnpm
 
-      - name: Enable Corepack and install JS dependencies
-        run: |
-          corepack enable
-          corepack prepare pnpm@latest --activate
-          pnpm install --frozen-lockfile
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Run Vitest
+      - name: Run Vitest gate
         run: ./node_modules/.bin/vitest --run
 
-      - name: Run Rust tests
+      - name: Run Rust test gate
         run: cargo test -p swiftfind-core
+
+      - name: Run Rust perf exact gate
+        run: cargo test -p swiftfind-core --test perf_query_latency_test -- --exact warm_query_p95_under_15ms
