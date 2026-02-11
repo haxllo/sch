@@ -2,6 +2,7 @@ use rusqlite::Connection;
 
 use crate::action_executor::{launch_path, LaunchError};
 use crate::config::{validate, Config};
+use crate::contract::{CoreRequest, CoreResponse, LaunchResponse, SearchResponse};
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
 
@@ -10,6 +11,7 @@ pub enum ServiceError {
     Config(String),
     Store(StoreError),
     Launch(LaunchError),
+    InvalidRequest(String),
     ItemNotFound(String),
 }
 
@@ -19,6 +21,7 @@ impl std::fmt::Display for ServiceError {
             Self::Config(error) => write!(f, "config error: {error}"),
             Self::Store(error) => write!(f, "store error: {error}"),
             Self::Launch(error) => write!(f, "launch error: {error}"),
+            Self::InvalidRequest(error) => write!(f, "invalid request: {error}"),
             Self::ItemNotFound(id) => write!(f, "item not found: {id}"),
         }
     }
@@ -90,5 +93,35 @@ impl CoreService {
     pub fn upsert_item(&self, item: &SearchItem) -> Result<(), ServiceError> {
         index_store::upsert_item(&self.db, item)?;
         Ok(())
+    }
+
+    pub fn handle_command(&self, request: CoreRequest) -> Result<CoreResponse, ServiceError> {
+        match request {
+            CoreRequest::Search(search) => {
+                let results = self.search(&search.query, search.limit.unwrap_or(0))?;
+                Ok(CoreResponse::Search(SearchResponse {
+                    results: results.into_iter().map(Into::into).collect(),
+                }))
+            }
+            CoreRequest::Launch(launch) => {
+                if let Some(id) = launch.id.as_deref() {
+                    if !id.trim().is_empty() {
+                        self.launch(LaunchTarget::Id(id))?;
+                        return Ok(CoreResponse::Launch(LaunchResponse { launched: true }));
+                    }
+                }
+
+                if let Some(path) = launch.path.as_deref() {
+                    if !path.trim().is_empty() {
+                        self.launch(LaunchTarget::Path(path))?;
+                        return Ok(CoreResponse::Launch(LaunchResponse { launched: true }));
+                    }
+                }
+
+                Err(ServiceError::InvalidRequest(
+                    "launch requires non-empty id or path".into(),
+                ))
+            }
+        }
     }
 }
