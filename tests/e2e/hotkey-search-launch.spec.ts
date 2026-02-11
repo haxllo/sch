@@ -1,22 +1,45 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, it, expect } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LauncherOverlay } from '../../apps/ui/src/components/LauncherOverlay'
 
-describe('hotkey-search-launch mvp smoke', () => {
-  it('renders query and ranked result rows', () => {
-    render(
-      React.createElement(LauncherOverlay, {
-        query: 'code',
-        results: [
-          { id: '1', title: 'Visual Studio Code' },
-          { id: '2', title: 'Codeium' },
-        ],
-      }),
-    )
+afterEach(() => {
+  document.body.innerHTML = ''
+})
 
-    expect(screen.getByRole('textbox')).toHaveValue('code')
-    expect(screen.getByText('Visual Studio Code')).toBeInTheDocument()
-    expect(screen.getByText('Codeium')).toBeInTheDocument()
+describe('hotkey-search-launch mvp smoke', () => {
+  it('searches, selects with keyboard, and launches the selected item', async () => {
+    const search = vi.fn().mockResolvedValue([
+      {
+        id: '1',
+        kind: 'app',
+        title: 'Visual Studio Code',
+        path: 'C:\\Code.exe',
+      },
+      {
+        id: '2',
+        kind: 'app',
+        title: 'Windows Terminal',
+        path: 'C:\\Terminal.exe',
+      },
+    ])
+    const launch = vi.fn().mockResolvedValue(undefined)
+
+    render(React.createElement(LauncherOverlay, { searchCommand: search, launchCommand: launch }))
+
+    const input = screen.getByRole('textbox', { name: 'Launcher Query' })
+    fireEvent.change(input, { target: { value: 'term' } })
+
+    await screen.findByText('Windows Terminal')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => {
+      expect(launch).toHaveBeenCalledWith({
+        id: '2',
+        path: 'C:\\Terminal.exe',
+      })
+    })
   })
 })
