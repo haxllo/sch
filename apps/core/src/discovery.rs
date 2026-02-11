@@ -1,4 +1,8 @@
 use std::fmt::{Display, Formatter};
+use std::path::PathBuf;
+
+#[cfg(target_os = "windows")]
+use std::path::Path;
 
 use crate::model::SearchItem;
 
@@ -104,4 +108,168 @@ impl DiscoveryProvider for FileProvider {
     fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
         Ok(self.files.clone())
     }
+}
+
+pub struct StartMenuAppDiscoveryProvider {
+    roots: Vec<PathBuf>,
+}
+
+impl Default for StartMenuAppDiscoveryProvider {
+    fn default() -> Self {
+        Self {
+            roots: default_start_menu_roots(),
+        }
+    }
+}
+
+impl StartMenuAppDiscoveryProvider {
+    pub fn with_roots(roots: Vec<PathBuf>) -> Self {
+        Self { roots }
+    }
+}
+
+impl DiscoveryProvider for StartMenuAppDiscoveryProvider {
+    fn provider_name(&self) -> &'static str {
+        "start-menu-apps"
+    }
+
+    fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = &self.roots;
+            Ok(Vec::new())
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            let mut items = Vec::new();
+            for root in &self.roots {
+                items.extend(discover_start_menu_root(root)?);
+            }
+            Ok(items)
+        }
+    }
+}
+
+pub struct FileSystemDiscoveryProvider {
+    roots: Vec<PathBuf>,
+    max_depth: usize,
+}
+
+impl FileSystemDiscoveryProvider {
+    pub fn new(roots: Vec<PathBuf>, max_depth: usize) -> Self {
+        Self { roots, max_depth }
+    }
+}
+
+impl DiscoveryProvider for FileSystemDiscoveryProvider {
+    fn provider_name(&self) -> &'static str {
+        "filesystem"
+    }
+
+    fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
+        let mut out = Vec::new();
+
+        for root in &self.roots {
+            if !root.exists() {
+                continue;
+            }
+
+            for entry in walkdir::WalkDir::new(root)
+                .max_depth(self.max_depth)
+                .into_iter()
+                .filter_map(Result::ok)
+            {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+
+                let file_name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+                let id = format!("file:{}", path.to_string_lossy());
+                out.push(SearchItem::new(
+                    &id,
+                    "file",
+                    &file_name,
+                    &path.to_string_lossy(),
+                ));
+            }
+        }
+
+        Ok(out)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn default_start_menu_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+
+    if let Ok(program_data) = std::env::var("ProgramData") {
+        roots.push(
+            PathBuf::from(program_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        roots.push(
+            PathBuf::from(app_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+
+    roots
+}
+
+#[cfg(not(target_os = "windows"))]
+fn default_start_menu_roots() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderError> {
+    let mut items = Vec::new();
+
+    if !root.exists() {
+        return Ok(items);
+    }
+
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+
+        if ext != "lnk" && ext != "exe" {
+            continue;
+        }
+
+        let title = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
+        let id = format!("app:{}", path.to_string_lossy());
+
+        items.push(SearchItem::new(&id, "app", &title, &path.to_string_lossy()));
+    }
+
+    Ok(items)
 }

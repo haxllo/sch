@@ -3,7 +3,9 @@ use rusqlite::Connection;
 use crate::action_executor::{launch_path, LaunchError};
 use crate::config::{validate, Config};
 use crate::contract::{CoreRequest, CoreResponse, LaunchResponse, SearchResponse};
-use crate::discovery::{DiscoveryProvider, ProviderError};
+use crate::discovery::{
+    DiscoveryProvider, FileSystemDiscoveryProvider, ProviderError, StartMenuAppDiscoveryProvider,
+};
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
 
@@ -82,6 +84,19 @@ impl CoreService {
     }
 
     pub fn with_providers(mut self, providers: Vec<Box<dyn DiscoveryProvider>>) -> Self {
+        self.providers = providers;
+        self
+    }
+
+    pub fn with_runtime_providers(mut self) -> Self {
+        let mut providers: Vec<Box<dyn DiscoveryProvider>> = Vec::new();
+        providers.push(Box::new(StartMenuAppDiscoveryProvider::default()));
+        if !self.config.discovery_roots.is_empty() {
+            providers.push(Box::new(FileSystemDiscoveryProvider::new(
+                self.config.discovery_roots.clone(),
+                5,
+            )));
+        }
         self.providers = providers;
         self
     }
