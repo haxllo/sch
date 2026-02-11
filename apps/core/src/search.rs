@@ -1,11 +1,11 @@
-use crate::model::SearchItem;
+use crate::model::{normalize_for_search, SearchItem};
 
 pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem> {
     if limit == 0 || items.is_empty() {
         return Vec::new();
     }
 
-    let normalized_query = normalize(query);
+    let normalized_query = normalize_for_search(query);
     if normalized_query.is_empty() {
         return Vec::new();
     }
@@ -14,7 +14,8 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            score_title(&item.title, &normalized_query).map(|score| (score, index, item))
+            score_normalized_title(item.normalized_title(), &normalized_query)
+                .map(|score| (score, index, item))
         })
         .collect();
 
@@ -27,16 +28,7 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         .collect()
 }
 
-fn normalize(input: &str) -> String {
-    input
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
-}
-
-fn score_title(title: &str, query: &str) -> Option<i64> {
-    let normalized_title = normalize(title);
+fn score_normalized_title(normalized_title: &str, query: &str) -> Option<i64> {
     if normalized_title.is_empty() || query.is_empty() {
         return None;
     }
@@ -49,7 +41,7 @@ fn score_title(title: &str, query: &str) -> Option<i64> {
         return Some(10_000 + prefix_bonus + compact_bonus - position_penalty - length_penalty);
     }
 
-    let positions = subsequence_positions(&normalized_title, query)?;
+    let positions = subsequence_positions(normalized_title, query)?;
     let start_penalty = positions[0] as i64;
     let gap_penalty: i64 = positions
         .windows(2)

@@ -24,12 +24,11 @@ pub fn get_item(db: &Connection, id: &str) -> Result<Option<SearchItem>, rusqlit
     let mut stmt = db.prepare("SELECT id, kind, title, path FROM item WHERE id = ?1")?;
     let mut rows = stmt.query(params![id])?;
     if let Some(row) = rows.next()? {
-        Ok(Some(SearchItem {
-            id: row.get(0)?,
-            kind: row.get(1)?,
-            title: row.get(2)?,
-            path: row.get(3)?,
-        }))
+        let id: String = row.get(0)?;
+        let kind: String = row.get(1)?;
+        let title: String = row.get(2)?;
+        let path: String = row.get(3)?;
+        Ok(Some(SearchItem::from_owned(id, kind, title, path)))
     } else {
         Ok(None)
     }
