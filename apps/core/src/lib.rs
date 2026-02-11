@@ -2,6 +2,7 @@ pub mod action_executor;
 pub mod config;
 pub mod contract;
 pub mod core_service;
+pub mod discovery;
 pub mod hotkey;
 pub mod index_store;
 pub mod model;
