@@ -13,6 +13,9 @@ jobs:
 
     runs-on: ${{ matrix.os }}
 
+    env:
+      SWIFTFIND_WINDOWS_RUNTIME_SMOKE: ${{ matrix.os == 'windows-latest' && '1' || '0' }}
+
     defaults:
       run:
         shell: bash
@@ -47,3 +50,6 @@ jobs:
 
       - name: Run Rust perf exact gate
         run: cargo test -p swiftfind-core --test perf_query_latency_test -- --exact warm_query_p95_under_15ms
+
+      - name: Run runtime smoke harness gate
+        run: cargo test -p swiftfind-core --test windows_runtime_smoke_test
