@@ -10,3 +10,6 @@ path = "src/lib.rs"
 [[bin]]
 name = "swiftfind-core"
 path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "0.37.0", features = ["bundled"] }
