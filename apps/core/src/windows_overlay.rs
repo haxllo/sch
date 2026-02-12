@@ -95,6 +95,8 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
+    const INPUT_TEXT_TOP_PAD: i32 = 10;
+    const INPUT_TEXT_BOTTOM_PAD: i32 = 4;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
@@ -1479,9 +1481,9 @@ mod imp {
 
         let mut text_rect = RECT {
             left: 10,
-            top: 7,
+            top: INPUT_TEXT_TOP_PAD,
             right: width - 10,
-            bottom: height - 7,
+            bottom: height - INPUT_TEXT_BOTTOM_PAD,
         };
         if text_rect.right <= text_rect.left {
             text_rect.right = width;
