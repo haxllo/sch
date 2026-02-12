@@ -133,7 +133,7 @@ mod imp {
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str =
-        "Change hotkey: edit %APPDATA%\\SwiftFind\\config.json (key: hotkey), then restart SwiftFind.";
+        "Click to configure hotkey: %APPDATA%\\SwiftFind\\config.json (key: hotkey).";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -895,6 +895,21 @@ mod imp {
                     }
                     return 0;
                 }
+                if control_id == CONTROL_ID_HELP && notification == 0 {
+                    if let Some(state) = state_for(hwnd) {
+                        if let Err(error) = open_help_config_file(state) {
+                            state.status_is_error = true;
+                            state.help_status_visible = false;
+                            let wide = to_wide(&format!("Help open error: {error}"));
+                            unsafe {
+                                SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                                InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                            }
+                            layout_children(hwnd, state);
+                        }
+                    }
+                    return 0;
+                }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
             WM_CTLCOLORSTATIC => {
@@ -1116,7 +1131,9 @@ mod imp {
                 }
                 return 0;
             }
-            if message == WM_LBUTTONUP && hwnd == state.help_hwnd {
+            if (message == WM_LBUTTONUP || message == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN)
+                && hwnd == state.help_hwnd
+            {
                 if let Err(error) = open_help_config_file(state) {
                     state.status_is_error = true;
                     state.help_status_visible = false;
@@ -1854,16 +1871,14 @@ mod imp {
         }
 
         if hovered {
-            let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
-            if status_len == 0 && !state.status_is_error {
-                state.help_status_visible = true;
-                let wide = to_wide(&help_hint_text(state));
-                unsafe {
-                    SetWindowTextW(state.status_hwnd, wide.as_ptr());
-                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
-                }
-                layout_children(hwnd, state);
+            state.help_status_visible = true;
+            state.status_is_error = false;
+            let wide = to_wide(&help_hint_text(state));
+            unsafe {
+                SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
             }
+            layout_children(hwnd, state);
             return;
         }
 
@@ -1883,7 +1898,7 @@ mod imp {
         if cfg_path.is_empty() {
             HOTKEY_HELP_TEXT_FALLBACK.to_string()
         } else {
-            format!("Change hotkey: edit {cfg_path} (key: hotkey), then restart SwiftFind.")
+            format!("Click to configure hotkey: {cfg_path} (key: hotkey).")
         }
     }
 
