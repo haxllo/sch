@@ -17,3 +17,6 @@ Known limitations in this milestone:
 - Launcher UX is console-driven (temporary runtime stub), not a native overlay window yet.
 - Hotkey callback currently runs on the message-loop thread; while launcher prompt is active, additional hotkey events are queued until prompt flow exits.
 - Runtime must stay running in its own console window/process; closing the process unregisters hotkeys.
+
+Operator steps and troubleshooting are documented in:
+- `docs/engineering/windows-operator-runbook.md`
