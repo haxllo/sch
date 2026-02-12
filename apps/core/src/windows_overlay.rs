@@ -95,7 +95,7 @@ mod imp {
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
-    const INPUT_TEXT_SHIFT_Y: i32 = 10;
+    const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT: i32 = 18;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
