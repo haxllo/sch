@@ -22,7 +22,7 @@ mod imp {
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
+        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL,
         LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
@@ -50,7 +50,6 @@ mod imp {
     const COMPACT_HEIGHT: i32 = 90;
     const PANEL_RADIUS: i32 = 20;
     const PANEL_MARGIN_X: i32 = 14;
-    const PANEL_MARGIN_TOP: i32 = 12;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
     const STATUS_HEIGHT: i32 = 18;
@@ -1322,7 +1321,7 @@ mod imp {
         let input_width = width - PANEL_MARGIN_X * 2;
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
-        // Keep the input bar anchored at a stable vertical position in all states.
+        // Keep input exactly centered in compact mode and stable across states.
         let input_top = ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0);
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
