@@ -4,12 +4,12 @@ mod imp {
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject,
-        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY,
-        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
+        EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkColor,
+        SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_END_ELLIPSIS,
+        DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -22,8 +22,7 @@ mod imp {
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS,
-        LB_SETTOPINDEX, LoadCursorW,
+        LB_GETTOPINDEX, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS, LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
@@ -32,7 +31,7 @@ mod imp {
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
-        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE, WS_VSCROLL,
@@ -73,6 +72,7 @@ mod imp {
     const SELECTION_ANIM_MS: u64 = 90;
     const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 10;
+    const WHEEL_LINES_PER_NOTCH: i32 = 3;
 
     // Required visual colors.
     const COLOR_PANEL_BG: u32 = 0x001C1C1C; // #1C1C1C (BGR)
@@ -880,42 +880,21 @@ mod imp {
         }
 
         if let Some(state) = state_for(parent) {
-            if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
-                let mut cursor = POINT { x: 0, y: 0 };
-                unsafe {
-                    GetCursorPos(&mut cursor);
-                    ScreenToClient(hwnd, &mut cursor);
-                }
-                let packed = ((cursor.y as u32) << 16) | (cursor.x as u32 & 0xFFFF);
-                let idx = unsafe { SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, packed as isize) };
-                let row = (idx & 0xFFFF) as usize;
-                let outside = ((idx >> 16) & 0xFFFF) != 0;
-                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
-                if !outside && count > 0 && row < count as usize {
-                    unsafe {
-                        SendMessageW(hwnd, LB_SETCURSEL, row, 0);
-                    }
-                }
-            }
             if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
-                    let current = unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) };
-                    let base = if current >= 0 { current as i32 } else { 0 };
+                    let current_top = unsafe { SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+                    let visible_rows = visible_row_capacity(hwnd);
+                    let max_top = (count as i32 - visible_rows).max(0);
                     let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
                     let mut notches = (wheel as i32) / 120;
                     if notches == 0 && wheel != 0 {
                         notches = if wheel > 0 { 1 } else { -1 };
                     }
                     if notches != 0 {
-                        let next = (base - notches).clamp(0, count as i32 - 1);
-                        unsafe {
-                            SendMessageW(hwnd, LB_SETCURSEL, next as usize, 0);
-                        }
-                        begin_scroll_animation(parent, state, next, count as i32);
-                        unsafe {
-                            InvalidateRect(hwnd, std::ptr::null(), 1);
-                        }
+                        let target_top =
+                            (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
+                        begin_scroll_animation_to_top(parent, state, target_top);
                     }
                 }
                 return 0;
@@ -1097,7 +1076,15 @@ mod imp {
 
         let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
         let target_top = target_top_index_for_selection(state.list_hwnd, selected_index, count, current_top);
+        begin_scroll_animation_to_top(overlay_hwnd, state, target_top);
+    }
 
+    fn begin_scroll_animation_to_top(
+        overlay_hwnd: HWND,
+        state: &mut OverlayShellState,
+        target_top: i32,
+    ) {
+        let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
         if target_top == current_top {
             state.scroll_anim_start = None;
             state.scroll_from_top = current_top;
