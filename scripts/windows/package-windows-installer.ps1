@@ -15,9 +15,17 @@ if (-not $Version -or $Version.Trim().Length -eq 0) {
   }
 }
 
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir "..\.."))
+$outputRootAbs = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
+  [System.IO.Path]::GetFullPath($OutputRoot)
+} else {
+  [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputRoot))
+}
+
 $artifactName = "swiftfind-$Version-windows-x64"
-$stageDir = Join-Path $OutputRoot "$artifactName-stage"
-$issPath = "scripts/windows/swiftfind.iss"
+$stageDir = Join-Path $outputRootAbs "$artifactName-stage"
+$issPath = Join-Path $repoRoot "scripts/windows/swiftfind.iss"
 
 Write-Host "== Building SwiftFind Setup.exe for $Version ==" -ForegroundColor Cyan
 
@@ -47,7 +55,7 @@ if (-not (Test-Path $issPath)) {
 
 if (-not (Test-Path $stageDir)) {
   Write-Host "Staged artifact not found. Building package stage first..." -ForegroundColor Yellow
-  & "scripts/windows/package-windows-artifact.ps1" -Version $Version -OutputRoot $OutputRoot
+  & (Join-Path $repoRoot "scripts/windows/package-windows-artifact.ps1") -Version $Version -OutputRoot $outputRootAbs
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to build staged artifact."
   }
@@ -57,12 +65,13 @@ if (-not (Test-Path (Join-Path $stageDir "bin/swiftfind-core.exe"))) {
   throw "Missing staged executable at '$stageDir/bin/swiftfind-core.exe'."
 }
 
-& $InnoCompiler "/DAppVersion=$Version" "/DStageDir=$stageDir" $issPath
+New-Item -ItemType Directory -Force -Path $outputRootAbs | Out-Null
+& $InnoCompiler "/DAppVersion=$Version" "/DStageDir=$stageDir" "/O$outputRootAbs" $issPath
 if ($LASTEXITCODE -ne 0) {
   throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }
 
-$setupPath = Join-Path $OutputRoot "swiftfind-$Version-windows-x64-setup.exe"
+$setupPath = Join-Path $outputRootAbs "swiftfind-$Version-windows-x64-setup.exe"
 if (-not (Test-Path $setupPath)) {
   throw "Expected installer was not generated at '$setupPath'."
 }

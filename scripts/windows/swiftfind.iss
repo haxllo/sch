@@ -24,7 +24,7 @@ PrivilegesRequired=lowest
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\bin\swiftfind-core.exe
-SetupIconFile=apps\assets\swiftfinder.ico
+SetupIconFile={#SourcePath}..\..\apps\assets\swiftfinder.ico
 
 [Files]
 Source: "{#StageDir}\bin\swiftfind-core.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
