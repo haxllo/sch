@@ -76,7 +76,6 @@ mod imp {
     const SWIFTFIND_WM_MOVE_UP: u32 = WM_APP + 3;
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
-    const EM_SETCUEBANNER: u32 = 0x1501;
     const EM_GETRECT: u32 = 0x00B2;
     const EM_SETRECTNP: u32 = 0x00B4;
 
@@ -145,7 +144,6 @@ mod imp {
         edit_hwnd: HWND,
         list_hwnd: HWND,
         status_hwnd: HWND,
-        cue_text_wide: Vec<u16>,
 
         edit_prev_proc: isize,
         list_prev_proc: isize,
@@ -742,14 +740,6 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
-                        state.cue_text_wide = to_wide("Type to search");
-                        SendMessageW(
-                            state.edit_hwnd,
-                            EM_SETCUEBANNER,
-                            1,
-                            state.cue_text_wide.as_ptr() as LPARAM,
-                        );
-
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
                             GWLP_WNDPROC,
@@ -1080,13 +1070,11 @@ mod imp {
             SendMessageW(edit_hwnd, EM_GETRECT, 0, &mut text_rect as *mut RECT as LPARAM);
         }
         if text_rect.right <= text_rect.left || text_rect.bottom <= text_rect.top {
+            let mut client: RECT = unsafe { std::mem::zeroed() };
             unsafe {
-                GetClientRect(edit_hwnd, &mut text_rect);
+                GetClientRect(edit_hwnd, &mut client);
             }
-            text_rect.left += INPUT_TEXT_LEFT_INSET;
-            text_rect.right -= INPUT_TEXT_RIGHT_INSET;
-            text_rect.top += INPUT_TEXT_TOP_PAD;
-            text_rect.bottom -= INPUT_TEXT_BOTTOM_PAD;
+            text_rect = compute_input_text_rect(client.right - client.left, client.bottom - client.top);
         }
         if text_rect.right <= text_rect.left {
             return;
@@ -1485,23 +1473,7 @@ mod imp {
             return;
         }
 
-        let mut text_rect = RECT {
-            left: INPUT_TEXT_LEFT_INSET,
-            top: INPUT_TEXT_TOP_PAD,
-            right: width - INPUT_TEXT_RIGHT_INSET,
-            bottom: height - INPUT_TEXT_BOTTOM_PAD,
-        };
-        text_rect.left += INPUT_TEXT_SHIFT_X;
-        text_rect.right += INPUT_TEXT_SHIFT_X;
-        text_rect.top += INPUT_TEXT_SHIFT_Y;
-        text_rect.bottom += INPUT_TEXT_SHIFT_Y;
-        if text_rect.right <= text_rect.left {
-            text_rect.right = width;
-        }
-        if text_rect.bottom <= text_rect.top {
-            text_rect.top = 0;
-            text_rect.bottom = height;
-        }
+        let text_rect = compute_input_text_rect(width, height);
 
         unsafe {
             SendMessageW(
@@ -1512,6 +1484,23 @@ mod imp {
             );
             InvalidateRect(edit_hwnd, std::ptr::null(), 1);
         }
+    }
+
+    fn compute_input_text_rect(width: i32, height: i32) -> RECT {
+        let mut text_rect = RECT {
+            left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X,
+            top: INPUT_TEXT_TOP_PAD + INPUT_TEXT_SHIFT_Y,
+            right: width - INPUT_TEXT_RIGHT_INSET + INPUT_TEXT_SHIFT_X,
+            bottom: height - INPUT_TEXT_BOTTOM_PAD + INPUT_TEXT_SHIFT_Y,
+        };
+        if text_rect.right <= text_rect.left {
+            text_rect.right = width;
+        }
+        if text_rect.bottom <= text_rect.top {
+            text_rect.top = 0;
+            text_rect.bottom = height;
+        }
+        text_rect
     }
 
     fn apply_list_rounded_corners(list_hwnd: HWND, width: i32, height: i32) {
