@@ -32,12 +32,19 @@ When running on Windows:
 - Index DB: `%APPDATA%\SwiftFind\index.sqlite3`
 
 If config file does not exist, runtime writes defaults to the stable app-data location on startup.
+The generated file is a user-focused template with inline comments (JSON5-compatible).
 
 ## Change Hotkey Safely
 
 1. Open `%APPDATA%\SwiftFind\config.json`.
 2. Update the `hotkey` value.
 3. Restart `swiftfind-core`.
+
+Notes:
+
+- You can keep inline comments in this file (`// ...`).
+- Most users only need to edit `hotkey`.
+- `max_results` and `discovery_roots` are optional tuning.
 
 Recommended low-conflict hotkeys on Windows:
 

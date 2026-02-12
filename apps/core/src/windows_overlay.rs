@@ -2087,7 +2087,7 @@ mod imp {
         if !path.exists() {
             let cfg = crate::config::load(Some(path))
                 .map_err(|e| format!("failed to load default config template: {e}"))?;
-            crate::config::save_to_path(&cfg, path)
+            crate::config::write_user_template(&cfg, path)
                 .map_err(|e| format!("failed to create config file: {e}"))?;
         }
 

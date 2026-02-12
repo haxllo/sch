@@ -45,7 +45,7 @@ impl Default for Config {
 #[derive(Debug)]
 pub enum ConfigError {
     Io(std::io::Error),
-    Parse(serde_json::Error),
+    Parse(String),
     Validation(String),
 }
 
@@ -69,7 +69,7 @@ impl From<std::io::Error> for ConfigError {
 
 impl From<serde_json::Error> for ConfigError {
     fn from(value: serde_json::Error) -> Self {
-        Self::Parse(value)
+        Self::Parse(value.to_string())
     }
 }
 
@@ -110,20 +110,13 @@ pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
     let resolved_path = path.map(Path::to_path_buf).unwrap_or_else(stable_config_path);
 
     if !resolved_path.exists() {
-        let mut cfg = Config::default();
-        cfg.config_path = resolved_path.clone();
-        if cfg.index_db_path == Config::default().index_db_path {
-            cfg.index_db_path = resolved_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join("index.sqlite3");
-        }
+        let cfg = default_for_path(&resolved_path);
         validate(&cfg).map_err(ConfigError::Validation)?;
         return Ok(cfg);
     }
 
     let raw = std::fs::read_to_string(&resolved_path)?;
-    let mut cfg: Config = serde_json::from_str(&raw)?;
+    let mut cfg: Config = parse_text(&raw)?;
     cfg.config_path = resolved_path.clone();
 
     if cfg.index_db_path.as_os_str().is_empty() {
@@ -150,6 +143,52 @@ pub fn save_to_path(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
 
     let encoded = serde_json::to_string_pretty(cfg)?;
     std::fs::write(path, encoded)?;
+    Ok(())
+}
+
+pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
+    validate(cfg).map_err(ConfigError::Validation)?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let roots = if cfg.discovery_roots.is_empty() {
+        String::new()
+    } else {
+        cfg.discovery_roots
+            .iter()
+            .map(|root| format!("    {}", json_string(&root.to_string_lossy())))
+            .collect::<Vec<_>>()
+            .join(",\n")
+    };
+
+    let roots_section = if roots.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[\n{roots}\n  ]")
+    };
+
+    let text = format!(
+        concat!(
+            "{{\n",
+            "  // SwiftFind user config.\n",
+            "  // In most cases, only change `hotkey`, then restart SwiftFind.\n",
+            "  \"version\": {},\n",
+            "  \"hotkey\": {},\n",
+            "  // Optional: max results per query (valid range: 5-100).\n",
+            "  \"max_results\": {},\n",
+            "  // Optional: folders scanned for local files.\n",
+            "  \"discovery_roots\": {}\n",
+            "}}\n"
+        ),
+        cfg.version,
+        json_string(&cfg.hotkey),
+        cfg.max_results,
+        roots_section
+    );
+
+    std::fs::write(path, text)?;
     Ok(())
 }
 
@@ -187,4 +226,32 @@ fn default_discovery_roots() -> Vec<PathBuf> {
     }
 
     Vec::new()
+}
+
+fn default_for_path(path: &Path) -> Config {
+    let mut cfg = Config::default();
+    cfg.config_path = path.to_path_buf();
+    if cfg.index_db_path == Config::default().index_db_path {
+        cfg.index_db_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join("index.sqlite3");
+    }
+    cfg
+}
+
+fn parse_text(raw: &str) -> Result<Config, ConfigError> {
+    match serde_json::from_str::<Config>(raw) {
+        Ok(cfg) => Ok(cfg),
+        Err(json_err) => match json5::from_str::<Config>(raw) {
+            Ok(cfg) => Ok(cfg),
+            Err(json5_err) => Err(ConfigError::Parse(format!(
+                "invalid config format. json error: {json_err}; json5 error: {json5_err}"
+            ))),
+        },
+    }
+}
+
+fn json_string(value: &str) -> String {
+    serde_json::to_string(value).unwrap_or_else(|_| "\"\"".to_string())
 }

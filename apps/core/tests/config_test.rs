@@ -117,3 +117,29 @@ fn loads_partial_config_with_migration_safe_defaults() {
         std::fs::remove_file(&loaded.config_path).unwrap();
     }
 }
+
+#[test]
+fn writes_user_template_with_comments_and_loads_it() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let config_path = std::env::temp_dir()
+        .join("swiftfind")
+        .join(format!("template-{unique}.json"));
+
+    let mut cfg = swiftfind_core::config::Config::default();
+    cfg.config_path = config_path.clone();
+
+    swiftfind_core::config::write_user_template(&cfg, &config_path).unwrap();
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(raw.contains("// SwiftFind user config."));
+    assert!(raw.contains("\"hotkey\""));
+    assert!(!raw.contains("\"index_db_path\""));
+
+    let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
+    assert_eq!(loaded.hotkey, cfg.hotkey);
+    assert_eq!(loaded.max_results, cfg.max_results);
+
+    std::fs::remove_file(&config_path).unwrap();
+}

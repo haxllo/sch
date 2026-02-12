@@ -3,7 +3,7 @@
 Current hotkey-to-launcher behavior in `swiftfind-core`:
 
 1. Start runtime with `cargo run -p swiftfind-core`.
-2. Runtime loads config, logs startup mode/hotkey/paths, builds or opens index.
+2. Runtime loads config (JSON/JSON5 with comments), logs startup mode/hotkey/paths, builds or opens index.
 3. Runtime registers global hotkey from config (default `Ctrl+Shift+Space`).
 4. Runtime creates a native borderless top-most launcher window (hidden by default).
 5. Hotkey behavior:

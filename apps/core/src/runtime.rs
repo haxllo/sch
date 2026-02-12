@@ -50,9 +50,9 @@ impl From<HotkeyRuntimeError> for RuntimeError {
 pub fn run() -> Result<(), RuntimeError> {
     let config = config::load(None)?;
     if !config.config_path.exists() {
-        config::save(&config)?;
+        config::write_user_template(&config, &config.config_path)?;
         println!(
-            "[swiftfind-core] wrote default config to {}",
+            "[swiftfind-core] wrote user config template to {}",
             config.config_path.display()
         );
     }
