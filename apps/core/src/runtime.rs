@@ -95,6 +95,9 @@ pub fn run() -> Result<(), RuntimeError> {
                     match action {
                         HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
                             overlay.show_and_focus();
+                            if overlay.query_text().trim().is_empty() {
+                                set_idle_overlay_state(&overlay);
+                            }
                         }
                         HotkeyAction::Hide => {
                             overlay.hide();
@@ -111,8 +114,7 @@ pub fn run() -> Result<(), RuntimeError> {
                     if trimmed.is_empty() {
                         current_results.clear();
                         selected_index = 0;
-                        overlay.set_results(&[], 0);
-                        overlay.set_status_text("");
+                        set_idle_overlay_state(&overlay);
                         return;
                     }
 
@@ -120,18 +122,19 @@ pub fn run() -> Result<(), RuntimeError> {
                         Ok(results) => {
                             current_results = results;
                             selected_index = 0;
-                            let rows = overlay_rows(&current_results);
-                            overlay.set_results(&rows, selected_index);
                             if current_results.is_empty() {
-                                overlay.set_status_text("No results");
+                                overlay.set_results(&no_results_rows(trimmed), 0);
+                                overlay.set_status_text("No matches found. Try a broader query.");
                             } else {
+                                let rows = overlay_rows(&current_results);
+                                overlay.set_results(&rows, selected_index);
                                 overlay.set_status_text("");
                             }
                         }
                         Err(error) => {
                             current_results.clear();
                             selected_index = 0;
-                            overlay.set_results(&[], 0);
+                            overlay.set_results(&search_error_rows(), 0);
                             overlay.set_status_text(&format!("Search error: {error}"));
                         }
                     }
@@ -153,7 +156,7 @@ pub fn run() -> Result<(), RuntimeError> {
                 }
                 OverlayEvent::Submit => {
                     if current_results.is_empty() {
-                        overlay.set_status_text("No result selected");
+                        overlay.set_status_text("No launchable result selected.");
                         return;
                     }
 
@@ -169,7 +172,7 @@ pub fn run() -> Result<(), RuntimeError> {
                             overlay.clear_query_text();
                             current_results.clear();
                             selected_index = 0;
-                            overlay.set_results(&[], 0);
+                            set_idle_overlay_state(&overlay);
                         }
                         Err(error) => {
                             overlay.set_status_text(&format!("Launch error: {error}"));
@@ -210,6 +213,27 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
             format!("{}\\t{}", item.title, display_path)
         })
         .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
+    overlay.set_results(&idle_rows(), 0);
+    overlay.set_status_text("Type to search apps and files.");
+}
+
+#[cfg(target_os = "windows")]
+fn idle_rows() -> Vec<String> {
+    vec!["Start typing to search...".to_string()]
+}
+
+#[cfg(target_os = "windows")]
+fn no_results_rows(query: &str) -> Vec<String> {
+    vec![format!("No matches for '{query}'\\tTry another term")]
+}
+
+#[cfg(target_os = "windows")]
+fn search_error_rows() -> Vec<String> {
+    vec!["Search failed\\tCheck index and configuration".to_string()]
 }
 
 #[cfg(target_os = "windows")]

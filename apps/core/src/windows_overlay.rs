@@ -21,7 +21,7 @@ mod imp {
         LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTABSTOPS, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
         SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
+        ShowWindow, TranslateMessage, AnimateWindow, AW_ACTIVATE, AW_BLEND, AW_HIDE, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, GWLP_USERDATA, GWLP_WNDPROC, HMENU,
         HWND_TOPMOST, IDC_ARROW, LBN_DBLCLK, LBS_NOTIFY, MSG, SM_CXSCREEN, SM_CYSCREEN,
         SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_APP,
@@ -62,6 +62,8 @@ mod imp {
     const COLOR_TEXT_PRIMARY: u32 = 0x00F0EAE3;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8ADA1;
     const COLOR_TEXT_ERROR: u32 = 0x007268FF;
+    const SHOW_ANIMATION_MS: u32 = 90;
+    const HIDE_ANIMATION_MS: u32 = 80;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -172,7 +174,11 @@ mod imp {
                     0,
                     SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE,
                 );
-                ShowWindow(self.hwnd, SW_SHOW);
+                if self.is_visible() {
+                    ShowWindow(self.hwnd, SW_SHOW);
+                } else {
+                    AnimateWindow(self.hwnd, SHOW_ANIMATION_MS, AW_BLEND | AW_ACTIVATE);
+                }
                 SetForegroundWindow(self.hwnd);
             }
             self.focus_input_and_select_all();
@@ -189,7 +195,11 @@ mod imp {
 
         pub fn hide(&self) {
             unsafe {
-                ShowWindow(self.hwnd, SW_HIDE);
+                if self.is_visible() {
+                    AnimateWindow(self.hwnd, HIDE_ANIMATION_MS, AW_BLEND | AW_HIDE);
+                } else {
+                    ShowWindow(self.hwnd, SW_HIDE);
+                }
             }
         }
 
