@@ -182,7 +182,7 @@ where
         DispatchMessageW, GetMessageW, TranslateMessage, MSG, WM_HOTKEY,
     };
 
-    let mut msg = MSG::default();
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
     loop {
         let status = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
         if status == -1 {
