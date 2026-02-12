@@ -40,7 +40,7 @@ mod imp {
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
-        SM_CYSCREEN, SS_NOTIFY, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
+        SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
@@ -80,6 +80,7 @@ mod imp {
     const CONTROL_ID_LIST: usize = 1002;
     const CONTROL_ID_STATUS: usize = 1003;
     const CONTROL_ID_HELP: usize = 1004;
+    const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
 
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
     const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
@@ -811,7 +812,7 @@ mod imp {
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
                             to_wide("?").as_ptr(),
-                            WS_CHILD | WS_VISIBLE | SS_NOTIFY as u32,
+                            WS_CHILD | WS_VISIBLE | STATIC_NOTIFY_STYLE,
                             0,
                             0,
                             0,
