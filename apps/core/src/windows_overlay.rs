@@ -949,9 +949,11 @@ mod imp {
                     state.hover_index = next_hover;
                     unsafe {
                         if next_hover >= 0 {
+                            let top_before = SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0);
                             let current_sel = SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32;
                             if current_sel != next_hover {
                                 SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
+                                SendMessageW(hwnd, LB_SETTOPINDEX, top_before as usize, 0);
                             }
                         }
                     }
@@ -1115,11 +1117,20 @@ mod imp {
 
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
             let text_left = icon_rect.right + ROW_ICON_GAP;
+            let has_meta = !row.path.trim().is_empty();
             let mut title_rect = RECT {
                 left: text_left,
-                top: dis.rcItem.top + ROW_TEXT_TOP_PAD,
+                top: if has_meta {
+                    dis.rcItem.top + ROW_TEXT_TOP_PAD
+                } else {
+                    dis.rcItem.top
+                },
                 right: dis.rcItem.right - ROW_INSET_X,
-                bottom: dis.rcItem.top + ROW_HEIGHT / 2,
+                bottom: if has_meta {
+                    dis.rcItem.top + ROW_HEIGHT / 2
+                } else {
+                    dis.rcItem.bottom
+                },
             };
             DrawTextW(
                 dis.hDC,
@@ -1129,21 +1140,23 @@ mod imp {
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
 
-            SelectObject(dis.hDC, state.meta_font as _);
-            SetTextColor(dis.hDC, COLOR_TEXT_SECONDARY);
-            let mut path_rect = RECT {
-                left: text_left,
-                top: dis.rcItem.top + ROW_HEIGHT / 2 - 1,
-                right: dis.rcItem.right - ROW_INSET_X,
-                bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD,
-            };
-            DrawTextW(
-                dis.hDC,
-                to_wide(&row.path).as_ptr(),
-                -1,
-                &mut path_rect,
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-            );
+            if has_meta {
+                SelectObject(dis.hDC, state.meta_font as _);
+                SetTextColor(dis.hDC, COLOR_TEXT_SECONDARY);
+                let mut path_rect = RECT {
+                    left: text_left,
+                    top: dis.rcItem.top + ROW_HEIGHT / 2 - 1,
+                    right: dis.rcItem.right - ROW_INSET_X,
+                    bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD,
+                };
+                DrawTextW(
+                    dis.hDC,
+                    to_wide(&row.path).as_ptr(),
+                    -1,
+                    &mut path_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                );
+            }
 
             SelectObject(dis.hDC, old_font);
         }
@@ -1181,18 +1194,14 @@ mod imp {
         target_top: i32,
     ) {
         let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-        if target_top == current_top {
-            state.scroll_anim_start = None;
-            state.scroll_from_top = current_top;
-            state.scroll_to_top = target_top;
-            return;
-        }
-
-        state.scroll_from_top = current_top;
+        state.scroll_anim_start = None;
+        state.scroll_from_top = target_top;
         state.scroll_to_top = target_top;
-        state.scroll_anim_start = Some(Instant::now());
         unsafe {
-            SetTimer(overlay_hwnd, TIMER_SCROLL_ANIM, ANIM_FRAME_MS as u32, None);
+            KillTimer(overlay_hwnd, TIMER_SCROLL_ANIM);
+            if target_top != current_top {
+                SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+            }
         }
     }
 

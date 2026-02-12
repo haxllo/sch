@@ -79,3 +79,30 @@ fn frequency_influences_ties_predictably() {
     assert_eq!(results[0].id, "high");
     assert_eq!(results[1].id, "low");
 }
+
+#[test]
+fn apps_then_local_files_then_other_results() {
+    let items = vec![
+        SearchItem::new("remote", "doc", "Code Reference", "https://example.com/code"),
+        SearchItem::new("local", "file", "Code Notes", "C:\\Users\\Admin\\code-notes.txt"),
+        SearchItem::new("app", "app", "Code", "C:\\Program Files\\Code\\Code.exe"),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "code", 10);
+    let ids: Vec<&str> = results.iter().map(|i| i.id.as_str()).collect();
+
+    assert_eq!(ids, vec!["app", "local", "remote"]);
+}
+
+#[test]
+fn local_file_outranks_network_file_in_same_kind() {
+    let items = vec![
+        SearchItem::new("network", "file", "Report", "\\\\server\\share\\report.txt"),
+        SearchItem::new("local", "file", "Report", "C:\\Reports\\report.txt"),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "report", 10);
+    let ids: Vec<&str> = results.iter().map(|i| i.id.as_str()).collect();
+
+    assert_eq!(ids, vec!["local", "network"]);
+}

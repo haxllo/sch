@@ -221,9 +221,42 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
         .map(|item| OverlayRow {
             kind: item.kind.clone(),
             title: item.title.clone(),
-            path: item.path.clone(),
+            path: overlay_subtitle(item),
         })
         .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn overlay_subtitle(item: &crate::model::SearchItem) -> String {
+    if item.kind.eq_ignore_ascii_case("app") {
+        return String::new();
+    }
+    abbreviate_path(&item.path)
+}
+
+#[cfg(target_os = "windows")]
+fn abbreviate_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+
+    let normalized = trimmed.replace('/', "\\");
+    let parts: Vec<&str> = normalized.split('\\').filter(|segment| !segment.is_empty()).collect();
+    if parts.is_empty() {
+        return normalized;
+    }
+
+    let tail_count = parts.len().min(3);
+    let tail = parts[parts.len() - tail_count..].join("\\");
+    if parts.len() > tail_count {
+        format!("...\\{tail}")
+    } else {
+        tail
+    }
 }
 
 #[cfg(target_os = "windows")]

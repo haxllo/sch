@@ -10,20 +10,31 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         return Vec::new();
     }
 
-    let mut scored: Vec<(i64, usize, &SearchItem)> = items
+    let mut scored: Vec<(u8, i64, usize, &SearchItem)> = items
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            score_item(item, &normalized_query).map(|score| (score, index, item))
+            score_item(item, &normalized_query).map(|score| {
+                (
+                    category_priority(item),
+                    score,
+                    index,
+                    item,
+                )
+            })
         })
         .collect();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    scored.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| b.1.cmp(&a.1))
+            .then_with(|| a.2.cmp(&b.2))
+    });
 
     scored
         .into_iter()
         .take(limit)
-        .map(|(_, _, item)| item.clone())
+        .map(|(_, _, _, item)| item.clone())
         .collect()
 }
 
@@ -45,6 +56,42 @@ fn recency_bonus(last_accessed_epoch_secs: i64) -> i64 {
 
 fn frequency_bonus(use_count: u32) -> i64 {
     ((use_count as i64) * 12).clamp(0, 400)
+}
+
+fn category_priority(item: &SearchItem) -> u8 {
+    if item.kind.eq_ignore_ascii_case("app") {
+        return 0;
+    }
+
+    if (item.kind.eq_ignore_ascii_case("file") || item.kind.eq_ignore_ascii_case("folder"))
+        && is_local_path(&item.path)
+    {
+        return 1;
+    }
+
+    2
+}
+
+fn is_local_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.contains("://") {
+        return false;
+    }
+    if trimmed.starts_with("\\\\") {
+        return false;
+    }
+
+    // Windows drive path, e.g. C:\...
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+        return true;
+    }
+
+    // Unix absolute path.
+    trimmed.starts_with('/')
 }
 
 fn score_normalized_title(normalized_title: &str, query: &str) -> Option<i64> {
