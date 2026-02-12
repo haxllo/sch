@@ -33,6 +33,7 @@ fn opens_index_store_from_config_path() {
     let got = swiftfind_core::index_store::get_item(&db, "cfg-1").unwrap();
     assert!(got.is_some());
 
+    drop(db);
     std::fs::remove_file(&cfg.index_db_path).unwrap();
 }
 

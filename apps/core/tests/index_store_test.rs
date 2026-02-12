@@ -40,5 +40,6 @@ fn persists_items_across_reopen() {
     assert_eq!(got.use_count, 7);
     assert_eq!(got.last_accessed_epoch_secs, 1_800_000_000);
 
+    drop(reopened);
     std::fs::remove_file(&db_path).unwrap();
 }
