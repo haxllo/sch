@@ -2158,7 +2158,11 @@ mod imp {
             }
             MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
             position_help_tip_popup(state);
-            apply_help_tip_rounded_corners(state.help_tip_hwnd, HELP_TIP_WIDTH, HELP_TIP_HEIGHT);
+            apply_help_tip_rounded_corners(
+                state.help_tip_hwnd,
+                help_tip_width_for_text(state),
+                HELP_TIP_HEIGHT,
+            );
             if state.help_tip_visible {
                 ShowWindow(state.help_tip_hwnd, SW_SHOW);
             } else {
@@ -2300,6 +2304,7 @@ mod imp {
 
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
         let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+        let tip_width = help_tip_width_for_text(state);
 
         // Anchor to the help icon: starts above "?" and may extend outside the panel.
         let mut tip_left = help_rect.left - HELP_TIP_TEXT_PAD_X;
@@ -2308,7 +2313,7 @@ mod imp {
             tip_top = help_rect.bottom + 8;
         }
 
-        let max_left = (screen_w - HELP_TIP_WIDTH - 8).max(8);
+        let max_left = (screen_w - tip_width - 8).max(8);
         let max_top = (screen_h - HELP_TIP_HEIGHT - 8).max(8);
         tip_left = tip_left.clamp(8, max_left);
         tip_top = tip_top.clamp(8, max_top);
@@ -2318,11 +2323,45 @@ mod imp {
                 state.help_tip_hwnd,
                 tip_left,
                 tip_top,
-                HELP_TIP_WIDTH,
+                tip_width,
                 HELP_TIP_HEIGHT,
                 1,
             );
         }
+    }
+
+    fn help_tip_width_for_text(state: &OverlayShellState) -> i32 {
+        let text = help_hint_text(state);
+        if text.is_empty() {
+            return HELP_TIP_WIDTH;
+        }
+
+        let hdc = unsafe { GetDC(state.help_tip_hwnd) };
+        if hdc.is_null() {
+            return HELP_TIP_WIDTH;
+        }
+
+        let width = unsafe {
+            let old_font = if state.help_tip_font != 0 {
+                SelectObject(hdc, state.help_tip_font as _)
+            } else {
+                std::ptr::null_mut()
+            };
+            let wide = to_wide_no_nul(&text);
+            let mut size: SIZE = std::mem::zeroed();
+            let ok = GetTextExtentPoint32W(hdc, wide.as_ptr(), wide.len() as i32, &mut size);
+            if !old_font.is_null() {
+                SelectObject(hdc, old_font);
+            }
+            ReleaseDC(state.help_tip_hwnd, hdc);
+            if ok == 0 {
+                HELP_TIP_WIDTH
+            } else {
+                size.cx + HELP_TIP_TEXT_PAD_X * 2
+            }
+        };
+
+        width.clamp(92, 260)
     }
 
     fn paint_help_tip(hwnd: HWND, state: &OverlayShellState) {
