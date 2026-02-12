@@ -7,17 +7,18 @@ mod imp {
     use windows_sys::Win32::Graphics::Gdi::CreateRoundRectRgn;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect, GetForegroundWindow,
-        GetMessageW, GetSystemMetrics, GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW,
-        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_RESETCONTENT, LB_SETCURSEL,
-        LoadCursorW, MoveWindow, PostQuitMessage, RegisterClassW, SendMessageW, SetFocus,
-        SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowRgn, SetWindowTextW,
-        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-        EM_SETSEL, GWLP_USERDATA, GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, MSG,
-        SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_SHOWWINDOW, WM_CLOSE,
-        WM_CREATE, WM_DESTROY, WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW,
-        WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP,
-        WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
+        GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics, GetWindowLongPtrW,
+        GetWindowTextLengthW, GetWindowTextW, IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL,
+        LB_RESETCONTENT, LB_SETCURSEL, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
+        RegisterClassW, SendMessageW, SetFocus, SetForegroundWindow, SetWindowLongPtrW,
+        SetWindowPos, SetWindowRgn, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
+        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EM_SETSEL, GWLP_USERDATA, GWLP_WNDPROC, HMENU,
+        HWND_TOPMOST, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW,
+        SWP_NOACTIVATE, SWP_SHOWWINDOW, VK_ESCAPE, WM_APP, WM_CLOSE, WM_CREATE, WM_DESTROY,
+        WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER,
+        WS_CHILD, WS_CLIPCHILDREN, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
+        WS_VISIBLE, WS_VSCROLL,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{COLOR_WINDOW, ES_AUTOHSCROLL, LBS_NOTIFY};
 
@@ -32,6 +33,7 @@ mod imp {
     const PANEL_MARGIN: i32 = 18;
     const INPUT_HEIGHT: i32 = 44;
     const STATUS_HEIGHT: i32 = 26;
+    const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
 
     pub struct NativeOverlayShell {
         hwnd: HWND,
@@ -42,6 +44,8 @@ mod imp {
         edit_hwnd: HWND,
         list_hwnd: HWND,
         status_hwnd: HWND,
+        edit_prev_proc: isize,
+        list_prev_proc: isize,
     }
 
     impl NativeOverlayShell {
@@ -337,6 +341,11 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, font as usize, 1);
+
+                        state.edit_prev_proc =
+                            SetWindowLongPtrW(state.edit_hwnd, GWLP_WNDPROC, control_subclass_proc as isize);
+                        state.list_prev_proc =
+                            SetWindowLongPtrW(state.list_hwnd, GWLP_WNDPROC, control_subclass_proc as isize);
                     }
                     layout_children(hwnd, state);
                 }
@@ -349,6 +358,12 @@ mod imp {
                 0
             }
             WM_CLOSE => {
+                unsafe {
+                    ShowWindow(hwnd, SW_HIDE);
+                }
+                0
+            }
+            SWIFTFIND_WM_ESCAPE => {
                 unsafe {
                     ShowWindow(hwnd, SW_HIDE);
                 }
@@ -372,6 +387,49 @@ mod imp {
             }
             _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
         }
+    }
+
+    extern "system" fn control_subclass_proc(
+        hwnd: HWND,
+        message: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        let parent = unsafe { GetParent(hwnd) };
+        if parent.is_null() {
+            return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+        }
+
+        if message == WM_KEYDOWN && (wparam as u32) == VK_ESCAPE {
+            unsafe {
+                PostMessageW(parent, SWIFTFIND_WM_ESCAPE, 0, 0);
+            }
+            return 0;
+        }
+
+        let Some(state) = state_for(parent) else {
+            return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+        };
+
+        let prev_ptr = if hwnd == state.edit_hwnd {
+            state.edit_prev_proc
+        } else if hwnd == state.list_hwnd {
+            state.list_prev_proc
+        } else {
+            0
+        };
+
+        if prev_ptr == 0 {
+            return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+        }
+
+        let prev_proc = unsafe {
+            std::mem::transmute::<
+                isize,
+                windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC,
+            >(prev_ptr)
+        };
+        unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) }
     }
 
     fn layout_children(hwnd: HWND, state: &OverlayShellState) {

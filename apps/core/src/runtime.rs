@@ -2,6 +2,8 @@ use crate::config::{self, ConfigError};
 use crate::core_service::{CoreService, LaunchTarget, ServiceError};
 use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
+use crate::overlay_state::{HotkeyAction, OverlayState};
+#[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, run_message_loop, HotkeyRegistration};
 #[cfg(target_os = "windows")]
 use crate::windows_overlay::NativeOverlayShell;
@@ -62,6 +64,16 @@ pub fn run() -> Result<(), RuntimeError> {
 
     #[cfg(target_os = "windows")]
     {
+        let _single_instance = match acquire_single_instance_guard() {
+            Ok(guard) => guard,
+            Err(error) => return Err(RuntimeError::Overlay(error)),
+        };
+        if _single_instance.is_none() {
+            println!("[swiftfind-core] runtime already active; exiting duplicate process");
+            return Ok(());
+        }
+
+        let mut overlay_state = OverlayState::default();
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
         overlay.set_status_text("Ready. Press Alt+Space to open launcher.");
         println!("[swiftfind-core] native overlay shell initialized (hidden)");
@@ -71,9 +83,15 @@ pub fn run() -> Result<(), RuntimeError> {
         log_registration(&registration);
         println!("[swiftfind-core] event loop running (WM_HOTKEY)");
         run_message_loop(|_| {
-            println!("[swiftfind-core] hotkey_event received, launching console flow");
-            if let Err(error) = run_console_launcher_flow(&service, config.max_results as usize) {
-                eprintln!("[swiftfind-core] launcher flow error: {error}");
+            overlay_state.set_visible(overlay.is_visible());
+            let action = overlay_state.on_hotkey(overlay.has_focus());
+            match action {
+                HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
+                    overlay.show_and_focus();
+                }
+                HotkeyAction::Hide => {
+                    overlay.hide();
+                }
             }
         })?;
         registrar.unregister_all()?;
@@ -109,6 +127,49 @@ fn log_registration(registration: &HotkeyRegistration) {
             println!("[swiftfind-core] hotkey registered noop={label}");
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+struct SingleInstanceGuard {
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for SingleInstanceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.handle);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn acquire_single_instance_guard() -> Result<Option<SingleInstanceGuard>, String> {
+    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::System::Threading::CreateMutexW;
+
+    let mutex_name = to_wide("Local\\SwiftFindRuntimeSingleton");
+    let handle = unsafe { CreateMutexW(std::ptr::null(), 0, mutex_name.as_ptr()) };
+    if handle.is_null() {
+        let error = unsafe { GetLastError() };
+        return Err(format!("CreateMutexW failed with error {error}"));
+    }
+
+    // ERROR_ALREADY_EXISTS
+    let error = unsafe { GetLastError() };
+    if error == 183 {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(handle);
+        }
+        return Ok(None);
+    }
+
+    Ok(Some(SingleInstanceGuard { handle }))
+}
+
+#[cfg(target_os = "windows")]
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
