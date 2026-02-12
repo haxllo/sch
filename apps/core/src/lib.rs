@@ -11,6 +11,7 @@ pub mod overlay_state;
 pub mod runtime;
 pub mod search;
 pub mod settings;
+pub mod settings_window;
 pub mod transport;
 #[cfg(target_os = "windows")]
 pub mod windows_overlay;
