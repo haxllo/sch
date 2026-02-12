@@ -106,6 +106,7 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
+    const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
@@ -132,14 +133,14 @@ mod imp {
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
-    const COLOR_HELP_TIP_BG: u32 = 0x00171717;
-    const COLOR_HELP_TIP_TEXT: u32 = 0x00D8D8D8;
-    const HELP_TIP_WIDTH: i32 = 340;
-    const HELP_TIP_HEIGHT: i32 = 26;
+    const COLOR_HELP_TIP_BG: u32 = 0x00161616;
+    const COLOR_HELP_TIP_TEXT: u32 = 0x00CFCFCF;
+    const HELP_TIP_WIDTH: i32 = 220;
+    const HELP_TIP_HEIGHT: i32 = 18;
+    const HELP_TIP_RADIUS: i32 = 8;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
-    const HOTKEY_HELP_TEXT_FALLBACK: &str =
-        "Click to configure hotkey: %APPDATA%\\SwiftFind\\config.json (key: hotkey).";
+    const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to configure hotkey";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -178,6 +179,7 @@ mod imp {
         title_font: isize,
         meta_font: isize,
         status_font: isize,
+        help_tip_font: isize,
 
         panel_brush: isize,
         border_brush: isize,
@@ -190,6 +192,7 @@ mod imp {
         selection_accent_brush: isize,
         icon_brush: isize,
         help_tip_brush: isize,
+        help_tip_border_brush: isize,
 
         status_is_error: bool,
         help_hovered: bool,
@@ -224,6 +227,7 @@ mod imp {
                 title_font: 0,
                 meta_font: 0,
                 status_font: 0,
+                help_tip_font: 0,
                 panel_brush: 0,
                 border_brush: 0,
                 input_brush: 0,
@@ -235,6 +239,7 @@ mod imp {
                 selection_accent_brush: 0,
                 icon_brush: 0,
                 help_tip_brush: 0,
+                help_tip_border_brush: 0,
                 status_is_error: false,
                 help_hovered: false,
                 help_tip_visible: false,
@@ -758,11 +763,14 @@ mod imp {
                         unsafe { CreateSolidBrush(COLOR_SELECTION_ACCENT) } as isize;
                     state.icon_brush = unsafe { CreateSolidBrush(COLOR_ICON_BG) } as isize;
                     state.help_tip_brush = unsafe { CreateSolidBrush(COLOR_HELP_TIP_BG) } as isize;
+                    state.help_tip_border_brush =
+                        unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
 
                     state.input_font = create_font(FONT_INPUT_HEIGHT, FW_MEDIUM as i32);
                     state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
                     state.meta_font = create_font(FONT_META_HEIGHT, FW_MEDIUM as i32);
                     state.status_font = create_font(FONT_STATUS_HEIGHT, FW_MEDIUM as i32);
+                    state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FW_MEDIUM as i32);
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -861,7 +869,7 @@ mod imp {
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
-                        SendMessageW(state.help_tip_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        SendMessageW(state.help_tip_hwnd, WM_SETFONT, state.help_tip_font as usize, 1);
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
                             GWLP_WNDPROC,
@@ -1261,6 +1269,9 @@ mod imp {
         let result = unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) };
         if hwnd == state.edit_hwnd && message == WM_PAINT {
             paint_edit_placeholder(hwnd, state);
+        }
+        if hwnd == state.help_tip_hwnd && message == WM_PAINT {
+            paint_help_tip_border(hwnd, state);
         }
         result
     }
@@ -1770,8 +1781,8 @@ mod imp {
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
         let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
-        let tip_left = (help_left + HELP_ICON_SIZE - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
-        let tip_top = (help_top - HELP_TIP_HEIGHT - 6).max(4);
+        let tip_left = (width - PANEL_MARGIN_X - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
+        let tip_top = (input_top + INPUT_HEIGHT + 6).min((height - HELP_TIP_HEIGHT - 4).max(4));
 
         unsafe {
             MoveWindow(
@@ -1805,6 +1816,7 @@ mod imp {
                 HELP_TIP_HEIGHT,
                 1,
             );
+            apply_help_tip_rounded_corners(state.help_tip_hwnd, HELP_TIP_WIDTH, HELP_TIP_HEIGHT);
             if state.help_tip_visible {
                 ShowWindow(state.help_tip_hwnd, SW_SHOW);
             } else {
@@ -1918,6 +1930,52 @@ mod imp {
         }
     }
 
+    fn apply_help_tip_rounded_corners(help_tip_hwnd: HWND, width: i32, height: i32) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        unsafe {
+            let region = CreateRoundRectRgn(
+                0,
+                0,
+                width + 1,
+                height + 1,
+                HELP_TIP_RADIUS,
+                HELP_TIP_RADIUS,
+            );
+            SetWindowRgn(help_tip_hwnd, region, 1);
+        }
+    }
+
+    fn paint_help_tip_border(hwnd: HWND, state: &OverlayShellState) {
+        if state.help_tip_border_brush == 0 {
+            return;
+        }
+
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(hwnd, &mut rect);
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width <= 0 || height <= 0 {
+            return;
+        }
+
+        unsafe {
+            let hdc = GetDC(hwnd);
+            if hdc.is_null() {
+                return;
+            }
+
+            let border_region =
+                CreateRoundRectRgn(0, 0, width + 1, height + 1, HELP_TIP_RADIUS, HELP_TIP_RADIUS);
+            FrameRgn(hdc, border_region, state.help_tip_border_brush as _, 1, 1);
+            DeleteObject(border_region as _);
+            ReleaseDC(hwnd, hdc);
+        }
+    }
+
     fn invalidate_list_row(list_hwnd: HWND, row: i32) {
         if row < 0 {
             return;
@@ -1970,11 +2028,10 @@ mod imp {
     }
 
     fn help_hint_text(state: &OverlayShellState) -> String {
-        let cfg_path = state.help_config_path.trim();
-        if cfg_path.is_empty() {
-            "Click to configure hotkey in Roaming\\SwiftFind\\config.json".to_string()
+        if state.help_config_path.trim().is_empty() {
+            HOTKEY_HELP_TEXT_FALLBACK.to_string()
         } else {
-            format!("Click to configure hotkey in {cfg_path}")
+            "Click to edit hotkey (config.json)".to_string()
         }
     }
 
@@ -2007,7 +2064,7 @@ mod imp {
 
         state.status_is_error = false;
         state.help_tip_visible = false;
-        let wide = to_wide(&format!("Opened config: {target}"));
+        let wide = to_wide("Opened hotkey config.");
         unsafe {
             SetWindowTextW(state.status_hwnd, wide.as_ptr());
             InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
@@ -2077,6 +2134,9 @@ mod imp {
             if state.status_font != 0 {
                 DeleteObject(state.status_font as _);
             }
+            if state.help_tip_font != 0 {
+                DeleteObject(state.help_tip_font as _);
+            }
             if state.panel_brush != 0 {
                 DeleteObject(state.panel_brush as _);
             }
@@ -2109,6 +2169,9 @@ mod imp {
             }
             if state.help_tip_brush != 0 {
                 DeleteObject(state.help_tip_brush as _);
+            }
+            if state.help_tip_border_brush != 0 {
+                DeleteObject(state.help_tip_border_brush as _);
             }
         }
         clear_icon_cache(state);
