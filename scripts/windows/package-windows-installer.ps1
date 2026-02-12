@@ -57,7 +57,7 @@ if (-not (Test-Path (Join-Path $stageDir "bin/swiftfind-core.exe"))) {
   throw "Missing staged executable at '$stageDir/bin/swiftfind-core.exe'."
 }
 
-& $InnoCompiler "/DAppVersion=$Version" $issPath $stageDir
+& $InnoCompiler "/DAppVersion=$Version" "/DStageDir=$stageDir" $issPath
 if ($LASTEXITCODE -ne 0) {
   throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }

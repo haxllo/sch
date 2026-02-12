@@ -1,6 +1,14 @@
 #define MyAppName "SwiftFind"
-#define MyAppVersion GetStringFileInfo(Param: "AppVersion", Key: "FileVersion")
-#define StageDir ParamStr(1)
+
+#ifndef AppVersion
+  #define AppVersion "0.0.0-local"
+#endif
+
+#ifndef StageDir
+  #error StageDir must be passed to ISCC via /DStageDir=...
+#endif
+
+#define MyAppVersion "{#AppVersion}"
 
 [Setup]
 AppId={{E3A739E3-FAF7-4E18-BD8B-01744C9E7C27}
@@ -37,4 +45,3 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--ensure-config"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--sync-startup"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--background"; Description: "Launch SwiftFind now"; Flags: runhidden nowait postinstall skipifsilent
-
