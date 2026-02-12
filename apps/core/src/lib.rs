@@ -4,6 +4,7 @@ pub mod contract;
 pub mod core_service;
 pub mod discovery;
 pub mod hotkey;
+pub mod hotkey_runtime;
 pub mod index_store;
 pub mod model;
 pub mod search;
