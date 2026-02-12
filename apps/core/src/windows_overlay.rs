@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 mod imp {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::ffi::c_void;
     use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
@@ -12,10 +12,10 @@ mod imp {
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FillRgn, FrameRgn, GetDC, GetTextMetricsW, HDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
+        EndPaint, FillRect, FillRgn, FrameRgn, GetDC, GetTextExtentPoint32W, GetTextMetricsW, HDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
-        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT, TextOutW, SIZE,
         TEXTMETRICW,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -71,6 +71,7 @@ mod imp {
     const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
+    const ROW_ICON_DRAW_SIZE: i32 = 18;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
@@ -83,6 +84,7 @@ mod imp {
     const CONTROL_ID_HELP: usize = 1004;
     const CONTROL_ID_HELP_TIP: usize = 1005;
     const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
+    const STATIC_RIGHT_STYLE: u32 = 0x00000002; // SS_RIGHT
 
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
     const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
@@ -94,6 +96,7 @@ mod imp {
 
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
+    const TIMER_ROW_ANIM: usize = 0xBEF2;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
@@ -101,6 +104,8 @@ mod imp {
     const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
+    const ROW_ANIM_MS: u64 = 130;
+    const ROW_STAGGER_MS: u64 = 16;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -125,6 +130,8 @@ mod imp {
     const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
+    const COLOR_TEXT_HIGHLIGHT: u32 = 0x00FFFFFF;
+    const COLOR_TEXT_HINT: u32 = 0x009B9B9B;
     const COLOR_SELECTION: u32 = 0x00262626;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
     const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
@@ -143,6 +150,7 @@ mod imp {
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
+    const FOOTER_HINT_TEXT: &str = "Enter open | Up/Down move | Esc close";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -201,12 +209,15 @@ mod imp {
         help_tip_visible: bool,
         results_visible: bool,
         help_config_path: String,
+        active_query: String,
 
         hover_index: i32,
 
         scroll_from_top: i32,
         scroll_to_top: i32,
         scroll_anim_start: Option<Instant>,
+        row_anim_start: Option<Instant>,
+        row_anim_exiting: bool,
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
@@ -247,10 +258,13 @@ mod imp {
                 help_tip_visible: false,
                 results_visible: false,
                 help_config_path: String::new(),
+                active_query: String::new(),
                 hover_index: -1,
                 scroll_from_top: 0,
                 scroll_to_top: 0,
                 scroll_anim_start: None,
+                row_anim_start: None,
+                row_anim_exiting: false,
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
@@ -389,15 +403,21 @@ mod imp {
 
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
-                state.status_is_error = message.to_ascii_lowercase().contains("error");
+                let trimmed = message.trim();
+                let status_text = if trimmed.is_empty() {
+                    FOOTER_HINT_TEXT
+                } else {
+                    trimmed
+                };
+                state.status_is_error = !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
                 state.help_tip_visible = false;
                 unsafe {
                     ShowWindow(state.help_tip_hwnd, SW_HIDE);
                 }
-                if message.is_empty() {
+                if trimmed.is_empty() {
                     state.help_hovered = false;
                 }
-                let wide = to_wide(message);
+                let wide = to_wide(status_text);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
                     InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
@@ -429,9 +449,47 @@ mod imp {
 
         pub fn set_results(&self, rows: &[OverlayRow], selected_index: usize) {
             if let Some(state) = state_for(self.hwnd) {
+                state.active_query = self.query_text().trim().to_string();
+                state.hover_index = -1;
+
+                if rows.is_empty() {
+                    if state.results_visible && !state.rows.is_empty() {
+                        state.row_anim_exiting = true;
+                        state.row_anim_start = Some(Instant::now());
+                        unsafe {
+                            SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
+                        }
+                        self.collapse_results();
+                        return;
+                    }
+
+                    state.rows.clear();
+                    unsafe {
+                        SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
+                        SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
+                    }
+
+                    self.collapse_results();
+                    state.scroll_anim_start = None;
+                    state.scroll_from_top = 0;
+                    state.scroll_to_top = 0;
+                    state.hover_index = -1;
+                    state.row_anim_start = None;
+                    state.row_anim_exiting = false;
+                    unsafe {
+                        KillTimer(self.hwnd, TIMER_ROW_ANIM);
+                    }
+                    return;
+                }
+
+                state.row_anim_exiting = false;
+                state.row_anim_start = Some(Instant::now());
+                unsafe {
+                    SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
+                }
+
                 state.rows.clear();
                 state.rows.extend_from_slice(rows);
-                state.hover_index = -1;
                 unsafe {
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
@@ -445,19 +503,8 @@ mod imp {
                     }
                 }
 
-                if rows.is_empty() {
-                    self.collapse_results();
-                } else {
-                    self.expand_results(rows.len());
-                    self.set_selected_index_internal(selected_index, false);
-                }
-
-                if rows.is_empty() {
-                    state.scroll_anim_start = None;
-                    state.scroll_from_top = 0;
-                    state.scroll_to_top = 0;
-                    state.hover_index = -1;
-                }
+                self.expand_results(rows.len());
+                self.set_selected_index_internal(selected_index, false);
             }
         }
 
@@ -590,8 +637,13 @@ mod imp {
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
                     KillTimer(self.hwnd, TIMER_SCROLL_ANIM);
+                    KillTimer(self.hwnd, TIMER_ROW_ANIM);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
+                    SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
+                state.row_anim_start = None;
+                state.row_anim_exiting = false;
+                state.rows.clear();
             }
         }
 
@@ -614,9 +666,6 @@ mod imp {
             self.animate_results_height(COMPACT_HEIGHT, RESULTS_ANIM_MS);
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
-                unsafe {
-                    ShowWindow(state.list_hwnd, SW_HIDE);
-                }
             }
         }
 
@@ -822,8 +871,8 @@ mod imp {
                         CreateWindowExW(
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
-                            to_wide("").as_ptr(),
-                            WS_CHILD | WS_VISIBLE,
+                            to_wide(FOOTER_HINT_TEXT).as_ptr(),
+                            WS_CHILD | WS_VISIBLE | STATIC_RIGHT_STYLE,
                             0,
                             0,
                             0,
@@ -993,7 +1042,7 @@ mod imp {
                         let color = if state.status_is_error {
                             COLOR_TEXT_ERROR
                         } else {
-                            COLOR_TEXT_SECONDARY
+                            COLOR_TEXT_HINT
                         };
                         unsafe {
                             SetTextColor(wparam as _, color);
@@ -1069,6 +1118,19 @@ mod imp {
                         if !running {
                             unsafe {
                                 KillTimer(hwnd, TIMER_WINDOW_ANIM);
+                            }
+                        }
+                    }
+                }
+                if wparam == TIMER_ROW_ANIM {
+                    if let Some(state) = state_for(hwnd) {
+                        let running = row_animation_tick(state);
+                        unsafe {
+                            InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
+                        }
+                        if !running {
+                            unsafe {
+                                KillTimer(hwnd, TIMER_ROW_ANIM);
                             }
                         }
                     }
@@ -1363,6 +1425,13 @@ mod imp {
                 icon_path: String::new(),
             });
 
+        let visibility = row_animation_visibility(state, item_index);
+        let offset_y = if state.row_anim_exiting {
+            -(((1.0 - visibility) * 4.0).round() as i32)
+        } else {
+            (((1.0 - visibility) * 6.0).round() as i32)
+        };
+
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
         unsafe {
@@ -1370,9 +1439,9 @@ mod imp {
             if selected_flag || hovered {
                 let row_rect = RECT {
                     left: dis.rcItem.left + 2,
-                    top: dis.rcItem.top + ROW_VERTICAL_INSET,
+                    top: dis.rcItem.top + ROW_VERTICAL_INSET + offset_y,
                     right: dis.rcItem.right - 2,
-                    bottom: dis.rcItem.bottom - ROW_VERTICAL_INSET,
+                    bottom: dis.rcItem.bottom - ROW_VERTICAL_INSET + offset_y,
                 };
                 let region = CreateRoundRectRgn(
                     row_rect.left,
@@ -1382,24 +1451,37 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let fill_brush = if selected_flag {
-                    state.selection_brush
-                } else {
-                    state.row_hover_brush
-                };
-                FillRgn(dis.hDC, region, fill_brush as _);
+                let base_fill = if selected_flag { COLOR_SELECTION } else { COLOR_ROW_HOVER };
+                let fill_color = blend_color(COLOR_RESULTS_BG, base_fill, visibility);
+                let fill_brush = CreateSolidBrush(fill_color);
+                FillRgn(dis.hDC, region, fill_brush);
+                DeleteObject(fill_brush as _);
                 DeleteObject(region as _);
             }
 
             let icon_rect = RECT {
                 left: dis.rcItem.left + ROW_INSET_X,
-                top: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2,
+                top: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + offset_y,
                 right: dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE,
-                bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE,
+                bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE + offset_y,
             };
+            let icon_backplate = CreateRoundRectRgn(
+                icon_rect.left,
+                icon_rect.top,
+                icon_rect.right + 1,
+                icon_rect.bottom + 1,
+                8,
+                8,
+            );
+            FillRgn(dis.hDC, icon_backplate, state.icon_brush as _);
+            DeleteObject(icon_backplate as _);
+
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
-            SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
+            let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, visibility);
+            let secondary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, visibility);
+            let highlight_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_HIGHLIGHT, visibility);
+            SetTextColor(dis.hDC, primary_text);
 
             let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
             if !icon_drawn {
@@ -1415,39 +1497,40 @@ mod imp {
                 );
             }
 
-            SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
+            SetTextColor(dis.hDC, primary_text);
             let text_left = icon_rect.right + ROW_ICON_GAP;
             let has_meta = !row.path.trim().is_empty();
-            let mut title_rect = RECT {
+            let title_rect = RECT {
                 left: text_left,
                 top: if has_meta {
-                    dis.rcItem.top + ROW_TEXT_TOP_PAD
+                    dis.rcItem.top + ROW_TEXT_TOP_PAD + offset_y
                 } else {
-                    dis.rcItem.top
+                    dis.rcItem.top + offset_y
                 },
                 right: dis.rcItem.right - ROW_INSET_X,
                 bottom: if has_meta {
-                    dis.rcItem.top + ROW_HEIGHT / 2
+                    dis.rcItem.top + ROW_HEIGHT / 2 + offset_y
                 } else {
-                    dis.rcItem.bottom
+                    dis.rcItem.bottom + offset_y
                 },
             };
-            DrawTextW(
+            draw_highlighted_title(
                 dis.hDC,
-                to_wide(&row.title).as_ptr(),
-                -1,
-                &mut title_rect,
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                &title_rect,
+                &row.title,
+                &state.active_query,
+                primary_text,
+                highlight_text,
             );
 
             if has_meta {
                 SelectObject(dis.hDC, state.meta_font as _);
-                SetTextColor(dis.hDC, COLOR_TEXT_SECONDARY);
+                SetTextColor(dis.hDC, secondary_text);
                 let mut path_rect = RECT {
                     left: text_left,
-                    top: dis.rcItem.top + ROW_HEIGHT / 2 - 1,
+                    top: dis.rcItem.top + ROW_HEIGHT / 2 - 1 + offset_y,
                     right: dis.rcItem.right - ROW_INSET_X,
-                    bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD,
+                    bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD + offset_y,
                 };
                 DrawTextW(
                     dis.hDC,
@@ -1460,6 +1543,164 @@ mod imp {
 
             SelectObject(dis.hDC, old_font);
         }
+    }
+
+    fn row_animation_visibility(state: &OverlayShellState, item_index: i32) -> f32 {
+        let Some(start) = state.row_anim_start else {
+            return 1.0;
+        };
+
+        let stagger = (item_index.max(0) as u64) * ROW_STAGGER_MS;
+        let elapsed = start.elapsed().as_millis() as u64;
+        if elapsed <= stagger {
+            return if state.row_anim_exiting { 1.0 } else { 0.0 };
+        }
+
+        let t = ((elapsed - stagger) as f32 / ROW_ANIM_MS as f32).clamp(0.0, 1.0);
+        let eased = ease_out(t);
+        if state.row_anim_exiting {
+            1.0 - eased
+        } else {
+            eased
+        }
+    }
+
+    fn draw_highlighted_title(
+        hdc: HDC,
+        rect: &RECT,
+        title: &str,
+        query: &str,
+        base_color: u32,
+        highlight_color: u32,
+    ) {
+        if rect.right <= rect.left || title.trim().is_empty() {
+            return;
+        }
+
+        let max_width = rect.right - rect.left;
+        if max_width <= 0 {
+            return;
+        }
+
+        let display = fit_text_with_ellipsis(hdc, title, max_width);
+        if display.is_empty() {
+            return;
+        }
+
+        let highlighted = fuzzy_match_positions(&display, query);
+        let text_height = current_text_height(hdc).max(1);
+        let y = rect.top + ((rect.bottom - rect.top - text_height).max(0) / 2);
+        let mut x = rect.left;
+
+        for (index, ch) in display.chars().enumerate() {
+            let s = ch.to_string();
+            let width = measure_text_width(hdc, &s).max(1);
+            if x + width > rect.right {
+                break;
+            }
+
+            let wide = to_wide_no_nul(&s);
+            unsafe {
+                SetTextColor(
+                    hdc,
+                    if highlighted.contains(&index) {
+                        highlight_color
+                    } else {
+                        base_color
+                    },
+                );
+                TextOutW(hdc, x, y, wide.as_ptr(), wide.len() as i32);
+            }
+            x += width;
+        }
+    }
+
+    fn fit_text_with_ellipsis(hdc: HDC, text: &str, max_width: i32) -> String {
+        if text.trim().is_empty() {
+            return String::new();
+        }
+        if measure_text_width(hdc, text) <= max_width {
+            return text.to_string();
+        }
+
+        let ellipsis = "...";
+        let ellipsis_width = measure_text_width(hdc, ellipsis);
+        if ellipsis_width >= max_width {
+            return String::new();
+        }
+
+        let mut output = String::new();
+        for ch in text.chars() {
+            let mut candidate = output.clone();
+            candidate.push(ch);
+            if measure_text_width(hdc, &candidate) + ellipsis_width > max_width {
+                break;
+            }
+            output.push(ch);
+        }
+        output.push_str(ellipsis);
+        output
+    }
+
+    fn fuzzy_match_positions(text: &str, query: &str) -> HashSet<usize> {
+        let query = query.trim();
+        if query.is_empty() {
+            return HashSet::new();
+        }
+
+        let mut matched = HashSet::new();
+        let mut text_iter = text.chars().enumerate();
+
+        for q in query.chars() {
+            let q_lower = q.to_ascii_lowercase();
+            let mut found = None;
+            for (index, t) in text_iter.by_ref() {
+                if t.to_ascii_lowercase() == q_lower {
+                    found = Some(index);
+                    break;
+                }
+            }
+            if let Some(index) = found {
+                matched.insert(index);
+            } else {
+                return HashSet::new();
+            }
+        }
+
+        matched
+    }
+
+    fn measure_text_width(hdc: HDC, text: &str) -> i32 {
+        if text.is_empty() {
+            return 0;
+        }
+        let wide = to_wide_no_nul(text);
+        let mut size: SIZE = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetTextExtentPoint32W(hdc, wide.as_ptr(), wide.len() as i32, &mut size) };
+        if ok == 0 {
+            0
+        } else {
+            size.cx
+        }
+    }
+
+    fn current_text_height(hdc: HDC) -> i32 {
+        let mut tm: TEXTMETRICW = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetTextMetricsW(hdc, &mut tm) };
+        if ok == 0 {
+            14
+        } else {
+            tm.tmHeight as i32
+        }
+    }
+
+    fn blend_color(from: u32, to: u32, t: f32) -> u32 {
+        let t = t.clamp(0.0, 1.0);
+        let lerp = |a: u32, b: u32| -> u32 { (a as f32 + (b as f32 - a as f32) * t).round() as u32 };
+        let r = lerp(from & 0xFF, to & 0xFF);
+        let g = lerp((from >> 8) & 0xFF, (to >> 8) & 0xFF);
+        let b = lerp((from >> 16) & 0xFF, (to >> 16) & 0xFF);
+        r | (g << 8) | (b << 16)
     }
 
     fn icon_glyph_for_kind(kind: &str) -> &'static str {
@@ -1476,7 +1717,7 @@ mod imp {
         let Some(icon_handle) = icon_handle_for_row(state, row) else {
             return false;
         };
-        let icon_size = (ROW_ICON_SIZE - 4).max(16);
+        let icon_size = ROW_ICON_DRAW_SIZE;
         let x = icon_rect.left + (ROW_ICON_SIZE - icon_size) / 2;
         let y = icon_rect.top + (ROW_ICON_SIZE - icon_size) / 2;
         unsafe {
@@ -1678,6 +1919,22 @@ mod imp {
         true
     }
 
+    fn row_animation_tick(state: &mut OverlayShellState) -> bool {
+        let Some(start) = state.row_anim_start else {
+            return false;
+        };
+
+        let row_count = state.rows.len() as u64;
+        let total_ms = ROW_ANIM_MS + row_count.min(MAX_VISIBLE_ROWS as u64) * ROW_STAGGER_MS;
+        let elapsed = start.elapsed().as_millis() as u64;
+        if elapsed >= total_ms {
+            state.row_anim_start = None;
+            state.row_anim_exiting = false;
+            return false;
+        }
+        true
+    }
+
     fn start_window_animation(
         hwnd: HWND,
         from_left: i32,
@@ -1742,6 +1999,15 @@ mod imp {
                     ShowWindow(hwnd, SW_HIDE);
                     SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
                 }
+            } else if !state.results_visible {
+                unsafe {
+                    ShowWindow(state.list_hwnd, SW_HIDE);
+                    SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
+                }
+                state.rows.clear();
+                state.hover_index = -1;
+                state.row_anim_start = None;
+                state.row_anim_exiting = false;
             }
             return false;
         }
@@ -1767,6 +2033,7 @@ mod imp {
     fn hide_overlay_immediate(hwnd: HWND) {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
+            KillTimer(hwnd, TIMER_ROW_ANIM);
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
@@ -2348,6 +2615,10 @@ mod imp {
 
     fn to_wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn to_wide_no_nul(value: &str) -> Vec<u16> {
+        value.encode_utf16().collect()
     }
 }
 
