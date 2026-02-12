@@ -7,7 +7,6 @@ use crate::overlay_state::{HotkeyAction, OverlayState};
 use crate::hotkey_runtime::{default_hotkey_registrar, HotkeyRegistration};
 #[cfg(target_os = "windows")]
 use crate::windows_overlay::{NativeOverlayShell, OverlayEvent};
-use std::io::{self, BufRead, Write};
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -116,7 +115,7 @@ pub fn run() -> Result<(), RuntimeError> {
                         return;
                     }
 
-                    match service.search(trimmed, max_results) {
+                    match search_overlay_results(&service, trimmed, max_results) {
                         Ok(results) => {
                             current_results = results;
                             selected_index = 0;
@@ -160,9 +159,8 @@ pub fn run() -> Result<(), RuntimeError> {
                     if let Some(list_selection) = overlay.selected_index() {
                         selected_index = list_selection.min(current_results.len() - 1);
                     }
-                    let selected = &current_results[selected_index];
 
-                    match service.launch(LaunchTarget::Id(&selected.id)) {
+                    match launch_overlay_selection(&service, &current_results, selected_index) {
                         Ok(()) => {
                             overlay.set_status_text("");
                             overlay.hide();
@@ -266,117 +264,69 @@ fn to_wide(value: &str) -> Vec<u16> {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn run_console_launcher_flow(service: &CoreService, result_limit: usize) -> Result<(), String> {
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut reader = stdin.lock();
-    let mut writer = stdout.lock();
-    run_console_launcher_flow_with_io(service, result_limit, &mut reader, &mut writer)
+fn search_overlay_results(
+    service: &CoreService,
+    query: &str,
+    result_limit: usize,
+) -> Result<Vec<crate::model::SearchItem>, String> {
+    service
+        .search(query, result_limit)
+        .map_err(|error| format!("search failed: {error}"))
 }
 
-fn run_console_launcher_flow_with_io<R, W>(
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn launch_overlay_selection(
     service: &CoreService,
-    result_limit: usize,
-    input: &mut R,
-    output: &mut W,
-) -> Result<(), String>
-where
-    R: BufRead,
-    W: Write,
-{
-    write!(output, "[swiftfind-core] launcher> query: ").map_err(|e| e.to_string())?;
-    output.flush().map_err(|e| e.to_string())?;
-
-    let mut query_line = String::new();
-    input
-        .read_line(&mut query_line)
-        .map_err(|e| format!("failed reading query: {e}"))?;
-    let query = query_line.trim();
-
-    if query.is_empty() {
-        writeln!(output, "[swiftfind-core] launcher canceled (empty query)")
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let results = service
-        .search(query, result_limit)
-        .map_err(|e| format!("search failed: {e}"))?;
-
+    results: &[crate::model::SearchItem],
+    selected_index: usize,
+) -> Result<(), String> {
     if results.is_empty() {
-        writeln!(output, "[swiftfind-core] launcher no matches for '{query}'")
-            .map_err(|e| e.to_string())?;
-        return Ok(());
+        return Err("no result selected".to_string());
     }
 
-    writeln!(output, "[swiftfind-core] launcher results:")
-        .and_then(|_| {
-            for (index, item) in results.iter().enumerate() {
-                writeln!(output, "  {}. {} ({})", index + 1, item.title, item.path)?;
-            }
-            Ok(())
-        })
-        .map_err(|e: io::Error| e.to_string())?;
-
-    write!(
-        output,
-        "[swiftfind-core] launcher> select [1-{}] (enter to cancel): ",
-        results.len()
-    )
-    .map_err(|e| e.to_string())?;
-    output.flush().map_err(|e| e.to_string())?;
-
-    let mut selection_line = String::new();
-    input
-        .read_line(&mut selection_line)
-        .map_err(|e| format!("failed reading selection: {e}"))?;
-    let selection = selection_line.trim();
-    if selection.is_empty() {
-        writeln!(output, "[swiftfind-core] launcher canceled (no selection)")
-            .map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let selected_number = selection
-        .parse::<usize>()
-        .map_err(|_| format!("invalid selection: '{selection}'"))?;
-    if selected_number == 0 || selected_number > results.len() {
+    if selected_index >= results.len() {
         return Err(format!(
-            "selection out of range: {selected_number} (results={})",
+            "selected index out of range: {selected_index} (len={})",
             results.len()
         ));
     }
 
-    let selected = &results[selected_number - 1];
+    let selected = &results[selected_index];
     service
         .launch(LaunchTarget::Id(&selected.id))
-        .map_err(|error| {
-            let _ = writeln!(output, "[swiftfind-core] launcher error: {error}");
-            format!("launch failed: {error}")
-        })?;
-
-    writeln!(
-        output,
-        "[swiftfind-core] launcher launched: {} ({})",
-        selected.title, selected.path
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
+        .map_err(|error| format!("launch failed: {error}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::run_console_launcher_flow_with_io;
+    use super::{launch_overlay_selection, search_overlay_results};
     use crate::config::Config;
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
     use crate::model::SearchItem;
-    use std::io::Cursor;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
-    fn launcher_flow_searches_and_launches_selected_item() {
+    fn overlay_search_returns_ranked_results() {
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "item-1",
+                "app",
+                "Visual Studio Code",
+                "C:\\Code.exe",
+            ))
+            .expect("item should upsert");
+
+        let results = search_overlay_results(&service, "code", 20).expect("search should succeed");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, "item-1");
+    }
+
+    #[test]
+    fn overlay_launch_selection_launches_selected_item() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock should be valid")
@@ -395,20 +345,14 @@ mod tests {
             ))
             .expect("item should upsert");
 
-        let mut input = Cursor::new("code\n1\n");
-        let mut output = Vec::new();
-        run_console_launcher_flow_with_io(&service, 20, &mut input, &mut output)
-            .expect("launcher flow should succeed");
-
-        let output_text = String::from_utf8(output).expect("output should be utf8");
-        assert!(output_text.contains("launcher results:"));
-        assert!(output_text.contains("launcher launched: Code Launcher"));
+        let results = search_overlay_results(&service, "code", 20).expect("search should succeed");
+        launch_overlay_selection(&service, &results, 0).expect("launch should succeed");
 
         std::fs::remove_file(&launch_path).expect("temp launch file should be removed");
     }
 
     #[test]
-    fn launcher_flow_reports_launch_errors() {
+    fn overlay_launch_selection_reports_error_for_missing_path() {
         let missing_path = std::env::temp_dir().join("swiftfind-does-not-exist-launch-flow.exe");
         let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
             .expect("service should initialize");
@@ -421,13 +365,9 @@ mod tests {
             ))
             .expect("item should upsert");
 
-        let mut input = Cursor::new("missing\n1\n");
-        let mut output = Vec::new();
-        let error = run_console_launcher_flow_with_io(&service, 20, &mut input, &mut output)
-            .expect_err("launcher flow should return launch failure");
+        let results = search_overlay_results(&service, "missing", 20).expect("search should succeed");
+        let error = launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));
-        let output_text = String::from_utf8(output).expect("output should be utf8");
-        assert!(output_text.contains("launcher error:"));
     }
 }
