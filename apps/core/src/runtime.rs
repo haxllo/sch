@@ -89,6 +89,7 @@ pub fn run() -> Result<(), RuntimeError> {
         overlay
             .run_message_loop_with_events(|event| match event {
                 OverlayEvent::Hotkey(_) => {
+                    println!("[swiftfind-core] hotkey_event received");
                     overlay_state.set_visible(overlay.is_visible());
                     let action = overlay_state.on_hotkey(overlay.has_focus());
                     match action {

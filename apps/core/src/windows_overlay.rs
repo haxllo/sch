@@ -18,7 +18,7 @@ mod imp {
         RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, GWLP_USERDATA, GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, MSG,
-        SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_SHOWWINDOW, WM_APP,
+        SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_APP,
         WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE,
         WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
         WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
@@ -152,7 +152,7 @@ mod imp {
                     0,
                     0,
                     0,
-                    SWP_SHOWWINDOW | SWP_NOACTIVATE,
+                    SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE,
                 );
                 ShowWindow(self.hwnd, SW_SHOW);
                 SetForegroundWindow(self.hwnd);
@@ -392,9 +392,17 @@ mod imp {
                         SendMessageW(state.status_hwnd, WM_SETFONT, font as usize, 1);
 
                         state.edit_prev_proc =
-                            SetWindowLongPtrW(state.edit_hwnd, GWLP_WNDPROC, control_subclass_proc as isize);
+                            SetWindowLongPtrW(
+                                state.edit_hwnd,
+                                GWLP_WNDPROC,
+                                control_subclass_proc as *const () as isize,
+                            );
                         state.list_prev_proc =
-                            SetWindowLongPtrW(state.list_hwnd, GWLP_WNDPROC, control_subclass_proc as isize);
+                            SetWindowLongPtrW(
+                                state.list_hwnd,
+                                GWLP_WNDPROC,
+                                control_subclass_proc as *const () as isize,
+                            );
                     }
                     layout_children(hwnd, state);
                 }
