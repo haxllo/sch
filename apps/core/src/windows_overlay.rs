@@ -8,7 +8,7 @@ mod imp {
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
+        EndPaint, FillRect, FillRgn, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         FR_PRIVATE, OUT_DEFAULT_PRECIS, TRANSPARENT,
@@ -65,6 +65,7 @@ mod imp {
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
     const ROW_VERTICAL_INSET: i32 = 1;
+    const ROW_ACTIVE_RADIUS: i32 = 10;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -328,6 +329,7 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.rows.clear();
                 state.rows.extend_from_slice(rows);
+                state.hover_index = -1;
                 unsafe {
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
@@ -401,6 +403,10 @@ mod imp {
 
         pub fn selected_index(&self) -> Option<usize> {
             let state = state_for(self.hwnd)?;
+            let count = unsafe { SendMessageW(state.list_hwnd, LB_GETCOUNT, 0, 0) as i32 };
+            if state.hover_index >= 0 && state.hover_index < count {
+                return Some(state.hover_index as usize);
+            }
             let index = unsafe { SendMessageW(state.list_hwnd, LB_GETCURSEL, 0, 0) };
             if index < 0 {
                 None
@@ -947,16 +953,6 @@ mod imp {
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
                     state.hover_index = next_hover;
-                    unsafe {
-                        if next_hover >= 0 {
-                            let top_before = SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0);
-                            let current_sel = SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32;
-                            if current_sel != next_hover {
-                                SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
-                                SendMessageW(hwnd, LB_SETTOPINDEX, top_before as usize, 0);
-                            }
-                        }
-                    }
                     invalidate_list_row(hwnd, previous_hover);
                     invalidate_list_row(hwnd, next_hover);
                 }
@@ -1089,7 +1085,16 @@ mod imp {
                     right: dis.rcItem.right - 2,
                     bottom: dis.rcItem.bottom - ROW_VERTICAL_INSET,
                 };
-                FillRect(dis.hDC, &row_rect, state.row_hover_brush as _);
+                let region = CreateRoundRectRgn(
+                    row_rect.left,
+                    row_rect.top,
+                    row_rect.right,
+                    row_rect.bottom,
+                    ROW_ACTIVE_RADIUS,
+                    ROW_ACTIVE_RADIUS,
+                );
+                FillRgn(dis.hDC, region, state.row_hover_brush as _);
+                DeleteObject(region as _);
             }
 
             let icon_rect = RECT {
