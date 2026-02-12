@@ -10,6 +10,8 @@ pub enum HotkeyRegistration {
 pub enum HotkeyRuntimeError {
     InvalidHotkey(String),
     RegistrationFailed(String),
+    EventLoopFailed(String),
+    UnsupportedPlatform,
 }
 
 pub trait HotkeyRegistrar: Send {
@@ -169,4 +171,45 @@ pub fn default_hotkey_registrar() -> Box<dyn HotkeyRegistrar> {
     {
         Box::new(NoopHotkeyRegistrar::default())
     }
+}
+
+#[cfg(target_os = "windows")]
+pub fn run_message_loop<F>(mut on_hotkey: F) -> Result<(), HotkeyRuntimeError>
+where
+    F: FnMut(i32),
+{
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, GetMessageW, TranslateMessage, MSG, WM_HOTKEY,
+    };
+
+    let mut msg = MSG::default();
+    loop {
+        let status = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
+        if status == -1 {
+            return Err(HotkeyRuntimeError::EventLoopFailed(
+                "GetMessageW returned -1".to_string(),
+            ));
+        }
+
+        if status == 0 {
+            return Ok(());
+        }
+
+        if msg.message == WM_HOTKEY {
+            on_hotkey(msg.wParam as i32);
+        }
+
+        unsafe {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn run_message_loop<F>(_on_hotkey: F) -> Result<(), HotkeyRuntimeError>
+where
+    F: FnMut(i32),
+{
+    Err(HotkeyRuntimeError::UnsupportedPlatform)
 }

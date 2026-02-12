@@ -1,6 +1,6 @@
 fn main() {
-    match swiftfind_core::hotkey::parse_hotkey("Alt+Space") {
-        Ok(h) => println!("swiftfind-core hotkey={}+{}", h.modifiers.join("+"), h.key),
-        Err(e) => eprintln!("hotkey parse error: {e}"),
+    if let Err(error) = swiftfind_core::runtime::run() {
+        eprintln!("[swiftfind-core] runtime failed: {error}");
+        std::process::exit(1);
     }
 }
