@@ -18,14 +18,20 @@
 Run on Windows PowerShell:
 
 ```powershell
-scripts/windows/package-windows-artifact.ps1 -Version "0.4.0-milestone"
+scripts/windows/package-windows-artifact.ps1 -Version "0.5.0"
+```
+
+Build Windows `Setup.exe` (Inno Setup) from the staged artifact:
+
+```powershell
+scripts/windows/package-windows-installer.ps1 -Version "0.5.0"
 ```
 
 Signed packaging (PFX):
 
 ```powershell
 scripts/windows/package-windows-artifact.ps1 `
-  -Version "0.4.0-milestone" `
+  -Version "0.5.0" `
   -Sign `
   -CertPath "C:\secure\certs\swiftfind-signing.pfx" `
   -CertPassword "<PFX_PASSWORD>"
@@ -33,9 +39,10 @@ scripts/windows/package-windows-artifact.ps1 `
 
 Expected outputs:
 
-- `artifacts/windows/swiftfind-0.4.0-milestone-windows-x64.zip`
-- `artifacts/windows/swiftfind-0.4.0-milestone-windows-x64-manifest.json`
-- `artifacts/windows/swiftfind-0.4.0-milestone-windows-x64-stage/`
+- `artifacts/windows/swiftfind-0.5.0-windows-x64.zip`
+- `artifacts/windows/swiftfind-0.5.0-windows-x64-manifest.json`
+- `artifacts/windows/swiftfind-0.5.0-windows-x64-stage/`
+- `artifacts/windows/swiftfind-0.5.0-windows-x64-setup.exe`
 
 ## Included Payload
 
@@ -63,8 +70,36 @@ If any of these fail, packaging fails.
 ## Installer-Prep Notes
 
 - This milestone prepares a deterministic zip payload and manifest.
-- Installer generation (MSI/EXE) can consume the staging directory directly.
+- Inno Setup consumes the staging directory directly via `scripts/windows/swiftfind.iss`.
 - Keep staging layout stable to avoid installer script churn.
+
+## Inno Setup Requirements
+
+- Install Inno Setup 6:
+
+```powershell
+winget install JRSoftware.InnoSetup -e
+```
+
+- Default compiler path used by wrapper:
+  - `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`
+- Override compiler path if needed:
+
+```powershell
+scripts/windows/package-windows-installer.ps1 `
+  -Version "0.5.0" `
+  -InnoCompiler "D:\Tools\Inno Setup 6\ISCC.exe"
+```
+
+## GitHub Release Update
+
+After packaging, upload installer to the existing tag/release:
+
+```powershell
+gh release upload v0.5.0 `
+  artifacts/windows/swiftfind-0.5.0-windows-x64-setup.exe `
+  --clobber
+```
 
 ## Local Install / Uninstall Commands
 
