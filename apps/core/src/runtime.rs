@@ -144,12 +144,11 @@ pub fn run() -> Result<(), RuntimeError> {
                         return;
                     }
 
-                    let max = current_results.len() - 1;
-                    if direction < 0 {
-                        selected_index = selected_index.saturating_sub(1);
-                    } else if direction > 0 {
-                        selected_index = (selected_index + 1).min(max);
-                    }
+                    selected_index = next_selection_index(
+                        selected_index,
+                        current_results.len(),
+                        direction,
+                    );
 
                     let rows = overlay_rows(&current_results);
                     overlay.set_results(&rows, selected_index);
@@ -254,6 +253,22 @@ fn trim_path_for_row(path: &str, max_chars: usize) -> String {
     format!("...{tail}")
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn next_selection_index(current: usize, len: usize, direction: i32) -> usize {
+    if len == 0 {
+        return 0;
+    }
+
+    let max = len - 1;
+    if direction < 0 {
+        current.saturating_sub(1)
+    } else if direction > 0 {
+        (current + 1).min(max)
+    } else {
+        current.min(max)
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn log_registration(registration: &HotkeyRegistration) {
     match registration {
@@ -345,7 +360,7 @@ fn launch_overlay_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_overlay_selection, search_overlay_results};
+    use super::{launch_overlay_selection, next_selection_index, search_overlay_results};
     use crate::config::Config;
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
@@ -415,5 +430,16 @@ mod tests {
         let error = launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));
+    }
+
+    #[test]
+    fn selection_index_bounds_are_stable() {
+        assert_eq!(next_selection_index(0, 0, 1), 0);
+        assert_eq!(next_selection_index(0, 3, -1), 0);
+        assert_eq!(next_selection_index(1, 3, -1), 0);
+        assert_eq!(next_selection_index(1, 3, 1), 2);
+        assert_eq!(next_selection_index(2, 3, 1), 2);
+        assert_eq!(next_selection_index(1, 3, 0), 1);
+        assert_eq!(next_selection_index(5, 3, 0), 2);
     }
 }
