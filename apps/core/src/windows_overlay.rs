@@ -2,7 +2,7 @@
 mod imp {
     use std::ffi::c_void;
     use std::sync::OnceLock;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
@@ -13,7 +13,9 @@ mod imp {
         OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_SELECTED, EM_SETSEL};
+    use windows_sys::Win32::UI::Controls::{
+        DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
+    };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
@@ -72,12 +74,11 @@ mod imp {
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
 
-    const TIMER_SELECTION_ANIM: usize = 0xBEEF;
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
+    const TIMER_WINDOW_ANIM: usize = 0xBEF1;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const RESULTS_ANIM_MS: u32 = 150;
-    const SELECTION_ANIM_MS: u64 = 90;
     const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
@@ -89,20 +90,20 @@ mod imp {
     const FONT_STATUS_HEIGHT: i32 = -13;
 
     // Visual tokens.
-    const COLOR_PANEL_BG: u32 = 0x001C1C1C; // #1C1C1C (BGR)
-    const COLOR_PANEL_BORDER: u32 = 0x003E3E3E; // #3E3E3E (BGR)
+    const COLOR_PANEL_BG: u32 = 0x0029231F; // #1F2329 (BGR)
+    const COLOR_PANEL_BORDER: u32 = 0x00453B35; // #353B45 (BGR)
     const COLOR_INPUT_BG: u32 = 0x00191919;
     const COLOR_RESULTS_BG: u32 = 0x00151515;
     const COLOR_TEXT_PRIMARY: u32 = 0x00F2EEE9;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B4AEA8;
-    const COLOR_TEXT_ERROR: u32 = 0x007779E8;
-    const COLOR_SELECTION: u32 = 0x00503E31;
-    const COLOR_SELECTION_BORDER: u32 = 0x00614B39;
-    const COLOR_ROW_HOVER: u32 = 0x00382D24;
-    const COLOR_ROW_SEPARATOR: u32 = 0x002B2B2B;
-    const COLOR_SELECTION_ACCENT: u32 = 0x007A5D45;
-    const COLOR_ICON_BG: u32 = 0x00312A24;
-    const COLOR_ICON_TEXT: u32 = 0x00D8D0C8;
+    const COLOR_TEXT_ERROR: u32 = 0x006666CC;
+    const COLOR_SELECTION: u32 = 0x00323232;
+    const COLOR_SELECTION_BORDER: u32 = 0x00484848;
+    const COLOR_ROW_HOVER: u32 = 0x00262626;
+    const COLOR_ROW_SEPARATOR: u32 = 0x00222222;
+    const COLOR_SELECTION_ACCENT: u32 = 0x00555555;
+    const COLOR_ICON_BG: u32 = 0x00202020;
+    const COLOR_ICON_TEXT: u32 = 0x00D0D0D0;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -111,6 +112,13 @@ mod imp {
         MoveSelection(i32),
         Submit,
         Escape,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct OverlayRow {
+        pub kind: String,
+        pub title: String,
+        pub path: String,
     }
 
     pub struct NativeOverlayShell {
@@ -135,18 +143,40 @@ mod imp {
         border_brush: isize,
         input_brush: isize,
         results_brush: isize,
+        selection_brush: isize,
+        selection_border_brush: isize,
+        row_hover_brush: isize,
+        row_separator_brush: isize,
+        selection_accent_brush: isize,
+        icon_brush: isize,
 
         status_is_error: bool,
         results_visible: bool,
 
-        selection_prev: i32,
-        selection_current: i32,
-        selection_anim_start: Option<Instant>,
         hover_index: i32,
 
         scroll_from_top: i32,
         scroll_to_top: i32,
         scroll_anim_start: Option<Instant>,
+
+        window_anim: Option<WindowAnimation>,
+        rows: Vec<OverlayRow>,
+    }
+
+    struct WindowAnimation {
+        start: Instant,
+        duration_ms: u32,
+        from_left: i32,
+        from_top: i32,
+        from_width: i32,
+        from_height: i32,
+        to_left: i32,
+        to_top: i32,
+        to_width: i32,
+        to_height: i32,
+        from_alpha: u8,
+        to_alpha: u8,
+        hide_on_complete: bool,
     }
 
     impl NativeOverlayShell {
@@ -268,6 +298,10 @@ mod imp {
             }
         }
 
+        pub fn set_hotkey_hint(&self, hotkey: &str) {
+            self.set_status_text(&format!("Ready. Press {hotkey} to open launcher."));
+        }
+
         pub fn clear_query_text(&self) {
             if let Some(state) = state_for(self.hwnd) {
                 unsafe {
@@ -276,14 +310,17 @@ mod imp {
             }
         }
 
-        pub fn set_results(&self, rows: &[String], selected_index: usize) {
+        pub fn set_results(&self, rows: &[OverlayRow], selected_index: usize) {
             if let Some(state) = state_for(self.hwnd) {
+                state.rows.clear();
+                state.rows.extend_from_slice(rows);
                 unsafe {
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
 
                 for row in rows {
-                    let wide = to_wide(row);
+                    // Keep listbox item text lightweight; owner-draw uses state.rows.
+                    let wide = to_wide(&row.title);
                     unsafe {
                         SendMessageW(state.list_hwnd, LB_ADDSTRING, 0, wide.as_ptr() as LPARAM);
                     }
@@ -297,12 +334,10 @@ mod imp {
                 }
 
                 if rows.is_empty() {
-                    state.selection_prev = -1;
-                    state.selection_current = -1;
-                    state.selection_anim_start = None;
                     state.scroll_anim_start = None;
                     state.scroll_from_top = 0;
                     state.scroll_to_top = 0;
+                    state.hover_index = -1;
                 }
             }
         }
@@ -318,20 +353,12 @@ mod imp {
             }
 
             let clamped = selected_index.min((count as usize).saturating_sub(1));
-            let previous = unsafe { SendMessageW(state.list_hwnd, LB_GETCURSEL, 0, 0) };
             unsafe {
                 SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
             }
-
-            if previous != clamped as isize {
-                state.selection_prev = previous as i32;
-                state.selection_current = clamped as i32;
-                state.selection_anim_start = Some(Instant::now());
-                begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
-                unsafe {
-                    SetTimer(self.hwnd, TIMER_SELECTION_ANIM, 16, None);
-                    InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
-                }
+            begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
+            unsafe {
+                InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
             }
         }
 
@@ -446,67 +473,32 @@ mod imp {
             unsafe {
                 GetWindowRect(self.hwnd, &mut rect);
             }
-            let width = rect.right - rect.left;
             let current_height = rect.bottom - rect.top;
-            let top = rect.top;
-            let left = rect.left;
 
             if current_height == target_height {
                 return;
             }
 
             if duration_ms == 0 {
-                unsafe {
-                    SetWindowPos(
-                        self.hwnd,
-                        HWND_TOPMOST,
-                        left,
-                        top,
-                        width,
-                        target_height,
-                        SWP_NOACTIVATE,
-                    );
-                    SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
-                }
+                apply_window_state(self.hwnd, rect.left, rect.top, rect.right - rect.left, target_height, 255);
                 return;
             }
 
-            let steps = (duration_ms / ANIM_FRAME_MS as u32).max(1);
-            let expanding = target_height > current_height;
-            let start_alpha = if expanding { 236 } else { 255 };
-            let end_alpha = if expanding { 255 } else { 236 };
-            for step in 1..=steps {
-                let t = step as f32 / steps as f32;
-                let eased = ease_out(t);
-                let h = lerp_i32(current_height, target_height, eased);
-                let alpha = lerp_i32(start_alpha, end_alpha, eased) as u8;
-                unsafe {
-                    SetWindowPos(
-                        self.hwnd,
-                        HWND_TOPMOST,
-                        left,
-                        top,
-                        width,
-                        h,
-                        SWP_NOACTIVATE,
-                    );
-                    SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
-                }
-                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
-            }
-
-            unsafe {
-                SetWindowPos(
-                    self.hwnd,
-                    HWND_TOPMOST,
-                    left,
-                    top,
-                    width,
-                    target_height,
-                    SWP_NOACTIVATE,
-                );
-                SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
-            }
+            start_window_animation(
+                self.hwnd,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                current_height,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                target_height,
+                255,
+                255,
+                duration_ms,
+                false,
+            );
         }
 
         fn animate_show(&self) {
@@ -529,48 +521,27 @@ mod imp {
             let start_width = ((final_width as f32) * 0.96_f32) as i32;
             let start_height = ((final_height as f32) * 0.96_f32) as i32;
             let start_left = final_left + (final_width - start_width) / 2;
+            let start_top = final_top + (final_height - start_height) / 2;
 
+            apply_window_state(self.hwnd, start_left, start_top, start_width, start_height, 0);
             unsafe {
-                SetWindowPos(
-                    self.hwnd,
-                    HWND_TOPMOST,
-                    start_left,
-                    final_top,
-                    start_width,
-                    start_height,
-                    SWP_NOACTIVATE,
-                );
-                SetLayeredWindowAttributes(self.hwnd, 0, 0, LWA_ALPHA);
                 ShowWindow(self.hwnd, SW_SHOW);
             }
-
-            let steps = (OVERLAY_ANIM_MS / ANIM_FRAME_MS as u32).max(1);
-            for step in 1..=steps {
-                let t = step as f32 / steps as f32;
-                let eased = ease_out(t);
-                let w = lerp_i32(start_width, final_width, eased);
-                let h = lerp_i32(start_height, final_height, eased);
-                let x = final_left + (final_width - w) / 2;
-                let alpha = lerp_i32(0, 255, eased) as u8;
-                unsafe {
-                    SetWindowPos(self.hwnd, HWND_TOPMOST, x, final_top, w, h, SWP_NOACTIVATE);
-                    SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
-                }
-                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
-            }
-
-            unsafe {
-                SetWindowPos(
-                    self.hwnd,
-                    HWND_TOPMOST,
-                    final_left,
-                    final_top,
-                    final_width,
-                    final_height,
-                    SWP_NOACTIVATE,
-                );
-                SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
-            }
+            start_window_animation(
+                self.hwnd,
+                start_left,
+                start_top,
+                start_width,
+                start_height,
+                final_left,
+                final_top,
+                final_width,
+                final_height,
+                0,
+                255,
+                OVERLAY_ANIM_MS,
+                false,
+            );
         }
 
         fn animate_hide(&self) {
@@ -589,35 +560,23 @@ mod imp {
 
             let end_width = ((final_width as f32) * 0.96_f32) as i32;
             let end_height = ((final_height as f32) * 0.96_f32) as i32;
-
-            let steps = (OVERLAY_ANIM_MS / ANIM_FRAME_MS as u32).max(1);
-            for step in 1..=steps {
-                let t = step as f32 / steps as f32;
-                let eased = ease_out(t);
-                let w = lerp_i32(final_width, end_width, eased);
-                let h = lerp_i32(final_height, end_height, eased);
-                let x = final_left + (final_width - w) / 2;
-                let alpha = lerp_i32(255, 0, eased) as u8;
-                unsafe {
-                    SetWindowPos(self.hwnd, HWND_TOPMOST, x, final_top, w, h, SWP_NOACTIVATE);
-                    SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
-                }
-                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
-            }
-
-            unsafe {
-                ShowWindow(self.hwnd, SW_HIDE);
-                SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
-                SetWindowPos(
-                    self.hwnd,
-                    HWND_TOPMOST,
-                    final_left,
-                    final_top,
-                    final_width,
-                    final_height,
-                    SWP_NOACTIVATE,
-                );
-            }
+            let end_left = final_left + (final_width - end_width) / 2;
+            let end_top = final_top + (final_height - end_height) / 2;
+            start_window_animation(
+                self.hwnd,
+                final_left,
+                final_top,
+                final_width,
+                final_height,
+                end_left,
+                end_top,
+                end_width,
+                end_height,
+                255,
+                0,
+                OVERLAY_ANIM_MS,
+                true,
+            );
         }
     }
 
@@ -645,6 +604,15 @@ mod imp {
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
                     state.results_brush = unsafe { CreateSolidBrush(COLOR_RESULTS_BG) } as isize;
+                    state.selection_brush = unsafe { CreateSolidBrush(COLOR_SELECTION) } as isize;
+                    state.selection_border_brush =
+                        unsafe { CreateSolidBrush(COLOR_SELECTION_BORDER) } as isize;
+                    state.row_hover_brush = unsafe { CreateSolidBrush(COLOR_ROW_HOVER) } as isize;
+                    state.row_separator_brush =
+                        unsafe { CreateSolidBrush(COLOR_ROW_SEPARATOR) } as isize;
+                    state.selection_accent_brush =
+                        unsafe { CreateSolidBrush(COLOR_SELECTION_ACCENT) } as isize;
+                    state.icon_brush = unsafe { CreateSolidBrush(COLOR_ICON_BG) } as isize;
 
                     state.input_font = create_font(FONT_INPUT_HEIGHT, FW_SEMIBOLD as i32);
                     state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
@@ -732,8 +700,6 @@ mod imp {
                     }
 
                     state.results_visible = false;
-                    state.selection_prev = -1;
-                    state.selection_current = -1;
                     state.hover_index = -1;
                     layout_children(hwnd, state);
                 }
@@ -839,25 +805,22 @@ mod imp {
                 0
             }
             WM_TIMER => {
-                if wparam == TIMER_SELECTION_ANIM {
-                    if let Some(state) = state_for(hwnd) {
-                        let running = selection_animation_running(state);
-                        unsafe {
-                            InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
-                        }
-                        if !running {
-                            unsafe {
-                                KillTimer(hwnd, TIMER_SELECTION_ANIM);
-                            }
-                        }
-                    }
-                }
                 if wparam == TIMER_SCROLL_ANIM {
                     if let Some(state) = state_for(hwnd) {
                         let running = scroll_animation_tick(state);
                         if !running {
                             unsafe {
                                 KillTimer(hwnd, TIMER_SCROLL_ANIM);
+                            }
+                        }
+                    }
+                }
+                if wparam == TIMER_WINDOW_ANIM {
+                    if let Some(state) = state_for(hwnd) {
+                        let running = window_animation_tick(hwnd, state);
+                        if !running {
+                            unsafe {
+                                KillTimer(hwnd, TIMER_WINDOW_ANIM);
                             }
                         }
                     }
@@ -1015,26 +978,28 @@ mod imp {
         };
 
         let item_index = dis.itemID as i32;
-        let row_text = listbox_row_text(state.list_hwnd, item_index);
-        let row = parse_result_row(&row_text);
+        let row = state
+            .rows
+            .get(item_index as usize)
+            .cloned()
+            .unwrap_or_else(|| OverlayRow {
+                kind: "file".to_string(),
+                title: String::new(),
+                path: String::new(),
+            });
 
-        let progress = selection_progress(state);
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
-        let mut row_bg = COLOR_RESULTS_BG;
-
-        if selected_flag {
-            row_bg = blend_color(COLOR_RESULTS_BG, COLOR_SELECTION, progress);
-        } else if state.selection_prev == item_index && progress < 1.0 {
-            row_bg = blend_color(COLOR_SELECTION, COLOR_RESULTS_BG, progress);
+        let row_brush = if selected_flag {
+            state.selection_brush
         } else if hovered {
-            row_bg = COLOR_ROW_HOVER;
-        }
+            state.row_hover_brush
+        } else {
+            state.results_brush
+        };
 
         unsafe {
-            let row_brush = CreateSolidBrush(row_bg);
-            FillRect(dis.hDC, &dis.rcItem, row_brush);
-            DeleteObject(row_brush as _);
+            FillRect(dis.hDC, &dis.rcItem, row_brush as _);
 
             let icon_rect = RECT {
                 left: dis.rcItem.left + ROW_INSET_X,
@@ -1042,9 +1007,7 @@ mod imp {
                 right: dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE,
                 bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE,
             };
-            let icon_brush = CreateSolidBrush(COLOR_ICON_BG);
-            FillRect(dis.hDC, &icon_rect, icon_brush);
-            DeleteObject(icon_brush as _);
+            FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
             FrameRect(dis.hDC, &icon_rect, state.border_brush as _);
 
             let old_font = SelectObject(dis.hDC, state.title_font as _);
@@ -1094,9 +1057,7 @@ mod imp {
             );
 
             if selected_flag {
-                let border_brush = CreateSolidBrush(COLOR_SELECTION_BORDER);
-                FrameRect(dis.hDC, &dis.rcItem, border_brush);
-                DeleteObject(border_brush as _);
+                FrameRect(dis.hDC, &dis.rcItem, state.selection_border_brush as _);
 
                 let accent_rect = RECT {
                     left: dis.rcItem.left + 1,
@@ -1104,9 +1065,7 @@ mod imp {
                     right: dis.rcItem.left + 4,
                     bottom: dis.rcItem.bottom - 1,
                 };
-                let accent_brush = CreateSolidBrush(COLOR_SELECTION_ACCENT);
-                FillRect(dis.hDC, &accent_rect, accent_brush);
-                DeleteObject(accent_brush as _);
+                FillRect(dis.hDC, &accent_rect, state.selection_accent_brush as _);
             }
 
             let separator_rect = RECT {
@@ -1115,41 +1074,9 @@ mod imp {
                 right: dis.rcItem.right - ROW_INSET_X,
                 bottom: dis.rcItem.bottom,
             };
-            let separator_brush = CreateSolidBrush(COLOR_ROW_SEPARATOR);
-            FillRect(dis.hDC, &separator_rect, separator_brush);
-            DeleteObject(separator_brush as _);
+            FillRect(dis.hDC, &separator_rect, state.row_separator_brush as _);
 
             SelectObject(dis.hDC, old_font);
-        }
-    }
-
-    struct ResultRow {
-        kind: String,
-        title: String,
-        path: String,
-    }
-
-    fn parse_result_row(row: &str) -> ResultRow {
-        if let Some((kind, rest)) = row.split_once('\u{1f}') {
-            if let Some((title, path)) = rest.split_once('\u{1f}') {
-                return ResultRow {
-                    kind: kind.to_string(),
-                    title: title.to_string(),
-                    path: path.to_string(),
-                };
-            }
-        }
-        if let Some((title, path)) = row.split_once('\t') {
-            return ResultRow {
-                kind: "file".to_string(),
-                title: title.to_string(),
-                path: path.to_string(),
-            };
-        }
-        ResultRow {
-            kind: "file".to_string(),
-            title: row.to_string(),
-            path: String::new(),
         }
     }
 
@@ -1163,42 +1090,6 @@ mod imp {
         }
     }
 
-    fn listbox_row_text(list_hwnd: HWND, index: i32) -> String {
-        if index < 0 {
-            return String::new();
-        }
-
-        let text_len = unsafe { SendMessageW(list_hwnd, LB_GETTEXTLEN, index as usize, 0) };
-        if text_len <= 0 {
-            return String::new();
-        }
-
-        let mut buf = vec![0_u16; (text_len as usize) + 2];
-        unsafe {
-            SendMessageW(
-                list_hwnd,
-                LB_GETTEXT,
-                index as usize,
-                buf.as_mut_ptr() as LPARAM,
-            );
-        }
-
-        let end = buf.iter().position(|c| *c == 0).unwrap_or(buf.len());
-        String::from_utf16_lossy(&buf[..end])
-    }
-
-    fn selection_animation_running(state: &mut OverlayShellState) -> bool {
-        let Some(start) = state.selection_anim_start else {
-            return false;
-        };
-
-        if start.elapsed().as_millis() as u64 >= SELECTION_ANIM_MS {
-            state.selection_anim_start = None;
-            state.selection_prev = -1;
-            return false;
-        }
-        true
-    }
 
     fn begin_scroll_animation(
         overlay_hwnd: HWND,
@@ -1285,31 +1176,92 @@ mod imp {
         true
     }
 
-    fn selection_progress(state: &OverlayShellState) -> f32 {
-        let Some(start) = state.selection_anim_start else {
-            return 1.0;
+    fn start_window_animation(
+        hwnd: HWND,
+        from_left: i32,
+        from_top: i32,
+        from_width: i32,
+        from_height: i32,
+        to_left: i32,
+        to_top: i32,
+        to_width: i32,
+        to_height: i32,
+        from_alpha: u8,
+        to_alpha: u8,
+        duration_ms: u32,
+        hide_on_complete: bool,
+    ) {
+        let Some(state) = state_for(hwnd) else {
+            return;
         };
-        let elapsed = start.elapsed().as_millis() as u64;
-        let t = (elapsed as f32 / SELECTION_ANIM_MS as f32).clamp(0.0, 1.0);
-        ease_out(t)
+
+        state.window_anim = Some(WindowAnimation {
+            start: Instant::now(),
+            duration_ms: duration_ms.max(1),
+            from_left,
+            from_top,
+            from_width,
+            from_height,
+            to_left,
+            to_top,
+            to_width,
+            to_height,
+            from_alpha,
+            to_alpha,
+            hide_on_complete,
+        });
+
+        unsafe {
+            SetTimer(hwnd, TIMER_WINDOW_ANIM, ANIM_FRAME_MS as u32, None);
+        }
     }
 
-    fn blend_color(from: u32, to: u32, t: f32) -> u32 {
-        let t = t.clamp(0.0, 1.0);
-        let fb = ((from >> 16) & 0xFF) as f32;
-        let fg = ((from >> 8) & 0xFF) as f32;
-        let fr = (from & 0xFF) as f32;
+    fn window_animation_tick(hwnd: HWND, state: &mut OverlayShellState) -> bool {
+        let Some(anim) = state.window_anim.as_ref() else {
+            return false;
+        };
 
-        let tb = ((to >> 16) & 0xFF) as f32;
-        let tg = ((to >> 8) & 0xFF) as f32;
-        let tr = (to & 0xFF) as f32;
+        let elapsed_ms = anim.start.elapsed().as_millis() as u32;
+        let t = (elapsed_ms as f32 / anim.duration_ms as f32).clamp(0.0, 1.0);
+        let eased = ease_out(t);
 
-        let b = fb + (tb - fb) * t;
-        let g = fg + (tg - fg) * t;
-        let r = fr + (tr - fr) * t;
+        let left = lerp_i32(anim.from_left, anim.to_left, eased);
+        let top = lerp_i32(anim.from_top, anim.to_top, eased);
+        let width = lerp_i32(anim.from_width, anim.to_width, eased);
+        let height = lerp_i32(anim.from_height, anim.to_height, eased);
+        let alpha = lerp_i32(anim.from_alpha as i32, anim.to_alpha as i32, eased) as u8;
+        apply_window_state(hwnd, left, top, width, height, alpha);
 
-        ((b as u32) << 16) | ((g as u32) << 8) | (r as u32)
+        if t >= 1.0 {
+            let hide_on_complete = anim.hide_on_complete;
+            state.window_anim = None;
+            if hide_on_complete {
+                unsafe {
+                    ShowWindow(hwnd, SW_HIDE);
+                    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                }
+            }
+            return false;
+        }
+
+        true
     }
+
+    fn apply_window_state(hwnd: HWND, left: i32, top: i32, width: i32, height: i32, alpha: u8) {
+        unsafe {
+            SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                left,
+                top,
+                width.max(1),
+                height.max(1),
+                SWP_NOACTIVATE,
+            );
+            SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+        }
+    }
+
 
     fn layout_children(hwnd: HWND, state: &OverlayShellState) {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
@@ -1421,6 +1373,24 @@ mod imp {
             if state.results_brush != 0 {
                 DeleteObject(state.results_brush as _);
             }
+            if state.selection_brush != 0 {
+                DeleteObject(state.selection_brush as _);
+            }
+            if state.selection_border_brush != 0 {
+                DeleteObject(state.selection_border_brush as _);
+            }
+            if state.row_hover_brush != 0 {
+                DeleteObject(state.row_hover_brush as _);
+            }
+            if state.row_separator_brush != 0 {
+                DeleteObject(state.row_separator_brush as _);
+            }
+            if state.selection_accent_brush != 0 {
+                DeleteObject(state.selection_accent_brush as _);
+            }
+            if state.icon_brush != 0 {
+                DeleteObject(state.icon_brush as _);
+            }
         }
     }
 
@@ -1474,4 +1444,4 @@ mod imp {
 }
 
 #[cfg(target_os = "windows")]
-pub use imp::{NativeOverlayShell, OverlayEvent};
+pub use imp::{NativeOverlayShell, OverlayEvent, OverlayRow};

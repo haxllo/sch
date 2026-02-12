@@ -6,7 +6,7 @@ use crate::overlay_state::{HotkeyAction, OverlayState};
 #[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, HotkeyRegistration};
 #[cfg(target_os = "windows")]
-use crate::windows_overlay::{NativeOverlayShell, OverlayEvent};
+use crate::windows_overlay::{NativeOverlayShell, OverlayEvent, OverlayRow};
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -74,7 +74,7 @@ pub fn run() -> Result<(), RuntimeError> {
 
         let mut overlay_state = OverlayState::default();
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
-        overlay.set_status_text("Ready. Press Alt+Space to open launcher.");
+        overlay.set_hotkey_hint(&config.hotkey);
         println!("[swiftfind-core] native overlay shell initialized (hidden)");
 
         let mut registrar = default_hotkey_registrar();
@@ -204,10 +204,14 @@ fn runtime_mode() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
-fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
+fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
     results
         .iter()
-        .map(|item| format!("{}\u{1f}{}\u{1f}{}", item.kind, item.title, item.path))
+        .map(|item| OverlayRow {
+            kind: item.kind.clone(),
+            title: item.title.clone(),
+            path: item.path.clone(),
+        })
         .collect()
 }
 
