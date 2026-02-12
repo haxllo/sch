@@ -80,6 +80,7 @@ mod imp {
     const CONTROL_ID_LIST: usize = 1002;
     const CONTROL_ID_STATUS: usize = 1003;
     const CONTROL_ID_HELP: usize = 1004;
+    const CONTROL_ID_HELP_TIP: usize = 1005;
     const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
 
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
@@ -131,6 +132,10 @@ mod imp {
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
+    const COLOR_HELP_TIP_BG: u32 = 0x00171717;
+    const COLOR_HELP_TIP_TEXT: u32 = 0x00D8D8D8;
+    const HELP_TIP_WIDTH: i32 = 340;
+    const HELP_TIP_HEIGHT: i32 = 26;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str =
@@ -162,10 +167,12 @@ mod imp {
         list_hwnd: HWND,
         status_hwnd: HWND,
         help_hwnd: HWND,
+        help_tip_hwnd: HWND,
 
         edit_prev_proc: isize,
         list_prev_proc: isize,
         help_prev_proc: isize,
+        help_tip_prev_proc: isize,
 
         input_font: isize,
         title_font: isize,
@@ -182,10 +189,11 @@ mod imp {
         row_separator_brush: isize,
         selection_accent_brush: isize,
         icon_brush: isize,
+        help_tip_brush: isize,
 
         status_is_error: bool,
         help_hovered: bool,
-        help_status_visible: bool,
+        help_tip_visible: bool,
         results_visible: bool,
         help_config_path: String,
 
@@ -207,9 +215,11 @@ mod imp {
                 list_hwnd: std::ptr::null_mut(),
                 status_hwnd: std::ptr::null_mut(),
                 help_hwnd: std::ptr::null_mut(),
+                help_tip_hwnd: std::ptr::null_mut(),
                 edit_prev_proc: 0,
                 list_prev_proc: 0,
                 help_prev_proc: 0,
+                help_tip_prev_proc: 0,
                 input_font: 0,
                 title_font: 0,
                 meta_font: 0,
@@ -224,9 +234,10 @@ mod imp {
                 row_separator_brush: 0,
                 selection_accent_brush: 0,
                 icon_brush: 0,
+                help_tip_brush: 0,
                 status_is_error: false,
                 help_hovered: false,
-                help_status_visible: false,
+                help_tip_visible: false,
                 results_visible: false,
                 help_config_path: String::new(),
                 hover_index: -1,
@@ -371,7 +382,10 @@ mod imp {
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
                 state.status_is_error = message.to_ascii_lowercase().contains("error");
-                state.help_status_visible = false;
+                state.help_tip_visible = false;
+                unsafe {
+                    ShowWindow(state.help_tip_hwnd, SW_HIDE);
+                }
                 if message.is_empty() {
                     state.help_hovered = false;
                 }
@@ -743,6 +757,7 @@ mod imp {
                     state.selection_accent_brush =
                         unsafe { CreateSolidBrush(COLOR_SELECTION_ACCENT) } as isize;
                     state.icon_brush = unsafe { CreateSolidBrush(COLOR_ICON_BG) } as isize;
+                    state.help_tip_brush = unsafe { CreateSolidBrush(COLOR_HELP_TIP_BG) } as isize;
 
                     state.input_font = create_font(FONT_INPUT_HEIGHT, FW_MEDIUM as i32);
                     state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
@@ -824,12 +839,29 @@ mod imp {
                             std::ptr::null_mut(),
                         )
                     };
+                    state.help_tip_hwnd = unsafe {
+                        CreateWindowExW(
+                            0,
+                            to_wide(STATUS_CLASS).as_ptr(),
+                            to_wide(HOTKEY_HELP_TEXT_FALLBACK).as_ptr(),
+                            WS_CHILD | STATIC_NOTIFY_STYLE,
+                            0,
+                            0,
+                            0,
+                            0,
+                            hwnd,
+                            CONTROL_ID_HELP_TIP as HMENU,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        )
+                    };
 
                     unsafe {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        SendMessageW(state.help_tip_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
                             GWLP_WNDPROC,
@@ -845,8 +877,14 @@ mod imp {
                             GWLP_WNDPROC,
                             control_subclass_proc as *const () as isize,
                         );
+                        state.help_tip_prev_proc = SetWindowLongPtrW(
+                            state.help_tip_hwnd,
+                            GWLP_WNDPROC,
+                            control_subclass_proc as *const () as isize,
+                        );
 
                         ShowWindow(state.list_hwnd, SW_HIDE);
+                        ShowWindow(state.help_tip_hwnd, SW_HIDE);
                     }
 
                     state.results_visible = false;
@@ -896,11 +934,13 @@ mod imp {
                     }
                     return 0;
                 }
-                if control_id == CONTROL_ID_HELP && notification == 0 {
+                if (control_id == CONTROL_ID_HELP || control_id == CONTROL_ID_HELP_TIP)
+                    && notification == 0
+                {
                     if let Some(state) = state_for(hwnd) {
                         if let Err(error) = open_help_config_file(state) {
                             state.status_is_error = true;
-                            state.help_status_visible = false;
+                            state.help_tip_visible = false;
                             let wide = to_wide(&format!("Help open error: {error}"));
                             unsafe {
                                 SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -916,6 +956,14 @@ mod imp {
             WM_CTLCOLORSTATIC => {
                 if let Some(state) = state_for(hwnd) {
                     let target = lparam as HWND;
+                    if target == state.help_tip_hwnd {
+                        unsafe {
+                            SetTextColor(wparam as _, COLOR_HELP_TIP_TEXT);
+                            SetBkColor(wparam as _, COLOR_HELP_TIP_BG);
+                            SetBkMode(wparam as _, OPAQUE as i32);
+                        }
+                        return state.help_tip_brush;
+                    }
                     if target == state.help_hwnd {
                         unsafe {
                             SetTextColor(
@@ -1061,14 +1109,14 @@ mod imp {
 
         if let Some(state) = state_for(parent) {
             if message == WM_MOUSEMOVE {
-                if hwnd == state.help_hwnd {
+                if hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd {
                     set_help_hover_state(parent, state, true);
                 } else if state.help_hovered {
                     set_help_hover_state(parent, state, false);
                 }
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
-                && hwnd == state.help_hwnd
+                && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
             {
                 unsafe {
                     SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_HAND));
@@ -1141,11 +1189,11 @@ mod imp {
                 return 0;
             }
             if (message == WM_LBUTTONUP || message == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN)
-                && hwnd == state.help_hwnd
+                && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
             {
                 if let Err(error) = open_help_config_file(state) {
                     state.status_is_error = true;
-                    state.help_status_visible = false;
+                    state.help_tip_visible = false;
                     let wide = to_wide(&format!("Help open error: {error}"));
                     unsafe {
                         SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -1197,6 +1245,8 @@ mod imp {
             state.list_prev_proc
         } else if hwnd == state.help_hwnd {
             state.help_prev_proc
+        } else if hwnd == state.help_tip_hwnd {
+            state.help_tip_prev_proc
         } else {
             0
         };
@@ -1720,6 +1770,8 @@ mod imp {
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
         let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
+        let tip_left = (help_left + HELP_ICON_SIZE - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
+        let tip_top = (help_top - HELP_TIP_HEIGHT - 6).max(4);
 
         unsafe {
             MoveWindow(
@@ -1745,6 +1797,19 @@ mod imp {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
             MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
+            MoveWindow(
+                state.help_tip_hwnd,
+                tip_left,
+                tip_top,
+                HELP_TIP_WIDTH,
+                HELP_TIP_HEIGHT,
+                1,
+            );
+            if state.help_tip_visible {
+                ShowWindow(state.help_tip_hwnd, SW_SHOW);
+            } else {
+                ShowWindow(state.help_tip_hwnd, SW_HIDE);
+            }
             MoveWindow(
                 state.list_hwnd,
                 list_left,
@@ -1882,23 +1947,23 @@ mod imp {
         }
 
         if hovered {
-            state.help_status_visible = true;
-            state.status_is_error = false;
+            state.help_tip_visible = true;
             let wide = to_wide(&help_hint_text(state));
             unsafe {
-                SetWindowTextW(state.status_hwnd, wide.as_ptr());
-                InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
             }
             layout_children(hwnd, state);
+            unsafe {
+                InvalidateRect(state.help_tip_hwnd, std::ptr::null(), 1);
+            }
             return;
         }
 
-        if state.help_status_visible {
-            state.help_status_visible = false;
-            state.status_is_error = false;
+        if state.help_tip_visible {
+            state.help_tip_visible = false;
+            let wide = to_wide(&help_hint_text(state));
             unsafe {
-                SetWindowTextW(state.status_hwnd, to_wide("").as_ptr());
-                InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
             }
             layout_children(hwnd, state);
         }
@@ -1907,9 +1972,9 @@ mod imp {
     fn help_hint_text(state: &OverlayShellState) -> String {
         let cfg_path = state.help_config_path.trim();
         if cfg_path.is_empty() {
-            HOTKEY_HELP_TEXT_FALLBACK.to_string()
+            "Click to configure hotkey in Roaming\\SwiftFind\\config.json".to_string()
         } else {
-            format!("Click to configure hotkey: {cfg_path} (key: hotkey).")
+            format!("Click to configure hotkey in {cfg_path}")
         }
     }
 
@@ -1941,7 +2006,7 @@ mod imp {
             .map_err(|e| format!("failed to open config file: {e}"))?;
 
         state.status_is_error = false;
-        state.help_status_visible = false;
+        state.help_tip_visible = false;
         let wide = to_wide(&format!("Opened config: {target}"));
         unsafe {
             SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -2041,6 +2106,9 @@ mod imp {
             }
             if state.icon_brush != 0 {
                 DeleteObject(state.icon_brush as _);
+            }
+            if state.help_tip_brush != 0 {
+                DeleteObject(state.help_tip_brush as _);
             }
         }
         clear_icon_cache(state);
