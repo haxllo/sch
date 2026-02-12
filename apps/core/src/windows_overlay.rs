@@ -95,13 +95,15 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
-    const INPUT_TEXT_TOP_PAD: i32 = 8;
+    const INPUT_TEXT_LEFT_INSET: i32 = 19;
+    const INPUT_TEXT_RIGHT_INSET: i32 = 10;
+    const INPUT_TEXT_TOP_PAD: i32 = 17;
     const INPUT_TEXT_BOTTOM_PAD: i32 = 8;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
     const COLOR_PANEL_BORDER: u32 = 0x002A2A2A;
-    const COLOR_INPUT_BG: u32 = 0x00141414;
+    const COLOR_INPUT_BG: u32 = COLOR_PANEL_BG;
     const COLOR_RESULTS_BG: u32 = 0x00101010;
     const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
@@ -1079,8 +1081,10 @@ mod imp {
             unsafe {
                 GetClientRect(edit_hwnd, &mut text_rect);
             }
-            text_rect.left += 10;
-            text_rect.right -= 10;
+            text_rect.left += INPUT_TEXT_LEFT_INSET;
+            text_rect.right -= INPUT_TEXT_RIGHT_INSET;
+            text_rect.top += INPUT_TEXT_TOP_PAD;
+            text_rect.bottom -= INPUT_TEXT_BOTTOM_PAD;
         }
         if text_rect.right <= text_rect.left {
             return;
@@ -1480,9 +1484,9 @@ mod imp {
         }
 
         let mut text_rect = RECT {
-            left: 10,
+            left: INPUT_TEXT_LEFT_INSET,
             top: INPUT_TEXT_TOP_PAD,
-            right: width - 10,
+            right: width - INPUT_TEXT_RIGHT_INSET,
             bottom: height - INPUT_TEXT_BOTTOM_PAD,
         };
         if text_rect.right <= text_rect.left {
