@@ -20,12 +20,12 @@ mod imp {
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-        GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
+        GetClientRect, GetCursorPos, GetDC, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
         LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTOPINDEX, LoadCursorW,
-        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
+        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, ReleaseDC, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, GWLP_USERDATA,
@@ -89,7 +89,7 @@ mod imp {
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
 
     // Typography tokens.
-    const FONT_INPUT_HEIGHT: i32 = -22;
+    const FONT_INPUT_HEIGHT: i32 = -19;
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
@@ -1050,7 +1050,49 @@ mod imp {
         let prev_proc = unsafe {
             std::mem::transmute::<isize, windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC>(prev_ptr)
         };
-        unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) }
+        let result = unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) };
+        if hwnd == state.edit_hwnd && message == WM_PAINT {
+            paint_edit_placeholder(hwnd, state);
+        }
+        result
+    }
+
+    fn paint_edit_placeholder(edit_hwnd: HWND, state: &OverlayShellState) {
+        let text_len = unsafe { GetWindowTextLengthW(edit_hwnd) };
+        if text_len > 0 {
+            return;
+        }
+
+        let mut text_rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(edit_hwnd, &mut text_rect);
+        }
+        text_rect.left += 10;
+        text_rect.right -= 10;
+        if text_rect.right <= text_rect.left {
+            return;
+        }
+
+        let hdc = unsafe { GetDC(edit_hwnd) };
+        if hdc.is_null() {
+            return;
+        }
+
+        unsafe {
+            let old_font = SelectObject(hdc, state.input_font as _);
+            SetBkMode(hdc, TRANSPARENT as i32);
+            SetTextColor(hdc, COLOR_TEXT_SECONDARY);
+            let placeholder = to_wide("Type to search");
+            DrawTextW(
+                hdc,
+                placeholder.as_ptr(),
+                -1,
+                &mut text_rect,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+            SelectObject(hdc, old_font);
+            ReleaseDC(edit_hwnd, hdc);
+        }
     }
 
     fn draw_list_row(hwnd: HWND, dis: &mut DRAWITEMSTRUCT) {
