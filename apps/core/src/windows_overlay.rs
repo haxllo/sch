@@ -45,6 +45,7 @@ mod imp {
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SETFOCUS, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
+        WM_MOUSELEAVE, TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
         WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
@@ -86,6 +87,7 @@ mod imp {
     const CONTROL_ID_HELP_TIP: usize = 1005;
     const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
     const STATIC_RIGHT_STYLE: u32 = 0x00000002; // SS_RIGHT
+    const EX_NOACTIVATE_STYLE: u32 = 0x08000000; // WS_EX_NOACTIVATE
 
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
     const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
@@ -921,16 +923,16 @@ mod imp {
                     };
                     state.help_tip_hwnd = unsafe {
                         CreateWindowExW(
-                            0,
+                            WS_EX_TOOLWINDOW | EX_NOACTIVATE_STYLE,
                             to_wide(STATUS_CLASS).as_ptr(),
                             to_wide(HOTKEY_HELP_TEXT_FALLBACK).as_ptr(),
-                            WS_CHILD | STATIC_NOTIFY_STYLE,
+                            WS_POPUP | STATIC_NOTIFY_STYLE,
                             0,
                             0,
                             0,
                             0,
                             hwnd,
-                            CONTROL_ID_HELP_TIP as HMENU,
+                            std::ptr::null_mut(),
                             std::ptr::null_mut(),
                             std::ptr::null_mut(),
                         )
@@ -962,6 +964,7 @@ mod imp {
                             GWLP_WNDPROC,
                             control_subclass_proc as *const () as isize,
                         );
+                        SetWindowLongPtrW(state.help_tip_hwnd, GWLP_USERDATA, hwnd as isize);
 
                         ShowWindow(state.list_hwnd, SW_HIDE);
                         ShowWindow(state.help_tip_hwnd, SW_HIDE);
@@ -1195,7 +1198,10 @@ mod imp {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        let parent = unsafe { GetParent(hwnd) };
+        let mut parent = unsafe { GetParent(hwnd) };
+        if parent.is_null() {
+            parent = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as HWND };
+        }
         if parent.is_null() {
             return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
         }
@@ -1215,10 +1221,22 @@ mod imp {
             }
             if message == WM_MOUSEMOVE {
                 if hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd {
+                    let mut tme = TRACKMOUSEEVENT {
+                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    unsafe {
+                        TrackMouseEvent(&mut tme);
+                    }
                     set_help_hover_state(parent, state, true);
                 } else if state.help_hovered {
                     set_help_hover_state(parent, state, false);
                 }
+            }
+            if message == WM_MOUSELEAVE && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd) {
+                set_help_hover_state(parent, state, false);
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
                 && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
@@ -2051,6 +2069,13 @@ mod imp {
     }
 
     fn hide_overlay_immediate(hwnd: HWND) {
+        if let Some(state) = state_for(hwnd) {
+            state.help_tip_visible = false;
+            state.help_hovered = false;
+            unsafe {
+                ShowWindow(state.help_tip_hwnd, SW_HIDE);
+            }
+        }
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_ROW_ANIM);
@@ -2101,8 +2126,6 @@ mod imp {
         let list_height = (height - list_top - list_bottom_reserved).max(0);
         let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
-        let tip_left = (help_left + HELP_ICON_SIZE - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
-        let tip_top = (help_top - HELP_TIP_HEIGHT - 6).max(6);
 
         unsafe {
             MoveWindow(
@@ -2128,14 +2151,7 @@ mod imp {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
             MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
-            MoveWindow(
-                state.help_tip_hwnd,
-                tip_left,
-                tip_top,
-                HELP_TIP_WIDTH,
-                HELP_TIP_HEIGHT,
-                1,
-            );
+            position_help_tip_popup(hwnd, state, help_top);
             apply_help_tip_rounded_corners(state.help_tip_hwnd, HELP_TIP_WIDTH, HELP_TIP_HEIGHT);
             if state.help_tip_visible {
                 ShowWindow(state.help_tip_hwnd, SW_SHOW);
@@ -2264,6 +2280,40 @@ mod imp {
                 HELP_TIP_RADIUS,
             );
             SetWindowRgn(help_tip_hwnd, region, 1);
+        }
+    }
+
+    fn position_help_tip_popup(hwnd: HWND, state: &OverlayShellState, help_top: i32) {
+        let mut overlay_rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetWindowRect(hwnd, &mut overlay_rect);
+        }
+
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+        let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+
+        // Keep the tip close to "?" and partly outside the panel edge.
+        let icon_screen_top = overlay_rect.top + help_top;
+        let mut tip_left = overlay_rect.right - HELP_TIP_WIDTH + 36;
+        let mut tip_top = icon_screen_top - HELP_TIP_HEIGHT - 8;
+        if tip_top < 8 {
+            tip_top = icon_screen_top + HELP_ICON_SIZE + 8;
+        }
+
+        let max_left = (screen_w - HELP_TIP_WIDTH - 8).max(8);
+        let max_top = (screen_h - HELP_TIP_HEIGHT - 8).max(8);
+        tip_left = tip_left.clamp(8, max_left);
+        tip_top = tip_top.clamp(8, max_top);
+
+        unsafe {
+            MoveWindow(
+                state.help_tip_hwnd,
+                tip_left,
+                tip_top,
+                HELP_TIP_WIDTH,
+                HELP_TIP_HEIGHT,
+                1,
+            );
         }
     }
 
