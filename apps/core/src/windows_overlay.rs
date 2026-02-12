@@ -133,14 +133,15 @@ mod imp {
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
-    const COLOR_HELP_TIP_BG: u32 = 0x00161616;
-    const COLOR_HELP_TIP_TEXT: u32 = 0x00CFCFCF;
-    const HELP_TIP_WIDTH: i32 = 220;
-    const HELP_TIP_HEIGHT: i32 = 18;
-    const HELP_TIP_RADIUS: i32 = 8;
+    const COLOR_HELP_TIP_BG: u32 = COLOR_PANEL_BG;
+    const COLOR_HELP_TIP_TEXT: u32 = COLOR_TEXT_SECONDARY;
+    const HELP_TIP_WIDTH: i32 = 196;
+    const HELP_TIP_HEIGHT: i32 = 26;
+    const HELP_TIP_RADIUS: i32 = 10;
+    const HELP_TIP_TEXT_PAD_X: i32 = 10;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
-    const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to configure hotkey";
+    const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -1116,6 +1117,10 @@ mod imp {
         }
 
         if let Some(state) = state_for(parent) {
+            if hwnd == state.help_tip_hwnd && message == WM_PAINT {
+                paint_help_tip(hwnd, state);
+                return 0;
+            }
             if message == WM_MOUSEMOVE {
                 if hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd {
                     set_help_hover_state(parent, state, true);
@@ -1269,9 +1274,6 @@ mod imp {
         let result = unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) };
         if hwnd == state.edit_hwnd && message == WM_PAINT {
             paint_edit_placeholder(hwnd, state);
-        }
-        if hwnd == state.help_tip_hwnd && message == WM_PAINT {
-            paint_help_tip_border(hwnd, state);
         }
         result
     }
@@ -1781,8 +1783,8 @@ mod imp {
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
         let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
-        let tip_left = (width - PANEL_MARGIN_X - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
-        let tip_top = (input_top + INPUT_HEIGHT + 6).min((height - HELP_TIP_HEIGHT - 4).max(4));
+        let tip_left = (help_left + HELP_ICON_SIZE - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
+        let tip_top = (help_top - HELP_TIP_HEIGHT - 6).max(6);
 
         unsafe {
             MoveWindow(
@@ -1947,32 +1949,62 @@ mod imp {
         }
     }
 
-    fn paint_help_tip_border(hwnd: HWND, state: &OverlayShellState) {
-        if state.help_tip_border_brush == 0 {
-            return;
-        }
-
-        let mut rect: RECT = unsafe { std::mem::zeroed() };
-        unsafe {
-            GetClientRect(hwnd, &mut rect);
-        }
-        let width = rect.right - rect.left;
-        let height = rect.bottom - rect.top;
-        if width <= 0 || height <= 0 {
+    fn paint_help_tip(hwnd: HWND, state: &OverlayShellState) {
+        if state.help_tip_brush == 0 || state.help_tip_border_brush == 0 {
             return;
         }
 
         unsafe {
-            let hdc = GetDC(hwnd);
+            let mut paint: PAINTSTRUCT = std::mem::zeroed();
+            let hdc = BeginPaint(hwnd, &mut paint);
             if hdc.is_null() {
                 return;
             }
+
+            let width = paint.rcPaint.right - paint.rcPaint.left;
+            let height = paint.rcPaint.bottom - paint.rcPaint.top;
+            if width <= 0 || height <= 0 {
+                EndPaint(hwnd, &paint);
+                return;
+            }
+
+            let bg_region =
+                CreateRoundRectRgn(0, 0, width + 1, height + 1, HELP_TIP_RADIUS, HELP_TIP_RADIUS);
+            FillRgn(hdc, bg_region, state.help_tip_brush as _);
+            DeleteObject(bg_region as _);
 
             let border_region =
                 CreateRoundRectRgn(0, 0, width + 1, height + 1, HELP_TIP_RADIUS, HELP_TIP_RADIUS);
             FrameRgn(hdc, border_region, state.help_tip_border_brush as _, 1, 1);
             DeleteObject(border_region as _);
-            ReleaseDC(hwnd, hdc);
+
+            let old_font = if state.help_tip_font != 0 {
+                SelectObject(hdc, state.help_tip_font as _)
+            } else {
+                std::ptr::null_mut()
+            };
+            SetBkMode(hdc, TRANSPARENT as i32);
+            SetTextColor(hdc, COLOR_HELP_TIP_TEXT);
+
+            let mut text_rect = RECT {
+                left: HELP_TIP_TEXT_PAD_X,
+                top: 0,
+                right: width - HELP_TIP_TEXT_PAD_X,
+                bottom: height,
+            };
+            let text = to_wide(&help_hint_text(state));
+            DrawTextW(
+                hdc,
+                text.as_ptr(),
+                -1,
+                &mut text_rect,
+                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+
+            if !old_font.is_null() {
+                SelectObject(hdc, old_font);
+            }
+            EndPaint(hwnd, &paint);
         }
     }
 
