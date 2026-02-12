@@ -169,24 +169,42 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         format!("[\n{roots}\n  ]")
     };
 
-    let text = format!(
-        concat!(
-            "{{\n",
-            "  // SwiftFind user config.\n",
-            "  // In most cases, only change `hotkey`, then restart SwiftFind.\n",
-            "  \"version\": {},\n",
-            "  \"hotkey\": {},\n",
-            "  // Optional: max results per query (valid range: 5-100).\n",
-            "  \"max_results\": {},\n",
-            "  // Optional: folders scanned for local files.\n",
-            "  \"discovery_roots\": {}\n",
-            "}}\n"
-        ),
-        cfg.version,
-        json_string(&cfg.hotkey),
-        cfg.max_results,
-        roots_section
-    );
+    let mut text = String::new();
+    text.push_str("{\n");
+    text.push_str("  // SwiftFind config (comments are allowed).\n");
+    text.push_str("  //\n");
+    text.push_str("  // Quick setup:\n");
+    text.push_str("  // 1) Keep exactly ONE `hotkey` line uncommented.\n");
+    text.push_str("  // 2) Save file.\n");
+    text.push_str("  // 3) Restart SwiftFind.\n");
+    text.push_str("  //\n");
+    text.push_str("  // Safer Windows-friendly hotkeys (uncomment one if you prefer):\n");
+
+    for option in &cfg.hotkey_recommended {
+        if option != &cfg.hotkey {
+            text.push_str("  // \"hotkey\": ");
+            text.push_str(&json_string(option));
+            text.push_str(",\n");
+        }
+    }
+
+    text.push_str("  // Avoid common OS-reserved/conflicting shortcuts like Win+..., Alt+Tab, Ctrl+Esc.\n");
+    text.push_str("  \"hotkey\": ");
+    text.push_str(&json_string(&cfg.hotkey));
+    text.push_str(",\n\n");
+
+    text.push_str("  // Optional tuning:\n");
+    text.push_str("  // Number of results shown per query (valid range: 5..100)\n");
+    text.push_str("  \"max_results\": ");
+    text.push_str(&cfg.max_results.to_string());
+    text.push_str(",\n\n");
+
+    text.push_str("  // Optional: folders scanned for local files.\n");
+    text.push_str("  // Add/remove paths as needed.\n");
+    text.push_str("  \"discovery_roots\": ");
+    text.push_str(&roots_section);
+    text.push('\n');
+    text.push_str("}\n");
 
     std::fs::write(path, text)?;
     Ok(())

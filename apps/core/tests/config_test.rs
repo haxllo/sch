@@ -133,8 +133,9 @@ fn writes_user_template_with_comments_and_loads_it() {
 
     swiftfind_core::config::write_user_template(&cfg, &config_path).unwrap();
     let raw = std::fs::read_to_string(&config_path).unwrap();
-    assert!(raw.contains("// SwiftFind user config."));
-    assert!(raw.contains("\"hotkey\""));
+    assert!(raw.contains("// SwiftFind config (comments are allowed)."));
+    assert!(raw.contains("\"hotkey\": \"Ctrl+Shift+Space\""));
+    assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
 
     let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
