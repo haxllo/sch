@@ -107,7 +107,9 @@ mod imp {
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
-    const INPUT_TEXT_RIGHT_INSET: i32 = 10;
+    const INPUT_TEXT_RIGHT_INSET: i32 = 34;
+    const HELP_ICON_SIZE: i32 = 14;
+    const HELP_ICON_RIGHT_INSET: i32 = 12;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
@@ -124,8 +126,12 @@ mod imp {
     const COLOR_SELECTION_ACCENT: u32 = 0x00343434;
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
+    const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
+    const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
+    const HOTKEY_HELP_TEXT: &str =
+        "Change hotkey: edit %APPDATA%\\SwiftFind\\config.json (key: hotkey), then restart SwiftFind.";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -174,7 +180,10 @@ mod imp {
         icon_brush: isize,
 
         status_is_error: bool,
+        help_hovered: bool,
+        help_status_visible: bool,
         results_visible: bool,
+        help_rect: RECT,
 
         hover_index: i32,
 
@@ -318,6 +327,10 @@ mod imp {
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
                 state.status_is_error = message.to_ascii_lowercase().contains("error");
+                state.help_status_visible = false;
+                if message.is_empty() {
+                    state.help_hovered = false;
+                }
                 let wide = to_wide(message);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -858,6 +871,17 @@ mod imp {
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
+            WM_MOUSEMOVE => {
+                if let Some(state) = state_for(hwnd) {
+                    let point = POINT {
+                        x: (lparam as u32 & 0xFFFF) as i16 as i32,
+                        y: ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32,
+                    };
+                    let hovered = point_in_rect(&point, &state.help_rect);
+                    set_help_hover_state(hwnd, state, hovered);
+                }
+                0
+            }
             WM_SIZE => {
                 if let Some(state) = state_for(hwnd) {
                     layout_children(hwnd, state);
@@ -946,6 +970,15 @@ mod imp {
         }
 
         if let Some(state) = state_for(parent) {
+            if message == WM_MOUSEMOVE {
+                let mut cursor = POINT { x: 0, y: 0 };
+                unsafe {
+                    GetCursorPos(&mut cursor);
+                    ScreenToClient(parent, &mut cursor);
+                }
+                let hovered = point_in_rect(&cursor, &state.help_rect);
+                set_help_hover_state(parent, state, hovered);
+            }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
                 let mut cursor = POINT { x: 0, y: 0 };
                 unsafe {
@@ -1548,7 +1581,7 @@ mod imp {
     }
 
 
-    fn layout_children(hwnd: HWND, state: &OverlayShellState) {
+    fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
@@ -1570,6 +1603,12 @@ mod imp {
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
+        state.help_rect = RECT {
+            left: PANEL_MARGIN_X + input_width - HELP_ICON_SIZE - HELP_ICON_RIGHT_INSET,
+            top: input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2,
+            right: PANEL_MARGIN_X + input_width - HELP_ICON_RIGHT_INSET,
+            bottom: input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2 + HELP_ICON_SIZE,
+        };
 
         unsafe {
             MoveWindow(
@@ -1720,6 +1759,45 @@ mod imp {
         }
     }
 
+    fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
+        point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
+    }
+
+    fn set_help_hover_state(hwnd: HWND, state: &mut OverlayShellState, hovered: bool) {
+        if state.help_hovered == hovered {
+            return;
+        }
+        state.help_hovered = hovered;
+
+        unsafe {
+            InvalidateRect(hwnd, &state.help_rect, 0);
+        }
+
+        if hovered {
+            let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
+            if status_len == 0 && !state.status_is_error {
+                state.help_status_visible = true;
+                let wide = to_wide(HOTKEY_HELP_TEXT);
+                unsafe {
+                    SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                }
+                layout_children(hwnd, state);
+            }
+            return;
+        }
+
+        if state.help_status_visible {
+            state.help_status_visible = false;
+            state.status_is_error = false;
+            unsafe {
+                SetWindowTextW(state.status_hwnd, to_wide("").as_ptr());
+                InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+            }
+            layout_children(hwnd, state);
+        }
+    }
+
     fn draw_panel_background(hwnd: HWND) {
         let Some(state) = state_for(hwnd) else {
             return;
@@ -1739,6 +1817,28 @@ mod imp {
                     CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
                 FrameRgn(hdc, border_region, state.border_brush as _, 1, 1);
                 DeleteObject(border_region as _);
+            }
+
+            if state.help_rect.right > state.help_rect.left && state.help_rect.bottom > state.help_rect.top {
+                let old_font = SelectObject(hdc, state.status_font as _);
+                SetBkMode(hdc, TRANSPARENT as i32);
+                SetTextColor(
+                    hdc,
+                    if state.help_hovered {
+                        COLOR_HELP_ICON_HOVER
+                    } else {
+                        COLOR_HELP_ICON
+                    },
+                );
+                let mut help_rect = state.help_rect;
+                DrawTextW(
+                    hdc,
+                    to_wide("?").as_ptr(),
+                    -1,
+                    &mut help_rect,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                );
+                SelectObject(hdc, old_font);
             }
             EndPaint(hwnd, &paint);
         }
