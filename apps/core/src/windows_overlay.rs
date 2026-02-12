@@ -42,15 +42,15 @@ mod imp {
     const LIST_CLASS: &str = "LISTBOX";
     const STATUS_CLASS: &str = "STATIC";
 
-    const WINDOW_WIDTH: i32 = 640;
-    const COMPACT_HEIGHT: i32 = 92;
-    const PANEL_MARGIN_X: i32 = 16;
-    const PANEL_MARGIN_TOP: i32 = 14;
-    const PANEL_MARGIN_BOTTOM: i32 = 10;
-    const INPUT_HEIGHT: i32 = 38;
-    const STATUS_HEIGHT: i32 = 20;
-    const ROW_GAP: i32 = 8;
-    const ROW_HEIGHT: i32 = 34;
+    const WINDOW_WIDTH: i32 = 560;
+    const COMPACT_HEIGHT: i32 = 84;
+    const PANEL_MARGIN_X: i32 = 14;
+    const PANEL_MARGIN_TOP: i32 = 12;
+    const PANEL_MARGIN_BOTTOM: i32 = 8;
+    const INPUT_HEIGHT: i32 = 34;
+    const STATUS_HEIGHT: i32 = 18;
+    const ROW_GAP: i32 = 6;
+    const ROW_HEIGHT: i32 = 32;
     const MAX_VISIBLE_ROWS: usize = 7;
 
     const CONTROL_ID_INPUT: usize = 1001;
@@ -78,6 +78,7 @@ mod imp {
     const COLOR_TEXT_SECONDARY: u32 = 0x00B7ADA3;
     const COLOR_TEXT_ERROR: u32 = 0x006766F6;
     const COLOR_SELECTION: u32 = 0x004F4032;
+    const COLOR_SELECTION_BORDER: u32 = 0x005A4A39;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -102,7 +103,8 @@ mod imp {
         list_prev_proc: isize,
 
         input_font: isize,
-        list_font: isize,
+        title_font: isize,
+        meta_font: isize,
         status_font: isize,
 
         panel_brush: isize,
@@ -622,8 +624,9 @@ mod imp {
                     state.results_brush = unsafe { CreateSolidBrush(COLOR_RESULTS_BG) } as isize;
 
                     state.input_font = create_font(-22, FW_SEMIBOLD as i32);
-                    state.list_font = create_font(-16, FW_MEDIUM as i32);
-                    state.status_font = create_font(-14, FW_MEDIUM as i32);
+                    state.title_font = create_font(-15, FW_SEMIBOLD as i32);
+                    state.meta_font = create_font(-14, FW_MEDIUM as i32);
+                    state.status_font = create_font(-13, FW_MEDIUM as i32);
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -685,7 +688,7 @@ mod imp {
 
                     unsafe {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
-                        SendMessageW(state.list_hwnd, WM_SETFONT, state.list_font as usize, 1);
+                        SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
 
                         let tab_stop = [268_i32];
@@ -942,13 +945,13 @@ mod imp {
             FillRect(dis.hDC, &dis.rcItem, row_brush);
             DeleteObject(row_brush as _);
 
-            let old_font = SelectObject(dis.hDC, state.list_font as _);
+            let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
 
             let mut title_rect = dis.rcItem;
-            title_rect.left += 10;
-            title_rect.right = title_rect.left + 250;
+            title_rect.left += 12;
+            title_rect.right = title_rect.left + 214;
             DrawTextW(
                 dis.hDC,
                 to_wide(&title).as_ptr(),
@@ -957,10 +960,11 @@ mod imp {
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
 
+            SelectObject(dis.hDC, state.meta_font as _);
             SetTextColor(dis.hDC, COLOR_TEXT_SECONDARY);
             let mut path_rect = dis.rcItem;
-            path_rect.left = title_rect.right + 10;
-            path_rect.right -= 10;
+            path_rect.left = title_rect.right + 8;
+            path_rect.right -= 12;
             DrawTextW(
                 dis.hDC,
                 to_wide(&path).as_ptr(),
@@ -968,6 +972,12 @@ mod imp {
                 &mut path_rect,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
+
+            if selected_flag {
+                let border_brush = CreateSolidBrush(COLOR_SELECTION_BORDER);
+                FrameRect(dis.hDC, &dis.rcItem, border_brush);
+                DeleteObject(border_brush as _);
+            }
 
             SelectObject(dis.hDC, old_font);
         }
@@ -1109,8 +1119,11 @@ mod imp {
             if state.input_font != 0 {
                 DeleteObject(state.input_font as _);
             }
-            if state.list_font != 0 {
-                DeleteObject(state.list_font as _);
+            if state.title_font != 0 {
+                DeleteObject(state.title_font as _);
+            }
+            if state.meta_font != 0 {
+                DeleteObject(state.meta_font as _);
             }
             if state.status_font != 0 {
                 DeleteObject(state.status_font as _);
