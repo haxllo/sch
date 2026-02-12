@@ -28,7 +28,7 @@ mod imp {
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
-        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, GWLP_USERDATA,
+        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
@@ -77,6 +77,8 @@ mod imp {
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
     const EM_SETCUEBANNER: u32 = 0x1501;
+    const EM_GETRECT: u32 = 0x00B2;
+    const EM_SETRECTNP: u32 = 0x00B4;
 
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
@@ -675,7 +677,11 @@ mod imp {
                             0,
                             to_wide(INPUT_CLASS).as_ptr(),
                             to_wide("").as_ptr(),
-                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL as u32,
+                            WS_CHILD
+                                | WS_VISIBLE
+                                | WS_TABSTOP
+                                | ES_AUTOHSCROLL as u32
+                                | ES_MULTILINE as u32,
                             0,
                             0,
                             0,
@@ -1065,10 +1071,15 @@ mod imp {
 
         let mut text_rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
-            GetClientRect(edit_hwnd, &mut text_rect);
+            SendMessageW(edit_hwnd, EM_GETRECT, 0, &mut text_rect as *mut RECT as LPARAM);
         }
-        text_rect.left += 10;
-        text_rect.right -= 10;
+        if text_rect.right <= text_rect.left || text_rect.bottom <= text_rect.top {
+            unsafe {
+                GetClientRect(edit_hwnd, &mut text_rect);
+            }
+            text_rect.left += 10;
+            text_rect.right -= 10;
+        }
         if text_rect.right <= text_rect.left {
             return;
         }
@@ -1429,6 +1440,7 @@ mod imp {
                 INPUT_HEIGHT,
                 1,
             );
+            apply_edit_text_rect(state.edit_hwnd);
             if status_visible {
                 ShowWindow(state.status_hwnd, SW_SHOW);
                 MoveWindow(
@@ -1451,6 +1463,42 @@ mod imp {
                 1,
             );
             apply_list_rounded_corners(state.list_hwnd, list_width, list_height);
+        }
+    }
+
+    fn apply_edit_text_rect(edit_hwnd: HWND) {
+        let mut client: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(edit_hwnd, &mut client);
+        }
+        let width = (client.right - client.left).max(0);
+        let height = (client.bottom - client.top).max(0);
+        if width <= 0 || height <= 0 {
+            return;
+        }
+
+        let mut text_rect = RECT {
+            left: 10,
+            top: 7,
+            right: width - 10,
+            bottom: height - 7,
+        };
+        if text_rect.right <= text_rect.left {
+            text_rect.right = width;
+        }
+        if text_rect.bottom <= text_rect.top {
+            text_rect.top = 0;
+            text_rect.bottom = height;
+        }
+
+        unsafe {
+            SendMessageW(
+                edit_hwnd,
+                EM_SETRECTNP,
+                0,
+                (&text_rect as *const RECT) as LPARAM,
+            );
+            InvalidateRect(edit_hwnd, std::ptr::null(), 1);
         }
     }
 
