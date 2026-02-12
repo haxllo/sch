@@ -22,7 +22,8 @@ mod imp {
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-        LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS, LoadCursorW,
+        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS,
+        LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
@@ -31,10 +32,10 @@ mod imp {
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
-        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
-        WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
-        WS_VSCROLL,
+        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+        WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
+        WS_VISIBLE, WS_VSCROLL,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -65,17 +66,19 @@ mod imp {
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
 
     const TIMER_SELECTION_ANIM: usize = 0xBEEF;
+    const TIMER_SCROLL_ANIM: usize = 0xBEF0;
 
     const OVERLAY_ANIM_MS: u32 = 140;
     const RESULTS_ANIM_MS: u32 = 140;
     const SELECTION_ANIM_MS: u64 = 90;
+    const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 10;
 
     // Required visual colors.
-    const COLOR_PANEL_BG: u32 = 0x0029231F; // #1F2329 (BGR)
-    const COLOR_PANEL_BORDER: u32 = 0x00453B35; // #353B45 (BGR)
-    const COLOR_INPUT_BG: u32 = 0x00221E1A;
-    const COLOR_RESULTS_BG: u32 = 0x00211C18;
+    const COLOR_PANEL_BG: u32 = 0x001C1C1C; // #1C1C1C (BGR)
+    const COLOR_PANEL_BORDER: u32 = 0x003E3E3E; // #3E3E3E (BGR)
+    const COLOR_INPUT_BG: u32 = 0x001C1C1C;
+    const COLOR_RESULTS_BG: u32 = 0x00171717;
     const COLOR_TEXT_PRIMARY: u32 = 0x00ECE7E1;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B7ADA3;
     const COLOR_TEXT_ERROR: u32 = 0x006766F6;
@@ -120,6 +123,10 @@ mod imp {
         selection_prev: i32,
         selection_current: i32,
         selection_anim_start: Option<Instant>,
+
+        scroll_from_top: i32,
+        scroll_to_top: i32,
+        scroll_anim_start: Option<Instant>,
     }
 
     impl NativeOverlayShell {
@@ -273,6 +280,9 @@ mod imp {
                     state.selection_prev = -1;
                     state.selection_current = -1;
                     state.selection_anim_start = None;
+                    state.scroll_anim_start = None;
+                    state.scroll_from_top = 0;
+                    state.scroll_to_top = 0;
                 }
             }
         }
@@ -297,6 +307,7 @@ mod imp {
                 state.selection_prev = previous as i32;
                 state.selection_current = clamped as i32;
                 state.selection_anim_start = Some(Instant::now());
+                begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
                 unsafe {
                     SetTimer(self.hwnd, TIMER_SELECTION_ANIM, 16, None);
                     InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
@@ -813,6 +824,16 @@ mod imp {
                         }
                     }
                 }
+                if wparam == TIMER_SCROLL_ANIM {
+                    if let Some(state) = state_for(hwnd) {
+                        let running = scroll_animation_tick(state);
+                        if !running {
+                            unsafe {
+                                KillTimer(hwnd, TIMER_SCROLL_ANIM);
+                            }
+                        }
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -875,6 +896,29 @@ mod imp {
                         SendMessageW(hwnd, LB_SETCURSEL, row, 0);
                     }
                 }
+            }
+            if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
+                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
+                if count > 0 {
+                    let current = unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) };
+                    let base = if current >= 0 { current as i32 } else { 0 };
+                    let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
+                    let mut notches = (wheel as i32) / 120;
+                    if notches == 0 && wheel != 0 {
+                        notches = if wheel > 0 { 1 } else { -1 };
+                    }
+                    if notches != 0 {
+                        let next = (base - notches).clamp(0, count as i32 - 1);
+                        unsafe {
+                            SendMessageW(hwnd, LB_SETCURSEL, next as usize, 0);
+                        }
+                        begin_scroll_animation(parent, state, next, count as i32);
+                        unsafe {
+                            InvalidateRect(hwnd, std::ptr::null(), 1);
+                        }
+                    }
+                }
+                return 0;
             }
         }
 
@@ -1036,6 +1080,83 @@ mod imp {
         if start.elapsed().as_millis() as u64 >= SELECTION_ANIM_MS {
             state.selection_anim_start = None;
             state.selection_prev = -1;
+            return false;
+        }
+        true
+    }
+
+    fn begin_scroll_animation(
+        overlay_hwnd: HWND,
+        state: &mut OverlayShellState,
+        selected_index: i32,
+        count: i32,
+    ) {
+        if count <= 0 {
+            return;
+        }
+
+        let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+        let target_top = target_top_index_for_selection(state.list_hwnd, selected_index, count, current_top);
+
+        if target_top == current_top {
+            state.scroll_anim_start = None;
+            state.scroll_from_top = current_top;
+            state.scroll_to_top = target_top;
+            return;
+        }
+
+        state.scroll_from_top = current_top;
+        state.scroll_to_top = target_top;
+        state.scroll_anim_start = Some(Instant::now());
+        unsafe {
+            SetTimer(overlay_hwnd, TIMER_SCROLL_ANIM, ANIM_FRAME_MS as u32, None);
+        }
+    }
+
+    fn target_top_index_for_selection(
+        list_hwnd: HWND,
+        selected_index: i32,
+        count: i32,
+        current_top: i32,
+    ) -> i32 {
+        let visible_rows = visible_row_capacity(list_hwnd);
+        let mut target_top = current_top;
+
+        if selected_index < current_top {
+            target_top = selected_index;
+        } else if selected_index >= current_top + visible_rows {
+            target_top = selected_index - visible_rows + 1;
+        }
+
+        let max_top = (count - visible_rows).max(0);
+        target_top.clamp(0, max_top)
+    }
+
+    fn visible_row_capacity(list_hwnd: HWND) -> i32 {
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(list_hwnd, &mut rect);
+        }
+        let height = (rect.bottom - rect.top).max(0);
+        let rows = height / ROW_HEIGHT;
+        rows.max(1)
+    }
+
+    fn scroll_animation_tick(state: &mut OverlayShellState) -> bool {
+        let Some(start) = state.scroll_anim_start else {
+            return false;
+        };
+
+        let elapsed = start.elapsed().as_millis() as u64;
+        let t = (elapsed as f32 / SCROLL_ANIM_MS as f32).clamp(0.0, 1.0);
+        let eased = ease_out(t);
+        let next_top = lerp_i32(state.scroll_from_top, state.scroll_to_top, eased);
+        unsafe {
+            SendMessageW(state.list_hwnd, LB_SETTOPINDEX, next_top as usize, 0);
+        }
+
+        if t >= 1.0 {
+            state.scroll_anim_start = None;
             return false;
         }
         true
