@@ -43,6 +43,7 @@
 
 ## MVP Smoke and Performance Baseline
 
-- E2E smoke path placeholder added: `tests/e2e/hotkey-search-launch.spec.ts`
-- Perf baseline test added: `tests/perf/query_latency_test.rs`
-- Current warm query p95 baseline: `12.4ms` (target `<= 15ms`)
+- UI flow smoke test added: `tests/e2e/hotkey-search-launch.spec.ts`
+- Perf latency test added: `tests/perf/query_latency_test.rs`
+- Rust integration entrypoint for perf test: `apps/core/tests/perf_query_latency_test.rs`
+- Warm query p95 is measured at test runtime against a 10k-item warm dataset and must stay `<= 15ms`

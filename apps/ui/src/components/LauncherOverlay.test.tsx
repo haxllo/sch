@@ -4,9 +4,9 @@ import { describe, it, expect } from 'vitest'
 import { LauncherOverlay } from './LauncherOverlay'
 
 describe('LauncherOverlay', () => {
-  it('renders input with autofocus', () => {
+  it('focuses the search input on open', () => {
     render(<LauncherOverlay query="" results={[]} />)
     const input = screen.getByRole('textbox')
-    expect(input).toHaveAttribute('autofocus')
+    expect(input).toHaveFocus()
   })
 })
