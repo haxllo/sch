@@ -27,7 +27,9 @@ if (Test-Path $stageDir) { Remove-Item -Recurse -Force $stageDir }
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "bin") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "assets") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "docs") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "scripts") | Out-Null
 
 cargo build -p swiftfind-core --release
 
@@ -37,8 +39,13 @@ if (-not (Test-Path $coreExe)) {
 }
 
 Copy-Item $coreExe (Join-Path $stageDir "bin/swiftfind-core.exe") -Force
+if (Test-Path "apps/assets/swiftfinder.svg") {
+  Copy-Item "apps/assets/swiftfinder.svg" (Join-Path $stageDir "assets/swiftfinder.svg") -Force
+}
 Copy-Item "docs/engineering/windows-runtime-validation-checklist.md" (Join-Path $stageDir "docs/windows-runtime-validation-checklist.md") -Force
 Copy-Item "docs/releases/windows-milestone-release-notes-template.md" (Join-Path $stageDir "docs/release-notes-template.md") -Force
+Copy-Item "scripts/windows/install-swiftfind.ps1" (Join-Path $stageDir "scripts/install-swiftfind.ps1") -Force
+Copy-Item "scripts/windows/uninstall-swiftfind.ps1" (Join-Path $stageDir "scripts/uninstall-swiftfind.ps1") -Force
 
 $manifest = [ordered]@{
   artifact = $artifactName
@@ -48,8 +55,11 @@ $manifest = [ordered]@{
   os = "windows-x64"
   files = @(
     "bin/swiftfind-core.exe",
+    "assets/swiftfinder.svg",
     "docs/windows-runtime-validation-checklist.md",
-    "docs/release-notes-template.md"
+    "docs/release-notes-template.md",
+    "scripts/install-swiftfind.ps1",
+    "scripts/uninstall-swiftfind.ps1"
   )
 }
 

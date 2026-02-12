@@ -2,27 +2,36 @@ use crate::config::{self, ConfigError};
 use crate::core_service::{CoreService, LaunchTarget, ServiceError};
 use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
-use crate::overlay_state::{HotkeyAction, OverlayState};
-#[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, HotkeyRegistration};
 #[cfg(target_os = "windows")]
-use crate::windows_overlay::{NativeOverlayShell, OverlayEvent, OverlayRow};
+use crate::overlay_state::{HotkeyAction, OverlayState};
+#[cfg(target_os = "windows")]
+use crate::windows_overlay::{
+    is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
+    NativeOverlayShell, OverlayEvent, OverlayRow,
+};
 
 #[derive(Debug)]
 pub enum RuntimeError {
+    Args(String),
     Config(ConfigError),
     Service(ServiceError),
     Hotkey(HotkeyRuntimeError),
     Overlay(String),
+    Startup(crate::startup::StartupError),
+    Io(std::io::Error),
 }
 
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Args(error) => write!(f, "argument error: {error}"),
             Self::Config(error) => write!(f, "config error: {error}"),
             Self::Service(error) => write!(f, "service error: {error}"),
             Self::Hotkey(error) => write!(f, "hotkey runtime error: {error:?}"),
             Self::Overlay(error) => write!(f, "overlay error: {error}"),
+            Self::Startup(error) => write!(f, "startup error: {error}"),
+            Self::Io(error) => write!(f, "io error: {error}"),
         }
     }
 }
@@ -47,7 +56,89 @@ impl From<HotkeyRuntimeError> for RuntimeError {
     }
 }
 
+impl From<crate::startup::StartupError> for RuntimeError {
+    fn from(value: crate::startup::StartupError) -> Self {
+        Self::Startup(value)
+    }
+}
+
+impl From<std::io::Error> for RuntimeError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeCommand {
+    Run,
+    Status,
+    Quit,
+    Restart,
+    EnsureConfig,
+    SyncStartup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeOptions {
+    pub command: RuntimeCommand,
+    pub background: bool,
+}
+
+impl Default for RuntimeOptions {
+    fn default() -> Self {
+        Self {
+            command: RuntimeCommand::Run,
+            background: false,
+        }
+    }
+}
+
+pub fn parse_cli_args(args: &[String]) -> Result<RuntimeOptions, String> {
+    let mut options = RuntimeOptions::default();
+    for arg in args {
+        match arg.as_str() {
+            "--background" => options.background = true,
+            "--foreground" => options.background = false,
+            "--status" => options.command = RuntimeCommand::Status,
+            "--quit" => options.command = RuntimeCommand::Quit,
+            "--restart" => options.command = RuntimeCommand::Restart,
+            "--ensure-config" => options.command = RuntimeCommand::EnsureConfig,
+            "--sync-startup" => options.command = RuntimeCommand::SyncStartup,
+            "--help" | "-h" => {
+                return Err(
+                    "usage: swiftfind-core [--background|--foreground] [--status|--quit|--restart|--ensure-config|--sync-startup]".to_string(),
+                )
+            }
+            unknown => return Err(format!("unknown argument: {unknown}")),
+        }
+    }
+
+    if options.command != RuntimeCommand::Run && options.background {
+        return Err("background mode is only valid with normal run mode".to_string());
+    }
+
+    Ok(options)
+}
+
 pub fn run() -> Result<(), RuntimeError> {
+    run_with_options(RuntimeOptions::default())
+}
+
+pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
+    #[cfg(target_os = "windows")]
+    if options.background && options.command == RuntimeCommand::Run {
+        return spawn_background_process();
+    }
+
+    match options.command {
+        RuntimeCommand::Status => return command_status(),
+        RuntimeCommand::Quit => return command_quit(),
+        RuntimeCommand::Restart => return command_restart(),
+        RuntimeCommand::EnsureConfig => return command_ensure_config(),
+        RuntimeCommand::SyncStartup => return command_sync_startup(),
+        RuntimeCommand::Run => {}
+    }
+
     let config = config::load(None)?;
     if !config.config_path.exists() {
         config::write_user_template(&config, &config.config_path)?;
@@ -70,12 +161,19 @@ pub fn run() -> Result<(), RuntimeError> {
 
     #[cfg(target_os = "windows")]
     {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Err(error) = crate::startup::set_enabled(config.launch_at_startup, &exe) {
+                eprintln!("[swiftfind-core] startup sync warning: {error}");
+            }
+        }
+
         let _single_instance = match acquire_single_instance_guard() {
             Ok(guard) => guard,
             Err(error) => return Err(RuntimeError::Overlay(error)),
         };
         if _single_instance.is_none() {
-            println!("[swiftfind-core] runtime already active; exiting duplicate process");
+            let _ = signal_existing_instance_show();
+            println!("[swiftfind-core] runtime already active; signaled existing instance");
             return Ok(());
         }
 
@@ -117,14 +215,23 @@ pub fn run() -> Result<(), RuntimeError> {
                         }
                     }
                 }
+                OverlayEvent::ExternalShow => {
+                    overlay_state.set_visible(overlay.is_visible());
+                    overlay.show_and_focus();
+                    if overlay.query_text().trim().is_empty() {
+                        set_idle_overlay_state(&overlay);
+                    }
+                }
+                OverlayEvent::ExternalQuit => {
+                    overlay.hide_now();
+                    unsafe {
+                        windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
+                    }
+                }
                 OverlayEvent::Escape => {
                     if overlay_state.on_escape() {
                         overlay.hide_now();
-                        reset_overlay_session(
-                            &overlay,
-                            &mut current_results,
-                            &mut selected_index,
-                        );
+                        reset_overlay_session(&overlay, &mut current_results, &mut selected_index);
                     }
                 }
                 OverlayEvent::QueryChanged(query) => {
@@ -164,11 +271,8 @@ pub fn run() -> Result<(), RuntimeError> {
                         return;
                     }
 
-                    selected_index = next_selection_index(
-                        selected_index,
-                        current_results.len(),
-                        direction,
-                    );
+                    selected_index =
+                        next_selection_index(selected_index, current_results.len(), direction);
                     overlay.set_selected_index(selected_index);
                 }
                 OverlayEvent::Submit => {
@@ -208,6 +312,115 @@ pub fn run() -> Result<(), RuntimeError> {
         println!("[swiftfind-core] non-windows runtime mode: no global hotkey loop");
         Ok(())
     }
+}
+
+fn command_ensure_config() -> Result<(), RuntimeError> {
+    let cfg = config::load(None)?;
+    if !cfg.config_path.exists() {
+        config::write_user_template(&cfg, &cfg.config_path)?;
+        println!(
+            "[swiftfind-core] wrote user config template to {}",
+            cfg.config_path.display()
+        );
+    }
+    println!(
+        "[swiftfind-core] config ready at {}",
+        cfg.config_path.display()
+    );
+    Ok(())
+}
+
+fn command_sync_startup() -> Result<(), RuntimeError> {
+    #[cfg(target_os = "windows")]
+    {
+        let cfg = config::load(None)?;
+        let exe = std::env::current_exe()?;
+        crate::startup::set_enabled(cfg.launch_at_startup, &exe)?;
+        println!(
+            "[swiftfind-core] startup registration synced: enabled={}",
+            cfg.launch_at_startup
+        );
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        println!("[swiftfind-core] startup sync is unsupported on this platform");
+        Ok(())
+    }
+}
+
+fn command_status() -> Result<(), RuntimeError> {
+    #[cfg(target_os = "windows")]
+    {
+        let running = is_instance_window_present();
+        println!(
+            "[swiftfind-core] status: {}",
+            if running { "running" } else { "stopped" }
+        );
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        println!("[swiftfind-core] status: unsupported on this platform");
+        Ok(())
+    }
+}
+
+fn command_quit() -> Result<(), RuntimeError> {
+    #[cfg(target_os = "windows")]
+    {
+        let signaled = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
+        println!(
+            "[swiftfind-core] quit signal {}",
+            if signaled {
+                "sent"
+            } else {
+                "skipped (not running)"
+            }
+        );
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        println!("[swiftfind-core] quit is unsupported on this platform");
+        Ok(())
+    }
+}
+
+fn command_restart() -> Result<(), RuntimeError> {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
+        let start = std::time::Instant::now();
+        while is_instance_window_present() && start.elapsed() < std::time::Duration::from_secs(3) {
+            std::thread::sleep(std::time::Duration::from_millis(120));
+        }
+        return run_with_options(RuntimeOptions::default());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        run_with_options(RuntimeOptions::default())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_background_process() -> Result<(), RuntimeError> {
+    use std::os::windows::process::CommandExt;
+
+    let exe = std::env::current_exe()?;
+    let mut command = std::process::Command::new(exe);
+    command.arg("--foreground");
+    command.creation_flags(0x00000008 | 0x00000200 | 0x08000000);
+    command.stdin(std::process::Stdio::null());
+    command.stdout(std::process::Stdio::null());
+    command.stderr(std::process::Stdio::null());
+    command.spawn()?;
+    println!("[swiftfind-core] background process started");
+    Ok(())
 }
 
 fn runtime_mode() -> &'static str {
@@ -254,7 +467,10 @@ fn abbreviate_path(path: &str) -> String {
     }
 
     let normalized = trimmed.replace('/', "\\");
-    let parts: Vec<&str> = normalized.split('\\').filter(|segment| !segment.is_empty()).collect();
+    let parts: Vec<&str> = normalized
+        .split('\\')
+        .filter(|segment| !segment.is_empty())
+        .collect();
     if parts.is_empty() {
         return normalized;
     }
@@ -393,7 +609,10 @@ fn launch_overlay_selection(
 
 #[cfg(test)]
 mod tests {
-    use super::{launch_overlay_selection, next_selection_index, search_overlay_results};
+    use super::{
+        launch_overlay_selection, next_selection_index, parse_cli_args, search_overlay_results,
+        RuntimeCommand, RuntimeOptions,
+    };
     use crate::config::Config;
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
@@ -475,7 +694,8 @@ mod tests {
             .expect("item should upsert");
 
         let results = vec![item];
-        let error = launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
+        let error =
+            launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));
     }
@@ -512,5 +732,33 @@ mod tests {
         assert_eq!(next_selection_index(2, 3, 1), 2);
         assert_eq!(next_selection_index(1, 3, 0), 1);
         assert_eq!(next_selection_index(5, 3, 0), 2);
+    }
+
+    #[test]
+    fn parses_background_run_args() {
+        let args = vec!["--background".to_string()];
+        let options = parse_cli_args(&args).expect("args should parse");
+        assert_eq!(
+            options,
+            RuntimeOptions {
+                command: RuntimeCommand::Run,
+                background: true,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_lifecycle_commands() {
+        let args = vec!["--status".to_string()];
+        let options = parse_cli_args(&args).expect("status should parse");
+        assert_eq!(options.command, RuntimeCommand::Status);
+        assert!(!options.background);
+    }
+
+    #[test]
+    fn rejects_background_with_non_run_commands() {
+        let args = vec!["--quit".to_string(), "--background".to_string()];
+        let error = parse_cli_args(&args).expect_err("invalid combination should fail");
+        assert!(error.contains("background mode"));
     }
 }

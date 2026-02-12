@@ -30,11 +30,37 @@ Expected outputs:
 ## Included Payload
 
 - `bin/swiftfind-core.exe`
+- `assets/swiftfinder.svg`
 - `docs/windows-runtime-validation-checklist.md`
 - `docs/release-notes-template.md`
+- `scripts/install-swiftfind.ps1`
+- `scripts/uninstall-swiftfind.ps1`
 
 ## Installer-Prep Notes
 
 - This milestone prepares a deterministic zip payload and manifest.
 - Installer generation (MSI/EXE) can consume the staging directory directly.
 - Keep staging layout stable to avoid installer script churn.
+
+## Local Install / Uninstall Commands
+
+Run on Windows PowerShell:
+
+```powershell
+scripts/windows/install-swiftfind.ps1
+```
+
+Optional flags:
+
+- `-SkipBuild` (use existing release binary)
+- `-StartAfterInstall:$false` (install only)
+
+Uninstall:
+
+```powershell
+scripts/windows/uninstall-swiftfind.ps1
+```
+
+Optional:
+
+- `-PurgeUserData` (also removes `%APPDATA%\SwiftFind`)

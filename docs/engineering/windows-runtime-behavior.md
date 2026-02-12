@@ -35,6 +35,21 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - hover-driven row emphasis (no hard selected border)
    - lightweight show/hide and results expansion animations with smooth scroll behavior
 
+## Runtime Host and Lifecycle
+
+- `--background`: starts detached background runtime process.
+- `--foreground`: explicit attached mode (primarily for debugging).
+- `--status`: reports whether an existing instance is running.
+- `--quit`: signals existing instance to close.
+- `--restart`: signals existing instance to close, then starts runtime again.
+- `--ensure-config`: creates config template if missing.
+- `--sync-startup`: applies `launch_at_startup` from config to Windows Run key.
+
+Single-instance behavior:
+
+- Mutex guard enforces one active runtime.
+- Duplicate launches signal existing instance to show/focus overlay instead of creating a second hotkey owner.
+
 Known limitations in this milestone:
 
 - Launcher is native Win32 shell (not a full React/WebView overlay).

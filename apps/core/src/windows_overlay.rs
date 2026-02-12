@@ -6,48 +6,49 @@ mod imp {
     use std::sync::OnceLock;
     use std::time::Instant;
 
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
+    use windows_sys::Win32::Foundation::{
+        GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
+    };
+    use windows_sys::Win32::Graphics::Gdi::{
+        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
+        DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
+        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, ScreenToClient,
+        SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
+        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_MEDIUM, FW_SEMIBOLD, HDC, OPAQUE,
+        OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
-    use windows_sys::Win32::Graphics::Gdi::{
-        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FillRgn, FrameRgn, GetDC, GetTextExtentPoint32W, GetTextMetricsW, HDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
-        SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
-        DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
-        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT, TextOutW,
-        TEXTMETRICW,
-    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+    use windows_sys::Win32::UI::Controls::{
+        DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
-    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
+    use windows_sys::Win32::UI::Shell::{
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
-        DestroyIcon, DI_NORMAL, DrawIconEx,
-        GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
-        GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-        HideCaret,
-        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
-        LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
-        LB_SETTOPINDEX, LoadCursorW, SetCursor,
-        MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
-        SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
-        SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
-        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, IDC_HAND, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
-        LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
-        SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
-        WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
-        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SETFOCUS, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
-        WNDCLASSW, WS_CHILD,
-        WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP,
-        WS_VISIBLE,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
+        DrawIconEx, FindWindowW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
+        GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+        GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
+        PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
+        SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
+        CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
+        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
+        LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
+        LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
+        LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
+        SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
+        WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
+        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
+        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN,
+        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -94,6 +95,8 @@ mod imp {
     const SWIFTFIND_WM_MOVE_UP: u32 = WM_APP + 3;
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
+    const SWIFTFIND_WM_EXTERNAL_SHOW: u32 = WM_APP + 16;
+    const SWIFTFIND_WM_EXTERNAL_QUIT: u32 = WM_APP + 17;
     const EM_GETRECT: u32 = 0x00B2;
     const EM_SETRECTNP: u32 = 0x00B4;
 
@@ -166,6 +169,8 @@ mod imp {
         MoveSelection(i32),
         Submit,
         Escape,
+        ExternalShow,
+        ExternalQuit,
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -415,7 +420,8 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 let trimmed = message.trim();
                 let status_text = trimmed;
-                state.status_is_error = !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
+                state.status_is_error =
+                    !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
                 state.help_tip_visible = false;
                 unsafe {
                     ShowWindow(state.help_tip_hwnd, SW_HIDE);
@@ -611,11 +617,15 @@ mod imp {
 
                 match msg.message {
                     WM_HOTKEY => on_event(OverlayEvent::Hotkey(msg.wParam as i32)),
-                    SWIFTFIND_WM_QUERY_CHANGED => on_event(OverlayEvent::QueryChanged(self.query_text())),
+                    SWIFTFIND_WM_QUERY_CHANGED => {
+                        on_event(OverlayEvent::QueryChanged(self.query_text()))
+                    }
                     SWIFTFIND_WM_MOVE_UP => on_event(OverlayEvent::MoveSelection(-1)),
                     SWIFTFIND_WM_MOVE_DOWN => on_event(OverlayEvent::MoveSelection(1)),
                     SWIFTFIND_WM_SUBMIT => on_event(OverlayEvent::Submit),
                     SWIFTFIND_WM_ESCAPE => on_event(OverlayEvent::Escape),
+                    SWIFTFIND_WM_EXTERNAL_SHOW => on_event(OverlayEvent::ExternalShow),
+                    SWIFTFIND_WM_EXTERNAL_QUIT => on_event(OverlayEvent::ExternalQuit),
                     _ => {}
                 }
 
@@ -714,7 +724,14 @@ mod imp {
             }
 
             if duration_ms == 0 {
-                apply_window_state(self.hwnd, rect.left, rect.top, rect.right - rect.left, target_height, 255);
+                apply_window_state(
+                    self.hwnd,
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    target_height,
+                    255,
+                );
                 return;
             }
 
@@ -757,7 +774,14 @@ mod imp {
             let start_left = final_left + (final_width - start_width) / 2;
             let start_top = final_top + (final_height - start_height) / 2;
 
-            apply_window_state(self.hwnd, start_left, start_top, start_width, start_height, 0);
+            apply_window_state(
+                self.hwnd,
+                start_left,
+                start_top,
+                start_width,
+                start_height,
+                0,
+            );
             unsafe {
                 ShowWindow(self.hwnd, SW_SHOW);
             }
@@ -954,7 +978,12 @@ mod imp {
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
-                        SendMessageW(state.help_tip_hwnd, WM_SETFONT, state.help_tip_font as usize, 1);
+                        SendMessageW(
+                            state.help_tip_hwnd,
+                            WM_SETFONT,
+                            state.help_tip_font as usize,
+                            1,
+                        );
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
                             GWLP_WNDPROC,
@@ -1217,7 +1246,8 @@ mod imp {
                     KillTimer(hwnd, TIMER_HELP_HOVER);
                     KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
                 }
-                let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
+                let state_ptr =
+                    unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
                 if !state_ptr.is_null() {
                     unsafe {
                         cleanup_state_resources(&mut *state_ptr);
@@ -1337,13 +1367,14 @@ mod imp {
                     if !outside && row >= 0 && row < count {
                         unsafe {
                             SendMessageW(hwnd, LB_SETCURSEL, row as usize, 0);
-                        PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
+                            PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
                         }
                     }
                 }
                 return 0;
             }
-            if (message == WM_LBUTTONUP || message == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN)
+            if (message == WM_LBUTTONUP
+                || message == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN)
                 && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
             {
                 if let Err(error) = open_help_config_file(state) {
@@ -1411,7 +1442,9 @@ mod imp {
         }
 
         let prev_proc = unsafe {
-            std::mem::transmute::<isize, windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC>(prev_ptr)
+            std::mem::transmute::<isize, windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC>(
+                prev_ptr,
+            )
         };
         let result = unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) };
         if hwnd == state.edit_hwnd && message == WM_PAINT {
@@ -1428,7 +1461,12 @@ mod imp {
 
         let mut text_rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
-            SendMessageW(edit_hwnd, EM_GETRECT, 0, &mut text_rect as *mut RECT as LPARAM);
+            SendMessageW(
+                edit_hwnd,
+                EM_GETRECT,
+                0,
+                &mut text_rect as *mut RECT as LPARAM,
+            );
         }
         if text_rect.right <= text_rect.left || text_rect.bottom <= text_rect.top {
             let mut client: RECT = unsafe { std::mem::zeroed() };
@@ -1521,7 +1559,11 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let base_fill = if selected_flag { COLOR_SELECTION } else { COLOR_ROW_HOVER };
+                let base_fill = if selected_flag {
+                    COLOR_SELECTION
+                } else {
+                    COLOR_ROW_HOVER
+                };
                 let fill_color = blend_color(COLOR_RESULTS_BG, base_fill, visibility);
                 let fill_brush = CreateSolidBrush(fill_color);
                 FillRgn(dis.hDC, region, fill_brush);
@@ -1533,7 +1575,10 @@ mod imp {
                 left: dis.rcItem.left + ROW_INSET_X,
                 top: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + offset_y,
                 right: dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE,
-                bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE + offset_y,
+                bottom: dis.rcItem.top
+                    + (ROW_HEIGHT - ROW_ICON_SIZE) / 2
+                    + ROW_ICON_SIZE
+                    + offset_y,
             };
             let icon_backplate = CreateRoundRectRgn(
                 icon_rect.left,
@@ -1766,7 +1811,8 @@ mod imp {
 
     fn blend_color(from: u32, to: u32, t: f32) -> u32 {
         let t = t.clamp(0.0, 1.0);
-        let lerp = |a: u32, b: u32| -> u32 { (a as f32 + (b as f32 - a as f32) * t).round() as u32 };
+        let lerp =
+            |a: u32, b: u32| -> u32 { (a as f32 + (b as f32 - a as f32) * t).round() as u32 };
         let r = lerp(from & 0xFF, to & 0xFF);
         let g = lerp((from >> 8) & 0xFF, (to >> 8) & 0xFF);
         let b = lerp((from >> 16) & 0xFF, (to >> 16) & 0xFF);
@@ -1783,7 +1829,12 @@ mod imp {
         }
     }
 
-    fn draw_row_icon(hdc: HDC, icon_rect: &RECT, row: &OverlayRow, state: &mut OverlayShellState) -> bool {
+    fn draw_row_icon(
+        hdc: HDC,
+        icon_rect: &RECT,
+        row: &OverlayRow,
+        state: &mut OverlayShellState,
+    ) -> bool {
         let Some(icon_handle) = icon_handle_for_row(state, row) else {
             return false;
         };
@@ -1920,7 +1971,6 @@ mod imp {
         }
     }
 
-
     fn begin_scroll_animation(
         overlay_hwnd: HWND,
         state: &mut OverlayShellState,
@@ -1932,7 +1982,8 @@ mod imp {
         }
 
         let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-        let target_top = target_top_index_for_selection(state.list_hwnd, selected_index, count, current_top);
+        let target_top =
+            target_top_index_for_selection(state.list_hwnd, selected_index, count, current_top);
         begin_scroll_animation_to_top(overlay_hwnd, state, target_top);
     }
 
@@ -2131,7 +2182,6 @@ mod imp {
         schedule_icon_cache_idle_cleanup(hwnd);
     }
 
-
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
@@ -2203,7 +2253,14 @@ mod imp {
             } else {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
-            MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
+            MoveWindow(
+                state.help_hwnd,
+                help_left,
+                help_top,
+                HELP_ICON_SIZE,
+                HELP_ICON_SIZE,
+                1,
+            );
             position_help_tip_popup(state);
             apply_help_tip_rounded_corners(
                 state.help_tip_hwnd,
@@ -2317,8 +2374,7 @@ mod imp {
             return;
         }
         unsafe {
-            let region =
-                CreateRoundRectRgn(0, 0, width + 1, height + 1, LIST_RADIUS, LIST_RADIUS);
+            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, LIST_RADIUS, LIST_RADIUS);
             SetWindowRgn(list_hwnd, region, 1);
         }
     }
@@ -2430,13 +2486,25 @@ mod imp {
                 return;
             }
 
-            let bg_region =
-                CreateRoundRectRgn(0, 0, width + 1, height + 1, HELP_TIP_RADIUS, HELP_TIP_RADIUS);
+            let bg_region = CreateRoundRectRgn(
+                0,
+                0,
+                width + 1,
+                height + 1,
+                HELP_TIP_RADIUS,
+                HELP_TIP_RADIUS,
+            );
             FillRgn(hdc, bg_region, state.help_tip_brush as _);
             DeleteObject(bg_region as _);
 
-            let border_region =
-                CreateRoundRectRgn(0, 0, width + 1, height + 1, HELP_TIP_RADIUS, HELP_TIP_RADIUS);
+            let border_region = CreateRoundRectRgn(
+                0,
+                0,
+                width + 1,
+                height + 1,
+                HELP_TIP_RADIUS,
+                HELP_TIP_RADIUS,
+            );
             FrameRgn(hdc, border_region, state.help_tip_border_brush as _, 1, 1);
             DeleteObject(border_region as _);
 
@@ -2635,14 +2703,8 @@ mod imp {
         }
 
         unsafe {
-            let region = CreateRoundRectRgn(
-                0,
-                0,
-                width + 1,
-                height + 1,
-                PANEL_RADIUS,
-                PANEL_RADIUS,
-            );
+            let region =
+                CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
             SetWindowRgn(hwnd, region, 1);
         }
     }
@@ -2715,7 +2777,9 @@ mod imp {
 
     fn class_name_wide() -> &'static [u16] {
         static CLASS_NAME_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
-        CLASS_NAME_WIDE.get_or_init(|| to_wide(CLASS_NAME)).as_slice()
+        CLASS_NAME_WIDE
+            .get_or_init(|| to_wide(CLASS_NAME))
+            .as_slice()
     }
 
     fn font_family_wide() -> &'static [u16] {
@@ -2830,7 +2894,58 @@ mod imp {
     fn to_wide_no_nul(value: &str) -> Vec<u16> {
         value.encode_utf16().collect()
     }
+
+    pub fn is_instance_window_present() -> bool {
+        let hwnd = unsafe { FindWindowW(class_name_wide().as_ptr(), std::ptr::null()) };
+        !hwnd.is_null()
+    }
+
+    pub fn signal_existing_instance_show() -> Result<bool, String> {
+        let hwnd = unsafe { FindWindowW(class_name_wide().as_ptr(), std::ptr::null()) };
+        if hwnd.is_null() {
+            return Ok(false);
+        }
+
+        let ok = unsafe { PostMessageW(hwnd, SWIFTFIND_WM_EXTERNAL_SHOW, 0, 0) };
+        if ok == 0 {
+            let error = unsafe { GetLastError() };
+            return Err(format!("PostMessageW(show) failed with error {error}"));
+        }
+        Ok(true)
+    }
+
+    pub fn signal_existing_instance_quit() -> Result<bool, String> {
+        let hwnd = unsafe { FindWindowW(class_name_wide().as_ptr(), std::ptr::null()) };
+        if hwnd.is_null() {
+            return Ok(false);
+        }
+
+        let ok = unsafe { PostMessageW(hwnd, SWIFTFIND_WM_EXTERNAL_QUIT, 0, 0) };
+        if ok == 0 {
+            let error = unsafe { GetLastError() };
+            return Err(format!("PostMessageW(quit) failed with error {error}"));
+        }
+        Ok(true)
+    }
 }
 
 #[cfg(target_os = "windows")]
-pub use imp::{NativeOverlayShell, OverlayEvent, OverlayRow};
+pub use imp::{
+    is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
+    NativeOverlayShell, OverlayEvent, OverlayRow,
+};
+
+#[cfg(not(target_os = "windows"))]
+pub fn is_instance_window_present() -> bool {
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn signal_existing_instance_show() -> Result<bool, String> {
+    Ok(false)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn signal_existing_instance_quit() -> Result<bool, String> {
+    Ok(false)
+}

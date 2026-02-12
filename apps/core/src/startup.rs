@@ -30,6 +30,33 @@ impl From<std::io::Error> for StartupError {
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(target_os = "windows")]
 const VALUE_NAME: &str = "SwiftFind";
+const STARTUP_ARG: &str = "--background";
+
+pub fn startup_command_for_executable(executable_path: &Path) -> Result<String, StartupError> {
+    if executable_path.as_os_str().is_empty() {
+        return Err(StartupError::Command(
+            "executable path is empty".to_string(),
+        ));
+    }
+    if !executable_path.exists() {
+        return Err(StartupError::Command(format!(
+            "executable path does not exist: {}",
+            executable_path.display()
+        )));
+    }
+    if !executable_path.is_file() {
+        return Err(StartupError::Command(format!(
+            "executable path is not a file: {}",
+            executable_path.display()
+        )));
+    }
+
+    Ok(format!(
+        "\"{}\" {}",
+        executable_path.to_string_lossy(),
+        STARTUP_ARG
+    ))
+}
 
 #[cfg(target_os = "windows")]
 pub fn is_enabled() -> Result<bool, StartupError> {
@@ -43,24 +70,18 @@ pub fn is_enabled() -> Result<bool, StartupError> {
 #[cfg(target_os = "windows")]
 pub fn set_enabled(enabled: bool, executable_path: &Path) -> Result<(), StartupError> {
     if enabled {
-        let value = format!("\"{}\"", executable_path.to_string_lossy());
+        let value = startup_command_for_executable(executable_path)?;
         let output = std::process::Command::new("reg")
             .args([
-                "add",
-                RUN_KEY,
-                "/v",
-                VALUE_NAME,
-                "/t",
-                "REG_SZ",
-                "/d",
-                &value,
-                "/f",
+                "add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ", "/d", &value, "/f",
             ])
             .output()?;
         if output.status.success() {
             return Ok(());
         }
-        return Err(StartupError::Command(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+        return Err(StartupError::Command(
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
     }
 
     let output = std::process::Command::new("reg")

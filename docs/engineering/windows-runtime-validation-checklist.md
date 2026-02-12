@@ -63,6 +63,12 @@ Expected:
 - Native settings UI is intentionally disabled from `?` for now.
 - Expected: no crash; manual config path remains available.
 
+11. Lifecycle command checks.
+- Run `swiftfind-core.exe --status` while runtime is active.
+- Expected: reports running.
+- Run `swiftfind-core.exe --quit`, then `--status`.
+- Expected: reports stopped after quit.
+
 Record pass/fail evidence:
 
 ```powershell

@@ -10,6 +10,12 @@ From repo root:
 cargo run -p swiftfind-core
 ```
 
+Background mode (detached, no terminal dependency):
+
+```powershell
+cargo run -p swiftfind-core -- --background
+```
+
 Expected startup logs include:
 
 - runtime mode
@@ -25,11 +31,32 @@ When running on Windows:
 - `cargo run` starts child process `swiftfind-core.exe`.
 - In Task Manager, look for `swiftfind-core.exe` (and `cargo.exe` while running from Cargo).
 
+## Lifecycle Commands
+
+From repo root or installed binary:
+
+```powershell
+swiftfind-core.exe --status
+swiftfind-core.exe --quit
+swiftfind-core.exe --restart
+swiftfind-core.exe --ensure-config
+swiftfind-core.exe --sync-startup
+```
+
+Notes:
+
+- `--status` reports whether an instance window is active.
+- `--quit` signals the running instance to close.
+- `--restart` signals quit then starts again.
+- `--ensure-config` creates `%APPDATA%\SwiftFind\config.json` if missing.
+- `--sync-startup` applies `launch_at_startup` from config to HKCU Run.
+
 ## Default Hotkey and Config
 
 - Default hotkey: `Ctrl+Shift+Space`
 - Config file: `%APPDATA%\SwiftFind\config.json`
 - Index DB: `%APPDATA%\SwiftFind\index.sqlite3`
+- Install root (scripted install): `%LOCALAPPDATA%\Programs\SwiftFind\`
 
 If config file does not exist, runtime writes defaults to the stable app-data location on startup.
 The generated file is a user-focused template with inline comments (JSON5-compatible).
