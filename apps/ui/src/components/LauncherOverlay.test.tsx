@@ -53,6 +53,17 @@ describe('LauncherOverlay', () => {
     })
   })
 
+  it('keeps result list empty while query is blank', async () => {
+    const search = vi.fn().mockResolvedValue([])
+    const launch = vi.fn().mockResolvedValue(undefined)
+
+    render(<LauncherOverlay searchCommand={search} launchCommand={launch} />)
+
+    const listbox = screen.getByRole('listbox', { name: 'Search Results' })
+    expect(listbox.querySelectorAll('[role="option"]')).toHaveLength(0)
+    expect(search).not.toHaveBeenCalled()
+  })
+
   it('supports keyboard selection and enter-to-launch', async () => {
     const search = vi.fn().mockResolvedValue([
       {
@@ -106,5 +117,17 @@ describe('LauncherOverlay', () => {
     await waitFor(() => {
       expect(screen.getByRole('alert')).toHaveTextContent('Launch failed: access denied')
     })
+  })
+
+  it('does not launch when no result is selected', () => {
+    const search = vi.fn().mockResolvedValue([])
+    const launch = vi.fn().mockResolvedValue(undefined)
+
+    render(<LauncherOverlay searchCommand={search} launchCommand={launch} />)
+
+    const input = screen.getByRole('textbox', { name: 'Launcher Query' })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(launch).not.toHaveBeenCalled()
   })
 })

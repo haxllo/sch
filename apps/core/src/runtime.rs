@@ -418,6 +418,29 @@ mod tests {
     }
 
     #[test]
+    fn overlay_launch_selection_rejects_out_of_range_index() {
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        let results = vec![SearchItem::new("item-1", "app", "One", "C:\\One.exe")];
+
+        let error =
+            launch_overlay_selection(&service, &results, 1).expect_err("selection should fail");
+
+        assert!(error.contains("selected index out of range"));
+    }
+
+    #[test]
+    fn overlay_launch_selection_rejects_empty_results() {
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+
+        let error =
+            launch_overlay_selection(&service, &[], 0).expect_err("empty selection should fail");
+
+        assert_eq!(error, "no result selected");
+    }
+
+    #[test]
     fn selection_index_bounds_are_stable() {
         assert_eq!(next_selection_index(0, 0, 1), 0);
         assert_eq!(next_selection_index(0, 3, -1), 0);
