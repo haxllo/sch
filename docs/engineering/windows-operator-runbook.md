@@ -10,6 +10,17 @@ From repo root:
 cargo run -p swiftfind-core
 ```
 
+Installed release mode (recommended for users):
+
+```powershell
+.\scripts\install-swiftfind.ps1
+```
+
+Notes:
+
+- When run from the packaged release zip, installer uses prebuilt `bin\swiftfind-core.exe`.
+- Rust/Cargo is not required for end users.
+
 Background mode (detached, no terminal dependency):
 
 ```powershell

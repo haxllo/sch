@@ -74,9 +74,15 @@ Run on Windows PowerShell:
 scripts/windows/install-swiftfind.ps1
 ```
 
+End-user note:
+
+- Rust/Cargo is **not required** when installing from the packaged release zip.
+- The installer script uses the prebuilt `bin/swiftfind-core.exe` from the zip.
+
 Optional flags:
 
-- `-SkipBuild` (use existing release binary)
+- `-BuildFromSource` (developer mode; builds with Cargo if prebuilt exe is not present)
+- `-SourceExe "<path>"` (explicit exe path override)
 - `-StartAfterInstall:$false` (install only)
 
 Uninstall:
