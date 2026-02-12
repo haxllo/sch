@@ -18,14 +18,14 @@ mod imp {
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        AnimateWindow, CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
         LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
-        SetWindowTextW, ShowWindow, TranslateMessage, AW_BLEND, CREATESTRUCTW, CS_DROPSHADOW,
+        SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
@@ -65,9 +65,10 @@ mod imp {
 
     const TIMER_SELECTION_ANIM: usize = 0xBEEF;
 
-    const OVERLAY_ANIM_MS: u32 = 150;
-    const RESULTS_ANIM_MS: u32 = 150;
-    const SELECTION_ANIM_MS: u64 = 100;
+    const OVERLAY_ANIM_MS: u32 = 140;
+    const RESULTS_ANIM_MS: u32 = 140;
+    const SELECTION_ANIM_MS: u64 = 90;
+    const ANIM_FRAME_MS: u64 = 10;
 
     // Required visual colors.
     const COLOR_PANEL_BG: u32 = 0x0029231F; // #1F2329 (BGR)
@@ -449,7 +450,7 @@ mod imp {
                 return;
             }
 
-            let steps = (duration_ms / 12).max(1);
+            let steps = (duration_ms / ANIM_FRAME_MS as u32).max(1);
             for step in 1..=steps {
                 let t = step as f32 / steps as f32;
                 let eased = ease_out(t);
@@ -465,7 +466,7 @@ mod imp {
                         SWP_NOACTIVATE,
                     );
                 }
-                std::thread::sleep(Duration::from_millis(12));
+                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
             }
 
             unsafe {
@@ -516,7 +517,7 @@ mod imp {
                 ShowWindow(self.hwnd, SW_SHOW);
             }
 
-            let steps = (OVERLAY_ANIM_MS / 12).max(1);
+            let steps = (OVERLAY_ANIM_MS / ANIM_FRAME_MS as u32).max(1);
             for step in 1..=steps {
                 let t = step as f32 / steps as f32;
                 let eased = ease_out(t);
@@ -528,7 +529,7 @@ mod imp {
                     SetWindowPos(self.hwnd, HWND_TOPMOST, x, final_top, w, h, SWP_NOACTIVATE);
                     SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
                 }
-                std::thread::sleep(Duration::from_millis(12));
+                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
             }
 
             unsafe {
@@ -562,12 +563,7 @@ mod imp {
             let end_width = ((final_width as f32) * 0.96_f32) as i32;
             let end_height = ((final_height as f32) * 0.96_f32) as i32;
 
-            // Also keep AW_BLEND to improve fade smoothness on some GPU drivers.
-            unsafe {
-                AnimateWindow(self.hwnd, OVERLAY_ANIM_MS, AW_BLEND);
-            }
-
-            let steps = (OVERLAY_ANIM_MS / 12).max(1);
+            let steps = (OVERLAY_ANIM_MS / ANIM_FRAME_MS as u32).max(1);
             for step in 1..=steps {
                 let t = step as f32 / steps as f32;
                 let eased = ease_out(t);
@@ -579,7 +575,7 @@ mod imp {
                     SetWindowPos(self.hwnd, HWND_TOPMOST, x, final_top, w, h, SWP_NOACTIVATE);
                     SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
                 }
-                std::thread::sleep(Duration::from_millis(12));
+                std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
             }
 
             unsafe {
