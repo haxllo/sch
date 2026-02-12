@@ -181,6 +181,26 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
                 .filter_map(Result::ok)
             {
                 let path = entry.path();
+                if path.is_dir() {
+                    if path == root {
+                        continue;
+                    }
+
+                    let folder_name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.to_string_lossy().to_string());
+
+                    let id = format!("folder:{}", path.to_string_lossy());
+                    out.push(SearchItem::new(
+                        &id,
+                        "folder",
+                        &folder_name,
+                        &path.to_string_lossy(),
+                    ));
+                    continue;
+                }
+
                 if !path.is_file() {
                     continue;
                 }

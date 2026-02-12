@@ -1172,14 +1172,13 @@ mod imp {
                 right: dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE,
                 bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE,
             };
-            FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
-
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
 
             let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
             if !icon_drawn {
+                FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
                 let mut icon_text_rect = icon_rect;
                 SetTextColor(dis.hDC, COLOR_ICON_TEXT);
                 DrawTextW(

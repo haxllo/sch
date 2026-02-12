@@ -57,8 +57,11 @@ fn file_system_provider_discovers_files_in_roots() {
     let items = provider.discover().unwrap();
 
     let titles: Vec<String> = items.iter().map(|i| i.title.clone()).collect();
+    let kinds: Vec<String> = items.iter().map(|i| i.kind.clone()).collect();
+    assert!(titles.contains(&"nested".to_string()));
     assert!(titles.contains(&"Q4_Report.xlsx".to_string()));
     assert!(titles.contains(&"Notes.txt".to_string()));
+    assert!(kinds.contains(&"folder".to_string()));
 
     std::fs::remove_file(&report).unwrap();
     std::fs::remove_file(&notes).unwrap();
