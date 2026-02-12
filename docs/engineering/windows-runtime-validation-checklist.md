@@ -28,9 +28,11 @@ Expected:
 
 2. Press `Alt+Space` with another app focused.
 - Expected: launcher overlay opens; query input is focused.
+- Expected: launcher opens in compact bar state (no visible results list).
 
 3. Type a query that should match indexed content (for example `code` or `report`).
 - Expected: result list updates with real indexed items.
+- Expected: results panel expands downward only (top edge remains fixed).
 
 4. Use `ArrowDown` / `ArrowUp` to change selected result.
 - Expected: selected row changes as keys are pressed.

@@ -1,4 +1,4 @@
-# Windows Runtime Behavior (Sprint 6)
+# Windows Runtime Behavior (Sprint 7)
 
 Current hotkey-to-launcher behavior in `swiftfind-core`:
 
@@ -17,14 +17,16 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - `Esc` hides launcher
 7. Search and launch errors are surfaced inside launcher status text.
 8. Visual/UX polish:
-   - compact Spotlight-like proportions
-   - styled input/list/status contrast with readable hierarchy
-   - lightweight fade animation for show/hide transitions
+   - compact Spotlight/Wofi-like default bar state
+   - no results panel shown when query is empty
+   - results panel expands downward only when query has matches
+   - panel background `#1F2329` with border `#353B45`
+   - lightweight show/hide and results expansion animations
 
 Known limitations in this milestone:
 
-- Launcher is native Win32 shell (not yet a full React/WebView overlay).
-- Custom theming/animations are minimal and intentionally lightweight for runtime stability.
+- Launcher is native Win32 shell (not a full React/WebView overlay).
+- Animations are intentionally lightweight to prioritize runtime stability.
 - Runtime must remain active in its process; stopping `swiftfind-core.exe` unregisters hotkey and closes launcher.
 
 Operator steps and troubleshooting are documented in:

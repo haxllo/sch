@@ -1,4 +1,4 @@
-# Windows Operator Runbook (Sprint 6)
+# Windows Operator Runbook (Sprint 7)
 
 This runbook covers how to run and validate the SwiftFind native Windows overlay runtime.
 
@@ -50,11 +50,15 @@ Behavior details:
 
 ## UI Characteristics (Final)
 
-- Compact centered launcher window (approx. 640x340) with rounded panel edges.
-- High-contrast input field, result list, and status line tuned for low visual noise.
-- Result rows show `title` and a trimmed path column for quick scanning.
-- Subtle fade-in/fade-out transitions on show/hide.
+- Compact centered launcher bar (default compact height; no oversized blank state).
+- Panel colors:
+  - background `#1F2329`
+  - border `#353B45` (1px)
+- Rounded panel with subtle depth and improved typography hierarchy.
+- Result rows show `title` + trimmed path; selected row has a visible transition and border.
 - Input focus is forced on open and text is selected for immediate re-query.
+- Results panel stays collapsed for empty query, and expands downward only after matching query text.
+- Overlay and results transitions are short and smooth (roughly 120-180ms range).
 
 ## Manual Validation Checklist
 
@@ -74,6 +78,8 @@ Run these on a real Windows host:
    - Press `Alt+Space` while focused to hide overlay.
 6. Confirm visual polish:
    - Window appears compact and centered (not oversized).
+   - Empty query shows compact bar only (no visible results list).
+   - Typing matching query expands results downward from a fixed top edge.
    - Result row selection updates using keyboard and mouse hover.
    - Status line color changes for error states.
 
@@ -91,6 +97,7 @@ Recommended capture points:
 - `overlay-idle.png`: just opened (`Alt+Space`), empty query, focused input.
 - `overlay-results.png`: populated results with one selected row.
 - `overlay-error.png`: launch/search error status visible.
+- `overlay-expand.gif` (or short video): compact bar expanding downward while typing.
 
 ## Troubleshooting Checklist
 
