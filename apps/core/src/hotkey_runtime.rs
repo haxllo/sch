@@ -88,10 +88,9 @@ impl Default for WindowsHotkeyRegistrar {
 impl HotkeyRegistrar for WindowsHotkeyRegistrar {
     fn register_hotkey(&mut self, hotkey: &str) -> Result<HotkeyRegistration, HotkeyRuntimeError> {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-            MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VK_F1, VK_F10, VK_F11, VK_F12, VK_F2,
-            VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_SPACE,
+            RegisterHotKey, MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, VK_F1, VK_F10, VK_F11,
+            VK_F12, VK_F2, VK_F3, VK_F4, VK_F5, VK_F6, VK_F7, VK_F8, VK_F9, VK_SPACE,
         };
-        use windows_sys::Win32::UI::WindowsAndMessaging::RegisterHotKey;
 
         let parsed = parse_hotkey(hotkey).map_err(HotkeyRuntimeError::InvalidHotkey)?;
 
@@ -111,20 +110,20 @@ impl HotkeyRegistrar for WindowsHotkeyRegistrar {
         }
 
         let key_upper = parsed.key.to_ascii_uppercase();
-        let vk = match key_upper.as_str() {
-            "SPACE" => VK_SPACE,
-            "F1" => VK_F1,
-            "F2" => VK_F2,
-            "F3" => VK_F3,
-            "F4" => VK_F4,
-            "F5" => VK_F5,
-            "F6" => VK_F6,
-            "F7" => VK_F7,
-            "F8" => VK_F8,
-            "F9" => VK_F9,
-            "F10" => VK_F10,
-            "F11" => VK_F11,
-            "F12" => VK_F12,
+        let vk: u32 = match key_upper.as_str() {
+            "SPACE" => VK_SPACE as u32,
+            "F1" => VK_F1 as u32,
+            "F2" => VK_F2 as u32,
+            "F3" => VK_F3 as u32,
+            "F4" => VK_F4 as u32,
+            "F5" => VK_F5 as u32,
+            "F6" => VK_F6 as u32,
+            "F7" => VK_F7 as u32,
+            "F8" => VK_F8 as u32,
+            "F9" => VK_F9 as u32,
+            "F10" => VK_F10 as u32,
+            "F11" => VK_F11 as u32,
+            "F12" => VK_F12 as u32,
             _ if key_upper.len() == 1 => key_upper.as_bytes()[0] as u32,
             _ => {
                 return Err(HotkeyRuntimeError::InvalidHotkey(format!(
@@ -137,7 +136,7 @@ impl HotkeyRegistrar for WindowsHotkeyRegistrar {
         let id = self.next_id;
         self.next_id += 1;
 
-        let ok = unsafe { RegisterHotKey(0, id, modifiers, vk) };
+        let ok = unsafe { RegisterHotKey(std::ptr::null_mut(), id, modifiers, vk) };
         if ok == 0 {
             return Err(HotkeyRuntimeError::RegistrationFailed(format!(
                 "RegisterHotKey failed for '{hotkey}'"
@@ -149,11 +148,11 @@ impl HotkeyRegistrar for WindowsHotkeyRegistrar {
     }
 
     fn unregister_all(&mut self) -> Result<(), HotkeyRuntimeError> {
-        use windows_sys::Win32::UI::WindowsAndMessaging::UnregisterHotKey;
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey;
 
         for id in self.registered_ids.drain(..) {
             unsafe {
-                UnregisterHotKey(0, id);
+                UnregisterHotKey(std::ptr::null_mut(), id);
             }
         }
         Ok(())

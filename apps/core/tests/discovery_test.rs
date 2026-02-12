@@ -3,8 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use swiftfind_core::core_service::CoreService;
 use swiftfind_core::discovery::{
     AppProvider, DiscoveryProvider, FileProvider, FileSystemDiscoveryProvider,
-    StartMenuAppDiscoveryProvider,
 };
+#[cfg(not(target_os = "windows"))]
+use swiftfind_core::discovery::StartMenuAppDiscoveryProvider;
 
 #[test]
 fn app_provider_fixture_is_deterministic() {
