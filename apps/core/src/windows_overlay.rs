@@ -31,6 +31,7 @@ mod imp {
         DestroyIcon, DI_NORMAL, DrawIconEx,
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
+        HideCaret,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
         LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTOPINDEX, LoadCursorW, SetCursor,
@@ -43,7 +44,7 @@ mod imp {
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
+        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SETFOCUS, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
         WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
@@ -357,6 +358,7 @@ mod imp {
                     SetFocus(state.edit_hwnd);
                     SendMessageW(state.edit_hwnd, EM_SETSEL, 0, -1);
                 }
+                hide_input_caret(state.edit_hwnd);
             }
         }
 
@@ -1121,6 +1123,14 @@ mod imp {
                 paint_help_tip(hwnd, state);
                 return 0;
             }
+            if hwnd == state.edit_hwnd
+                && (message == WM_SETFOCUS
+                    || message == WM_KEYDOWN
+                    || message == windows_sys::Win32::UI::WindowsAndMessaging::WM_LBUTTONDOWN
+                    || message == WM_LBUTTONUP)
+            {
+                hide_input_caret(hwnd);
+            }
             if message == WM_MOUSEMOVE {
                 if hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd {
                     set_help_hover_state(parent, state, true);
@@ -1323,6 +1333,12 @@ mod imp {
             );
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
+        }
+    }
+
+    fn hide_input_caret(edit_hwnd: HWND) {
+        unsafe {
+            let _ = HideCaret(edit_hwnd);
         }
     }
 
