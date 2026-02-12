@@ -3,6 +3,8 @@ use crate::core_service::{CoreService, LaunchTarget, ServiceError};
 use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, run_message_loop, HotkeyRegistration};
+#[cfg(target_os = "windows")]
+use crate::windows_overlay::NativeOverlayShell;
 use std::io::{self, BufRead, Write};
 
 #[derive(Debug)]
@@ -10,6 +12,7 @@ pub enum RuntimeError {
     Config(ConfigError),
     Service(ServiceError),
     Hotkey(HotkeyRuntimeError),
+    Overlay(String),
 }
 
 impl std::fmt::Display for RuntimeError {
@@ -18,6 +21,7 @@ impl std::fmt::Display for RuntimeError {
             Self::Config(error) => write!(f, "config error: {error}"),
             Self::Service(error) => write!(f, "service error: {error}"),
             Self::Hotkey(error) => write!(f, "hotkey runtime error: {error:?}"),
+            Self::Overlay(error) => write!(f, "overlay error: {error}"),
         }
     }
 }
@@ -58,6 +62,10 @@ pub fn run() -> Result<(), RuntimeError> {
 
     #[cfg(target_os = "windows")]
     {
+        let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
+        overlay.set_status_text("Ready. Press Alt+Space to open launcher.");
+        println!("[swiftfind-core] native overlay shell initialized (hidden)");
+
         let mut registrar = default_hotkey_registrar();
         let registration = registrar.register_hotkey(&config.hotkey)?;
         log_registration(&registration);
