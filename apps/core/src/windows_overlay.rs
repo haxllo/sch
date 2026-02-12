@@ -34,7 +34,7 @@ mod imp {
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
+        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
     };
@@ -55,13 +55,14 @@ mod imp {
     const INPUT_HEIGHT: i32 = 36;
     const STATUS_HEIGHT: i32 = 18;
     const ROW_GAP: i32 = 8;
-    const ROW_HEIGHT: i32 = 44;
+    const ROW_HEIGHT: i32 = 50;
     const MAX_VISIBLE_ROWS: usize = 6;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
     const ROW_ICON_GAP: i32 = 10;
-    const ROW_TEXT_TOP_PAD: i32 = 6;
-    const ROW_TEXT_BOTTOM_PAD: i32 = 5;
+    const ROW_TEXT_TOP_PAD: i32 = 7;
+    const ROW_TEXT_BOTTOM_PAD: i32 = 6;
+    const ROW_VERTICAL_INSET: i32 = 2;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -78,6 +79,7 @@ mod imp {
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
 
     const OVERLAY_ANIM_MS: u32 = 150;
+    const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const RESULTS_ANIM_MS: u32 = 150;
     const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 8;
@@ -609,7 +611,7 @@ mod imp {
                 end_height,
                 255,
                 0,
-                OVERLAY_ANIM_MS,
+                OVERLAY_HIDE_ANIM_MS,
                 true,
             );
         }
@@ -955,6 +957,25 @@ mod imp {
                 }
                 return 0;
             }
+            if message == WM_LBUTTONUP && hwnd == state.list_hwnd {
+                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) as i32 };
+                if count > 0 {
+                    let x = (lparam as u32 & 0xFFFF) as i16 as i32;
+                    let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32;
+                    let packed = ((y as u32) << 16) | (x as u32 & 0xFFFF);
+                    let hit = unsafe { SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, packed as isize) };
+                    let row = (hit & 0xFFFF) as i32;
+                    let outside = ((hit >> 16) & 0xFFFF) != 0;
+                    if !outside && row >= 0 && row < count {
+                        unsafe {
+                            SendMessageW(hwnd, LB_SETCURSEL, row as usize, 0);
+                            InvalidateRect(hwnd, std::ptr::null(), 1);
+                            PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
+                        }
+                    }
+                }
+                return 0;
+            }
         }
 
         if message == WM_KEYDOWN {
@@ -1031,16 +1052,19 @@ mod imp {
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
-        let row_brush = if selected_flag {
-            state.selection_brush
-        } else if hovered {
-            state.row_hover_brush
-        } else {
-            state.results_brush
-        };
+        let row_active = selected_flag || hovered;
 
         unsafe {
-            FillRect(dis.hDC, &dis.rcItem, row_brush as _);
+            FillRect(dis.hDC, &dis.rcItem, state.results_brush as _);
+            if row_active {
+                let row_rect = RECT {
+                    left: dis.rcItem.left + 2,
+                    top: dis.rcItem.top + ROW_VERTICAL_INSET,
+                    right: dis.rcItem.right - 2,
+                    bottom: dis.rcItem.bottom - ROW_VERTICAL_INSET,
+                };
+                FillRect(dis.hDC, &row_rect, state.row_hover_brush as _);
+            }
 
             let icon_rect = RECT {
                 left: dis.rcItem.left + ROW_INSET_X,
@@ -1096,26 +1120,6 @@ mod imp {
                 &mut path_rect,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
             );
-
-            if selected_flag {
-                FrameRect(dis.hDC, &dis.rcItem, state.selection_border_brush as _);
-
-                let accent_rect = RECT {
-                    left: dis.rcItem.left + 1,
-                    top: dis.rcItem.top + 1,
-                    right: dis.rcItem.left + 4,
-                    bottom: dis.rcItem.bottom - 1,
-                };
-                FillRect(dis.hDC, &accent_rect, state.selection_accent_brush as _);
-            }
-
-            let separator_rect = RECT {
-                left: dis.rcItem.left + ROW_INSET_X,
-                top: dis.rcItem.bottom - 1,
-                right: dis.rcItem.right - ROW_INSET_X,
-                bottom: dis.rcItem.bottom,
-            };
-            FillRect(dis.hDC, &separator_rect, state.row_separator_brush as _);
 
             SelectObject(dis.hDC, old_font);
         }
