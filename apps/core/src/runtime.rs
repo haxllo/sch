@@ -1,8 +1,9 @@
 use crate::config::{self, ConfigError};
-use crate::core_service::{CoreService, ServiceError};
+use crate::core_service::{CoreService, LaunchTarget, ServiceError};
 use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, run_message_loop, HotkeyRegistration};
+use std::io::{self, BufRead, Write};
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -62,7 +63,10 @@ pub fn run() -> Result<(), RuntimeError> {
         log_registration(&registration);
         println!("[swiftfind-core] event loop running (WM_HOTKEY)");
         run_message_loop(|_| {
-            println!("[swiftfind-core] hotkey_event received");
+            println!("[swiftfind-core] hotkey_event received, launching console flow");
+            if let Err(error) = run_console_launcher_flow(&service, config.max_results as usize) {
+                eprintln!("[swiftfind-core] launcher flow error: {error}");
+            }
         })?;
         registrar.unregister_all()?;
         Ok(())
@@ -96,5 +100,172 @@ fn log_registration(registration: &HotkeyRegistration) {
         HotkeyRegistration::Noop(label) => {
             println!("[swiftfind-core] hotkey registered noop={label}");
         }
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn run_console_launcher_flow(service: &CoreService, result_limit: usize) -> Result<(), String> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut reader = stdin.lock();
+    let mut writer = stdout.lock();
+    run_console_launcher_flow_with_io(service, result_limit, &mut reader, &mut writer)
+}
+
+fn run_console_launcher_flow_with_io<R, W>(
+    service: &CoreService,
+    result_limit: usize,
+    input: &mut R,
+    output: &mut W,
+) -> Result<(), String>
+where
+    R: BufRead,
+    W: Write,
+{
+    write!(output, "[swiftfind-core] launcher> query: ").map_err(|e| e.to_string())?;
+    output.flush().map_err(|e| e.to_string())?;
+
+    let mut query_line = String::new();
+    input
+        .read_line(&mut query_line)
+        .map_err(|e| format!("failed reading query: {e}"))?;
+    let query = query_line.trim();
+
+    if query.is_empty() {
+        writeln!(output, "[swiftfind-core] launcher canceled (empty query)")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let results = service
+        .search(query, result_limit)
+        .map_err(|e| format!("search failed: {e}"))?;
+
+    if results.is_empty() {
+        writeln!(output, "[swiftfind-core] launcher no matches for '{query}'")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    writeln!(output, "[swiftfind-core] launcher results:")
+        .and_then(|_| {
+            for (index, item) in results.iter().enumerate() {
+                writeln!(output, "  {}. {} ({})", index + 1, item.title, item.path)?;
+            }
+            Ok(())
+        })
+        .map_err(|e: io::Error| e.to_string())?;
+
+    write!(
+        output,
+        "[swiftfind-core] launcher> select [1-{}] (enter to cancel): ",
+        results.len()
+    )
+    .map_err(|e| e.to_string())?;
+    output.flush().map_err(|e| e.to_string())?;
+
+    let mut selection_line = String::new();
+    input
+        .read_line(&mut selection_line)
+        .map_err(|e| format!("failed reading selection: {e}"))?;
+    let selection = selection_line.trim();
+    if selection.is_empty() {
+        writeln!(output, "[swiftfind-core] launcher canceled (no selection)")
+            .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let selected_number = selection
+        .parse::<usize>()
+        .map_err(|_| format!("invalid selection: '{selection}'"))?;
+    if selected_number == 0 || selected_number > results.len() {
+        return Err(format!(
+            "selection out of range: {selected_number} (results={})",
+            results.len()
+        ));
+    }
+
+    let selected = &results[selected_number - 1];
+    service
+        .launch(LaunchTarget::Id(&selected.id))
+        .map_err(|error| {
+            let _ = writeln!(output, "[swiftfind-core] launcher error: {error}");
+            format!("launch failed: {error}")
+        })?;
+
+    writeln!(
+        output,
+        "[swiftfind-core] launcher launched: {} ({})",
+        selected.title, selected.path
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_console_launcher_flow_with_io;
+    use crate::config::Config;
+    use crate::core_service::CoreService;
+    use crate::index_store::open_memory;
+    use crate::model::SearchItem;
+    use std::io::Cursor;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn launcher_flow_searches_and_launches_selected_item() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let launch_path = std::env::temp_dir().join(format!("swiftfind-launch-flow-{unique}.tmp"));
+        std::fs::write(&launch_path, b"ok").expect("temp launch file should be created");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "item-1",
+                "file",
+                "Code Launcher",
+                launch_path.to_string_lossy().as_ref(),
+            ))
+            .expect("item should upsert");
+
+        let mut input = Cursor::new("code\n1\n");
+        let mut output = Vec::new();
+        run_console_launcher_flow_with_io(&service, 20, &mut input, &mut output)
+            .expect("launcher flow should succeed");
+
+        let output_text = String::from_utf8(output).expect("output should be utf8");
+        assert!(output_text.contains("launcher results:"));
+        assert!(output_text.contains("launcher launched: Code Launcher"));
+
+        std::fs::remove_file(&launch_path).expect("temp launch file should be removed");
+    }
+
+    #[test]
+    fn launcher_flow_reports_launch_errors() {
+        let missing_path = std::env::temp_dir().join("swiftfind-does-not-exist-launch-flow.exe");
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "missing",
+                "file",
+                "Missing Item",
+                missing_path.to_string_lossy().as_ref(),
+            ))
+            .expect("item should upsert");
+
+        let mut input = Cursor::new("missing\n1\n");
+        let mut output = Vec::new();
+        let error = run_console_launcher_flow_with_io(&service, 20, &mut input, &mut output)
+            .expect_err("launcher flow should return launch failure");
+
+        assert!(error.contains("launch failed:"));
+        let output_text = String::from_utf8(output).expect("output should be utf8");
+        assert!(output_text.contains("launcher error:"));
     }
 }
