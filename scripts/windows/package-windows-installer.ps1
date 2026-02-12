@@ -22,7 +22,23 @@ $issPath = "scripts/windows/swiftfind.iss"
 Write-Host "== Building SwiftFind Setup.exe for $Version ==" -ForegroundColor Cyan
 
 if (-not (Test-Path $InnoCompiler)) {
-  throw "Inno Setup compiler not found at '$InnoCompiler'. Install Inno Setup or pass -InnoCompiler with the full ISCC.exe path."
+  $resolvedInno = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+  if (-not $resolvedInno) {
+    $candidates = @(
+      "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+      "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+      "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+    $resolvedInno = $candidates | Select-Object -First 1
+  }
+
+  if ($resolvedInno) {
+    $InnoCompiler = $resolvedInno
+    Write-Host "Resolved Inno Setup compiler: $InnoCompiler" -ForegroundColor Yellow
+  }
+  else {
+    throw "Inno Setup compiler not found. Install Inno Setup or pass -InnoCompiler with the full ISCC.exe path."
+  }
 }
 
 if (-not (Test-Path $issPath)) {
