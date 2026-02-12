@@ -6,7 +6,7 @@ mod imp {
     use std::sync::OnceLock;
     use std::time::Instant;
 
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM};
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
@@ -15,7 +15,7 @@ mod imp {
         EndPaint, FillRect, FillRgn, FrameRgn, GetDC, GetTextExtentPoint32W, GetTextMetricsW, HDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
-        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT, TextOutW, SIZE,
+        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT, TextOutW,
         TEXTMETRICW,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -1429,7 +1429,7 @@ mod imp {
         let offset_y = if state.row_anim_exiting {
             -(((1.0 - visibility) * 4.0).round() as i32)
         } else {
-            (((1.0 - visibility) * 6.0).round() as i32)
+            ((1.0 - visibility) * 6.0).round() as i32
         };
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
