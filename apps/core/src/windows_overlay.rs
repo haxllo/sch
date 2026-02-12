@@ -109,11 +109,11 @@ mod imp {
     const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
-    const COLOR_SELECTION: u32 = 0x00222222;
+    const COLOR_SELECTION: u32 = 0x00262626;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
-    const COLOR_ROW_HOVER: u32 = 0x00080808;
+    const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
     const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
-    const COLOR_SELECTION_ACCENT: u32 = 0x004A4A4A;
+    const COLOR_SELECTION_ACCENT: u32 = 0x00343434;
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
@@ -1129,11 +1129,9 @@ mod imp {
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
-        let row_active = selected_flag || hovered;
-
         unsafe {
             FillRect(dis.hDC, &dis.rcItem, state.results_brush as _);
-            if row_active {
+            if selected_flag || hovered {
                 let row_rect = RECT {
                     left: dis.rcItem.left + 2,
                     top: dis.rcItem.top + ROW_VERTICAL_INSET,
@@ -1148,7 +1146,12 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                FillRgn(dis.hDC, region, state.row_hover_brush as _);
+                let fill_brush = if selected_flag {
+                    state.selection_brush
+                } else {
+                    state.row_hover_brush
+                };
+                FillRgn(dis.hDC, region, fill_brush as _);
                 DeleteObject(region as _);
             }
 
