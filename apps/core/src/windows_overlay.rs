@@ -147,10 +147,10 @@ mod imp {
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
     const COLOR_HELP_TIP_BG: u32 = COLOR_PANEL_BG;
     const COLOR_HELP_TIP_TEXT: u32 = COLOR_TEXT_SECONDARY;
-    const HELP_TIP_WIDTH: i32 = 156;
+    const HELP_TIP_WIDTH: i32 = 132;
     const HELP_TIP_HEIGHT: i32 = 26;
     const HELP_TIP_RADIUS: i32 = 10;
-    const HELP_TIP_TEXT_PAD_X: i32 = 10;
+    const HELP_TIP_TEXT_PAD_X: i32 = 8;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
