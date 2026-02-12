@@ -54,8 +54,8 @@ mod imp {
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
     const STATUS_HEIGHT: i32 = 18;
-    const ROW_GAP: i32 = 8;
     const ROW_HEIGHT: i32 = 50;
+    const LIST_RADIUS: i32 = 12;
     const MAX_VISIBLE_ROWS: usize = 6;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
@@ -483,7 +483,7 @@ mod imp {
 
         fn expand_results(&self, result_count: usize) {
             let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
-            let target_height = COMPACT_HEIGHT + ROW_GAP + rows * ROW_HEIGHT;
+            let target_height = COMPACT_HEIGHT + rows * ROW_HEIGHT + PANEL_MARGIN_X;
 
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = true;
@@ -1326,8 +1326,8 @@ mod imp {
         let input_top = ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0);
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
-        let list_top = COMPACT_HEIGHT + ROW_GAP / 2;
-        let list_height = (height - list_top - PANEL_MARGIN_BOTTOM).max(0);
+        let list_top = COMPACT_HEIGHT;
+        let list_height = (height - list_top - PANEL_MARGIN_X).max(0);
 
         unsafe {
             MoveWindow(
@@ -1359,6 +1359,18 @@ mod imp {
                 list_height,
                 1,
             );
+            apply_list_rounded_corners(state.list_hwnd, input_width, list_height);
+        }
+    }
+
+    fn apply_list_rounded_corners(list_hwnd: HWND, width: i32, height: i32) {
+        if width <= 0 || height <= 0 {
+            return;
+        }
+        unsafe {
+            let region =
+                CreateRoundRectRgn(0, 0, width + 1, height + 1, LIST_RADIUS, LIST_RADIUS);
+            SetWindowRgn(list_hwnd, region, 1);
         }
     }
 
