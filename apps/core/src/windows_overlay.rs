@@ -100,6 +100,7 @@ mod imp {
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
     const TIMER_ROW_ANIM: usize = 0xBEF2;
     const TIMER_HELP_HOVER: usize = 0xBEF3;
+    const TIMER_ICON_CACHE_IDLE: usize = 0xBEF4;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
@@ -110,6 +111,7 @@ mod imp {
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
+    const ICON_CACHE_IDLE_MS: u32 = 90_000;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -361,6 +363,7 @@ mod imp {
         }
 
         pub fn show_and_focus(&self) {
+            cancel_icon_cache_idle_cleanup(self.hwnd);
             self.center_window();
             self.ensure_compact_state();
             self.animate_show();
@@ -382,10 +385,12 @@ mod imp {
 
         pub fn hide(&self) {
             self.animate_hide();
+            schedule_icon_cache_idle_cleanup(self.hwnd);
         }
 
         pub fn hide_now(&self) {
             hide_overlay_immediate(self.hwnd);
+            schedule_icon_cache_idle_cleanup(self.hwnd);
         }
 
         pub fn query_text(&self) -> String {
@@ -454,6 +459,7 @@ mod imp {
                 let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
+                    schedule_icon_cache_idle_cleanup(self.hwnd);
                     if state.results_visible && !state.rows.is_empty() {
                         state.row_anim_exiting = true;
                         state.row_anim_start = Some(Instant::now());
@@ -489,6 +495,7 @@ mod imp {
                     return;
                 }
 
+                cancel_icon_cache_idle_cleanup(self.hwnd);
                 if !had_rows {
                     state.row_anim_exiting = false;
                     state.row_anim_start = Some(Instant::now());
@@ -1172,6 +1179,22 @@ mod imp {
                         sync_help_hover_with_cursor(hwnd, state);
                     }
                 }
+                if wparam == TIMER_ICON_CACHE_IDLE {
+                    if let Some(state) = state_for(hwnd) {
+                        if state.results_visible || state.help_hovered {
+                            schedule_icon_cache_idle_cleanup(hwnd);
+                        } else {
+                            clear_icon_cache(state);
+                            unsafe {
+                                KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
+                        }
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -1189,6 +1212,7 @@ mod imp {
             WM_NCDESTROY => {
                 unsafe {
                     KillTimer(hwnd, TIMER_HELP_HOVER);
+                    KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
                 }
                 let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
                 if !state_ptr.is_null() {
@@ -1880,6 +1904,19 @@ mod imp {
         state.icon_cache.clear();
     }
 
+    fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {
+        unsafe {
+            KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
+            SetTimer(hwnd, TIMER_ICON_CACHE_IDLE, ICON_CACHE_IDLE_MS, None);
+        }
+    }
+
+    fn cancel_icon_cache_idle_cleanup(hwnd: HWND) {
+        unsafe {
+            KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
+        }
+    }
+
 
     fn begin_scroll_animation(
         overlay_hwnd: HWND,
@@ -2088,6 +2125,7 @@ mod imp {
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
+        schedule_icon_cache_idle_cleanup(hwnd);
     }
 
 
