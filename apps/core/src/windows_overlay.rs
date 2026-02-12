@@ -1,16 +1,17 @@
 #[cfg(target_os = "windows")]
 mod imp {
     use std::ffi::c_void;
+    use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
     use std::time::Instant;
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
+        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
         EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
-        OUT_DEFAULT_PRECIS, TRANSPARENT,
+        FR_PRIVATE, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{
@@ -105,6 +106,7 @@ mod imp {
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
+    const GEIST_FONT_FAMILY: &str = "Geist";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -317,6 +319,7 @@ mod imp {
                 state.rows.extend_from_slice(rows);
                 unsafe {
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
+                    SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                 }
 
                 for row in rows {
@@ -331,7 +334,7 @@ mod imp {
                     self.collapse_results();
                 } else {
                     self.expand_results(rows.len());
-                    self.set_selected_index(selected_index);
+                    self.set_selected_index_internal(selected_index, false);
                 }
 
                 if rows.is_empty() {
@@ -344,6 +347,10 @@ mod imp {
         }
 
         pub fn set_selected_index(&self, selected_index: usize) {
+            self.set_selected_index_internal(selected_index, true);
+        }
+
+        fn set_selected_index_internal(&self, selected_index: usize, animate_scroll: bool) {
             let Some(state) = state_for(self.hwnd) else {
                 return;
             };
@@ -357,7 +364,25 @@ mod imp {
             unsafe {
                 SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
             }
-            begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
+            if animate_scroll {
+                begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
+            } else {
+                let current_top =
+                    unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+                let target_top = target_top_index_for_selection(
+                    state.list_hwnd,
+                    clamped as i32,
+                    count as i32,
+                    current_top,
+                );
+                state.scroll_anim_start = None;
+                state.scroll_from_top = target_top;
+                state.scroll_to_top = target_top;
+                unsafe {
+                    KillTimer(self.hwnd, TIMER_SCROLL_ANIM);
+                    SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+                }
+            }
             unsafe {
                 InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
             }
@@ -439,8 +464,14 @@ mod imp {
             self.animate_results_height(COMPACT_HEIGHT, 0);
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
+                state.scroll_anim_start = None;
+                state.scroll_from_top = 0;
+                state.scroll_to_top = 0;
+                state.hover_index = -1;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
+                    KillTimer(self.hwnd, TIMER_SCROLL_ANIM);
+                    SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                 }
             }
         }
@@ -1416,10 +1447,71 @@ mod imp {
                     .ok()
                     .map(|v| v.trim().to_string())
                     .filter(|v| !v.is_empty())
-                    .unwrap_or_else(|| DEFAULT_FONT_FAMILY.to_string());
+                    .unwrap_or_else(|| {
+                        if register_private_geist_fonts() {
+                            GEIST_FONT_FAMILY.to_string()
+                        } else {
+                            DEFAULT_FONT_FAMILY.to_string()
+                        }
+                    });
                 to_wide(&family)
             })
             .as_slice()
+    }
+
+    fn register_private_geist_fonts() -> bool {
+        static REGISTERED: OnceLock<bool> = OnceLock::new();
+        *REGISTERED.get_or_init(|| {
+            let mut candidates = Vec::new();
+            if let Ok(dir) = std::env::var("SWIFTFIND_FONT_DIR") {
+                let trimmed = dir.trim();
+                if !trimmed.is_empty() {
+                    candidates.push(PathBuf::from(trimmed));
+                }
+            }
+            if let Ok(cwd) = std::env::current_dir() {
+                candidates.push(cwd.join("apps/ui/src/fonts/Geist/otf"));
+                candidates.push(cwd.join("fonts/Geist/otf"));
+            }
+
+            let files = [
+                "Geist-Regular.otf",
+                "Geist-Medium.otf",
+                "Geist-SemiBold.otf",
+                "Geist-Bold.otf",
+            ];
+
+            for base_dir in candidates {
+                if !base_dir.is_dir() {
+                    continue;
+                }
+                let mut loaded_any = false;
+                for file_name in files {
+                    let font_path = base_dir.join(file_name);
+                    if !font_path.is_file() {
+                        continue;
+                    }
+                    let font_wide = path_to_wide(&font_path);
+                    let added = unsafe {
+                        AddFontResourceExW(font_wide.as_ptr(), FR_PRIVATE, std::ptr::null())
+                    };
+                    if added > 0 {
+                        loaded_any = true;
+                    }
+                }
+                if loaded_any {
+                    return true;
+                }
+            }
+            false
+        })
+    }
+
+    fn path_to_wide(path: &Path) -> Vec<u16> {
+        path.to_string_lossy()
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     fn create_font(height: i32, weight: i32) -> isize {
