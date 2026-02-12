@@ -22,8 +22,8 @@ mod imp {
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL,
-        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
+        IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
+        LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
@@ -57,14 +57,14 @@ mod imp {
     const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
     const ROW_HEIGHT: i32 = 50;
-    const LIST_RADIUS: i32 = 14;
+    const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 6;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
-    const ROW_VERTICAL_INSET: i32 = 0;
+    const ROW_VERTICAL_INSET: i32 = 1;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -395,7 +395,7 @@ mod imp {
                 }
             }
             unsafe {
-                InvalidateRect(state.list_hwnd, std::ptr::null(), 1);
+                InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
             }
         }
 
@@ -945,10 +945,18 @@ mod imp {
                 };
 
                 if next_hover != state.hover_index {
+                    let previous_hover = state.hover_index;
                     state.hover_index = next_hover;
                     unsafe {
-                        InvalidateRect(hwnd, std::ptr::null(), 1);
+                        if next_hover >= 0 {
+                            let current_sel = SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32;
+                            if current_sel != next_hover {
+                                SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
+                            }
+                        }
                     }
+                    invalidate_list_row(hwnd, previous_hover);
+                    invalidate_list_row(hwnd, next_hover);
                 }
             }
             if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
@@ -986,8 +994,7 @@ mod imp {
                     if !outside && row >= 0 && row < count {
                         unsafe {
                             SendMessageW(hwnd, LB_SETCURSEL, row as usize, 0);
-                            InvalidateRect(hwnd, std::ptr::null(), 1);
-                            PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
+                        PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
                         }
                     }
                 }
@@ -1352,7 +1359,9 @@ mod imp {
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
         let list_top = input_top + INPUT_HEIGHT + INPUT_TO_LIST_GAP;
-        let list_height = (height - list_top - PANEL_MARGIN_X).max(0);
+        let list_left = PANEL_MARGIN_X + 1;
+        let list_width = (input_width - 2).max(0);
+        let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
 
         unsafe {
             MoveWindow(
@@ -1378,13 +1387,13 @@ mod imp {
             }
             MoveWindow(
                 state.list_hwnd,
-                PANEL_MARGIN_X,
+                list_left,
                 list_top,
-                input_width,
+                list_width,
                 list_height,
                 1,
             );
-            apply_list_rounded_corners(state.list_hwnd, input_width, list_height);
+            apply_list_rounded_corners(state.list_hwnd, list_width, list_height);
         }
     }
 
@@ -1396,6 +1405,24 @@ mod imp {
             let region =
                 CreateRoundRectRgn(0, 0, width + 1, height + 1, LIST_RADIUS, LIST_RADIUS);
             SetWindowRgn(list_hwnd, region, 1);
+        }
+    }
+
+    fn invalidate_list_row(list_hwnd: HWND, row: i32) {
+        if row < 0 {
+            return;
+        }
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            let ok = SendMessageW(
+                list_hwnd,
+                LB_GETITEMRECT,
+                row as usize,
+                (&mut rect as *mut RECT) as LPARAM,
+            );
+            if ok != 0 {
+                InvalidateRect(list_hwnd, &rect, 0);
+            }
         }
     }
 
