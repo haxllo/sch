@@ -4,6 +4,7 @@ pub struct Config {
     pub max_results: u16,
     pub index_db_path: PathBuf,
     pub config_path: PathBuf,
+    pub discovery_roots: Vec<PathBuf>,
 }
 
 impl Default for Config {
@@ -13,6 +14,7 @@ impl Default for Config {
             max_results: 20,
             index_db_path: base.join("index.sqlite3"),
             config_path: base.join("config.toml"),
+            discovery_roots: Vec::new(),
         }
     }
 }
