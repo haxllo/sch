@@ -33,11 +33,14 @@ mod imp {
     const LIST_CLASS: &str = "LISTBOX";
     const STATUS_CLASS: &str = "STATIC";
 
-    const WINDOW_WIDTH: i32 = 760;
-    const WINDOW_HEIGHT: i32 = 420;
-    const PANEL_MARGIN: i32 = 18;
-    const INPUT_HEIGHT: i32 = 44;
-    const STATUS_HEIGHT: i32 = 26;
+    const WINDOW_WIDTH: i32 = 640;
+    const WINDOW_HEIGHT: i32 = 340;
+    const PANEL_MARGIN_X: i32 = 16;
+    const PANEL_MARGIN_TOP: i32 = 14;
+    const PANEL_MARGIN_BOTTOM: i32 = 12;
+    const INPUT_HEIGHT: i32 = 38;
+    const ROW_GAP: i32 = 10;
+    const STATUS_HEIGHT: i32 = 22;
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
     const CONTROL_ID_STATUS: usize = 1003;
@@ -245,7 +248,7 @@ mod imp {
             let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
             let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
             let x = (screen_width - WINDOW_WIDTH).max(0) / 2;
-            let y = (screen_height - WINDOW_HEIGHT).max(0) / 4;
+            let y = (screen_height - WINDOW_HEIGHT).max(0) / 5;
 
             unsafe {
                 SetWindowPos(
@@ -539,23 +542,23 @@ mod imp {
             return;
         }
 
-        let input_width = width - PANEL_MARGIN * 2;
-        let list_top = PANEL_MARGIN + INPUT_HEIGHT + 12;
-        let status_top = height - PANEL_MARGIN - STATUS_HEIGHT;
-        let list_height = (status_top - list_top - 10).max(60);
+        let input_width = width - PANEL_MARGIN_X * 2;
+        let list_top = PANEL_MARGIN_TOP + INPUT_HEIGHT + ROW_GAP;
+        let status_top = height - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
+        let list_height = (status_top - list_top - ROW_GAP).max(60);
 
         unsafe {
             MoveWindow(
                 state.edit_hwnd,
-                PANEL_MARGIN,
-                PANEL_MARGIN,
+                PANEL_MARGIN_X,
+                PANEL_MARGIN_TOP,
                 input_width,
                 INPUT_HEIGHT,
                 1,
             );
             MoveWindow(
                 state.list_hwnd,
-                PANEL_MARGIN,
+                PANEL_MARGIN_X,
                 list_top,
                 input_width,
                 list_height,
@@ -563,7 +566,7 @@ mod imp {
             );
             MoveWindow(
                 state.status_hwnd,
-                PANEL_MARGIN,
+                PANEL_MARGIN_X,
                 status_top,
                 input_width,
                 STATUS_HEIGHT,
