@@ -33,12 +33,12 @@ mod imp {
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
         LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
-        LB_SETTOPINDEX, LoadCursorW,
+        LB_SETTOPINDEX, LoadCursorW, SetCursor,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
+        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, IDC_HAND, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
@@ -109,9 +109,10 @@ mod imp {
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
-    const INPUT_TEXT_RIGHT_INSET: i32 = 34;
+    const INPUT_TEXT_RIGHT_INSET: i32 = 10;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
+    const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
@@ -1066,6 +1067,14 @@ mod imp {
                     set_help_hover_state(parent, state, false);
                 }
             }
+            if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
+                && hwnd == state.help_hwnd
+            {
+                unsafe {
+                    SetCursor(LoadCursorW(std::ptr::null_mut(), IDC_HAND));
+                }
+                return 1;
+            }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
                 let mut cursor = POINT { x: 0, y: 0 };
                 unsafe {
@@ -1697,6 +1706,8 @@ mod imp {
         }
 
         let input_width = width - PANEL_MARGIN_X * 2;
+        let help_reserved = HELP_ICON_SIZE + HELP_ICON_RIGHT_INSET + HELP_ICON_GAP_FROM_INPUT;
+        let edit_width = (input_width - help_reserved).max(120);
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
         // Keep input exactly centered in compact mode and stable across states.
@@ -1707,7 +1718,7 @@ mod imp {
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
-        let help_left = PANEL_MARGIN_X + input_width - HELP_ICON_SIZE - HELP_ICON_RIGHT_INSET;
+        let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
 
         unsafe {
@@ -1715,7 +1726,7 @@ mod imp {
                 state.edit_hwnd,
                 PANEL_MARGIN_X,
                 input_top,
-                input_width,
+                edit_width,
                 INPUT_HEIGHT,
                 1,
             );
