@@ -297,6 +297,10 @@ mod imp {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
                     InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
                 }
+                layout_children(self.hwnd, state);
+                unsafe {
+                    InvalidateRect(self.hwnd, std::ptr::null(), 1);
+                }
             }
         }
 
@@ -714,7 +718,7 @@ mod imp {
                         SendMessageW(
                             state.edit_hwnd,
                             EM_SETCUEBANNER,
-                            0,
+                            1,
                             cue_text.as_ptr() as LPARAM,
                         );
 
@@ -1312,7 +1316,14 @@ mod imp {
         }
 
         let input_width = width - PANEL_MARGIN_X * 2;
-        let input_top = PANEL_MARGIN_TOP;
+        let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
+        let status_visible = status_len > 0;
+        let idle_compact = !state.results_visible && !status_visible;
+        let input_top = if idle_compact {
+            ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0)
+        } else {
+            PANEL_MARGIN_TOP
+        };
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
         let list_top = COMPACT_HEIGHT + ROW_GAP / 2;
@@ -1327,14 +1338,19 @@ mod imp {
                 INPUT_HEIGHT,
                 1,
             );
-            MoveWindow(
-                state.status_hwnd,
-                PANEL_MARGIN_X,
-                status_top,
-                input_width,
-                STATUS_HEIGHT,
-                1,
-            );
+            if status_visible {
+                ShowWindow(state.status_hwnd, SW_SHOW);
+                MoveWindow(
+                    state.status_hwnd,
+                    PANEL_MARGIN_X,
+                    status_top,
+                    input_width,
+                    STATUS_HEIGHT,
+                    1,
+                );
+            } else {
+                ShowWindow(state.status_hwnd, SW_HIDE);
+            }
             MoveWindow(
                 state.list_hwnd,
                 PANEL_MARGIN_X,
