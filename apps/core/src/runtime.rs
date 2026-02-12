@@ -74,6 +74,7 @@ pub fn run() -> Result<(), RuntimeError> {
 
         let mut overlay_state = OverlayState::default();
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
+        overlay.set_help_config_path(config.config_path.to_string_lossy().as_ref());
         overlay.set_hotkey_hint(&config.hotkey);
         println!("[swiftfind-core] native overlay shell initialized (hidden)");
 

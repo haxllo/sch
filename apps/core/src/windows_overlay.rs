@@ -40,7 +40,7 @@ mod imp {
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
-        SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
+        SM_CYSCREEN, SS_NOTIFY, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
@@ -79,6 +79,7 @@ mod imp {
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
     const CONTROL_ID_STATUS: usize = 1003;
+    const CONTROL_ID_HELP: usize = 1004;
 
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
     const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
@@ -130,7 +131,7 @@ mod imp {
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
-    const HOTKEY_HELP_TEXT: &str =
+    const HOTKEY_HELP_TEXT_FALLBACK: &str =
         "Change hotkey: edit %APPDATA%\\SwiftFind\\config.json (key: hotkey), then restart SwiftFind.";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,9 +159,11 @@ mod imp {
         edit_hwnd: HWND,
         list_hwnd: HWND,
         status_hwnd: HWND,
+        help_hwnd: HWND,
 
         edit_prev_proc: isize,
         list_prev_proc: isize,
+        help_prev_proc: isize,
 
         input_font: isize,
         title_font: isize,
@@ -182,7 +185,7 @@ mod imp {
         help_hovered: bool,
         help_status_visible: bool,
         results_visible: bool,
-        help_rect: RECT,
+        help_config_path: String,
 
         hover_index: i32,
 
@@ -201,8 +204,10 @@ mod imp {
                 edit_hwnd: std::ptr::null_mut(),
                 list_hwnd: std::ptr::null_mut(),
                 status_hwnd: std::ptr::null_mut(),
+                help_hwnd: std::ptr::null_mut(),
                 edit_prev_proc: 0,
                 list_prev_proc: 0,
+                help_prev_proc: 0,
                 input_font: 0,
                 title_font: 0,
                 meta_font: 0,
@@ -221,12 +226,7 @@ mod imp {
                 help_hovered: false,
                 help_status_visible: false,
                 results_visible: false,
-                help_rect: RECT {
-                    left: 0,
-                    top: 0,
-                    right: 0,
-                    bottom: 0,
-                },
+                help_config_path: String::new(),
                 hover_index: -1,
                 scroll_from_top: 0,
                 scroll_to_top: 0,
@@ -387,6 +387,12 @@ mod imp {
 
         pub fn set_hotkey_hint(&self, _hotkey: &str) {
             self.set_status_text("");
+        }
+
+        pub fn set_help_config_path(&self, path: &str) {
+            if let Some(state) = state_for(self.hwnd) {
+                state.help_config_path = path.to_string();
+            }
         }
 
         pub fn clear_query_text(&self) {
@@ -800,11 +806,28 @@ mod imp {
                             std::ptr::null_mut(),
                         )
                     };
+                    state.help_hwnd = unsafe {
+                        CreateWindowExW(
+                            0,
+                            to_wide(STATUS_CLASS).as_ptr(),
+                            to_wide("?").as_ptr(),
+                            WS_CHILD | WS_VISIBLE | SS_NOTIFY as u32,
+                            0,
+                            0,
+                            0,
+                            0,
+                            hwnd,
+                            CONTROL_ID_HELP as HMENU,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        )
+                    };
 
                     unsafe {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
                             GWLP_WNDPROC,
@@ -812,6 +835,11 @@ mod imp {
                         );
                         state.list_prev_proc = SetWindowLongPtrW(
                             state.list_hwnd,
+                            GWLP_WNDPROC,
+                            control_subclass_proc as *const () as isize,
+                        );
+                        state.help_prev_proc = SetWindowLongPtrW(
+                            state.help_hwnd,
                             GWLP_WNDPROC,
                             control_subclass_proc as *const () as isize,
                         );
@@ -871,6 +899,20 @@ mod imp {
             WM_CTLCOLORSTATIC => {
                 if let Some(state) = state_for(hwnd) {
                     let target = lparam as HWND;
+                    if target == state.help_hwnd {
+                        unsafe {
+                            SetTextColor(
+                                wparam as _,
+                                if state.help_hovered {
+                                    COLOR_HELP_ICON_HOVER
+                                } else {
+                                    COLOR_HELP_ICON
+                                },
+                            );
+                            SetBkMode(wparam as _, TRANSPARENT as i32);
+                        }
+                        return state.panel_brush;
+                    }
                     if target == state.status_hwnd {
                         let color = if state.status_is_error {
                             COLOR_TEXT_ERROR
@@ -912,17 +954,6 @@ mod imp {
                     }
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
-            }
-            WM_MOUSEMOVE => {
-                if let Some(state) = state_for(hwnd) {
-                    let point = POINT {
-                        x: (lparam as u32 & 0xFFFF) as i16 as i32,
-                        y: ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32,
-                    };
-                    let hovered = point_in_rect(&point, &state.help_rect);
-                    set_help_hover_state(hwnd, state, hovered);
-                }
-                0
             }
             WM_SIZE => {
                 if let Some(state) = state_for(hwnd) {
@@ -1013,13 +1044,11 @@ mod imp {
 
         if let Some(state) = state_for(parent) {
             if message == WM_MOUSEMOVE {
-                let mut cursor = POINT { x: 0, y: 0 };
-                unsafe {
-                    GetCursorPos(&mut cursor);
-                    ScreenToClient(parent, &mut cursor);
+                if hwnd == state.help_hwnd {
+                    set_help_hover_state(parent, state, true);
+                } else if state.help_hovered {
+                    set_help_hover_state(parent, state, false);
                 }
-                let hovered = point_in_rect(&cursor, &state.help_rect);
-                set_help_hover_state(parent, state, hovered);
             }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
                 let mut cursor = POINT { x: 0, y: 0 };
@@ -1086,6 +1115,19 @@ mod imp {
                 }
                 return 0;
             }
+            if message == WM_LBUTTONUP && hwnd == state.help_hwnd {
+                if let Err(error) = open_help_config_file(state) {
+                    state.status_is_error = true;
+                    state.help_status_visible = false;
+                    let wide = to_wide(&format!("Help open error: {error}"));
+                    unsafe {
+                        SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                        InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                    }
+                    layout_children(parent, state);
+                }
+                return 0;
+            }
         }
 
         if message == WM_KEYDOWN {
@@ -1126,6 +1168,8 @@ mod imp {
             state.edit_prev_proc
         } else if hwnd == state.list_hwnd {
             state.list_prev_proc
+        } else if hwnd == state.help_hwnd {
+            state.help_prev_proc
         } else {
             0
         };
@@ -1645,12 +1689,8 @@ mod imp {
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
-        state.help_rect = RECT {
-            left: PANEL_MARGIN_X + input_width - HELP_ICON_SIZE - HELP_ICON_RIGHT_INSET,
-            top: input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2,
-            right: PANEL_MARGIN_X + input_width - HELP_ICON_RIGHT_INSET,
-            bottom: input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2 + HELP_ICON_SIZE,
-        };
+        let help_left = PANEL_MARGIN_X + input_width - HELP_ICON_SIZE - HELP_ICON_RIGHT_INSET;
+        let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
 
         unsafe {
             MoveWindow(
@@ -1675,6 +1715,7 @@ mod imp {
             } else {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
+            MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
             MoveWindow(
                 state.list_hwnd,
                 list_left,
@@ -1801,10 +1842,6 @@ mod imp {
         }
     }
 
-    fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
-        point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
-    }
-
     fn set_help_hover_state(hwnd: HWND, state: &mut OverlayShellState, hovered: bool) {
         if state.help_hovered == hovered {
             return;
@@ -1812,14 +1849,14 @@ mod imp {
         state.help_hovered = hovered;
 
         unsafe {
-            InvalidateRect(hwnd, &state.help_rect, 0);
+            InvalidateRect(state.help_hwnd, std::ptr::null(), 0);
         }
 
         if hovered {
             let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
             if status_len == 0 && !state.status_is_error {
                 state.help_status_visible = true;
-                let wide = to_wide(HOTKEY_HELP_TEXT);
+                let wide = to_wide(&help_hint_text(state));
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
                     InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
@@ -1838,6 +1875,52 @@ mod imp {
             }
             layout_children(hwnd, state);
         }
+    }
+
+    fn help_hint_text(state: &OverlayShellState) -> String {
+        let cfg_path = state.help_config_path.trim();
+        if cfg_path.is_empty() {
+            HOTKEY_HELP_TEXT_FALLBACK.to_string()
+        } else {
+            format!("Change hotkey: edit {cfg_path} (key: hotkey), then restart SwiftFind.")
+        }
+    }
+
+    fn open_help_config_file(state: &mut OverlayShellState) -> Result<(), String> {
+        let cfg_path = state.help_config_path.trim().to_string();
+        let target = if cfg_path.is_empty() {
+            if let Ok(appdata) = std::env::var("APPDATA") {
+                format!("{appdata}\\SwiftFind\\config.json")
+            } else {
+                return Err("APPDATA is not set; cannot locate config path.".to_string());
+            }
+        } else {
+            cfg_path
+        };
+
+        let path = std::path::Path::new(&target);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("failed to create config directory: {e}"))?;
+        }
+        if !path.exists() {
+            std::fs::write(path, b"{}\n")
+                .map_err(|e| format!("failed to create config file: {e}"))?;
+        }
+
+        std::process::Command::new("notepad")
+            .arg(&target)
+            .spawn()
+            .map_err(|e| format!("failed to open config file: {e}"))?;
+
+        state.status_is_error = false;
+        state.help_status_visible = false;
+        let wide = to_wide(&format!("Opened config: {target}"));
+        unsafe {
+            SetWindowTextW(state.status_hwnd, wide.as_ptr());
+            InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+        }
+        Ok(())
     }
 
     fn draw_panel_background(hwnd: HWND) {
@@ -1859,28 +1942,6 @@ mod imp {
                     CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
                 FrameRgn(hdc, border_region, state.border_brush as _, 1, 1);
                 DeleteObject(border_region as _);
-            }
-
-            if state.help_rect.right > state.help_rect.left && state.help_rect.bottom > state.help_rect.top {
-                let old_font = SelectObject(hdc, state.status_font as _);
-                SetBkMode(hdc, TRANSPARENT as i32);
-                SetTextColor(
-                    hdc,
-                    if state.help_hovered {
-                        COLOR_HELP_ICON_HOVER
-                    } else {
-                        COLOR_HELP_ICON
-                    },
-                );
-                let mut help_rect = state.help_rect;
-                DrawTextW(
-                    hdc,
-                    to_wide("?").as_ptr(),
-                    -1,
-                    &mut help_rect,
-                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-                );
-                SelectObject(hdc, old_font);
             }
             EndPaint(hwnd, &paint);
         }
