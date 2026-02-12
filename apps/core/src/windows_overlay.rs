@@ -66,6 +66,7 @@ mod imp {
     const INPUT_TOP: i32 = (COMPACT_HEIGHT - INPUT_HEIGHT) / 2;
     const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
+    const STATUS_FOOTER_HEIGHT: i32 = 13;
     const ROW_HEIGHT: i32 = 56;
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
@@ -111,7 +112,7 @@ mod imp {
     const FONT_INPUT_HEIGHT: i32 = -19;
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
-    const FONT_STATUS_HEIGHT: i32 = -13;
+    const FONT_STATUS_HEIGHT: i32 = -11;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
@@ -150,7 +151,7 @@ mod imp {
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
-    const FOOTER_HINT_TEXT: &str = "Enter open | Up/Down move | Esc close";
+    const FOOTER_HINT_TEXT: &str = "Enter open • Esc close";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -404,11 +405,7 @@ mod imp {
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
                 let trimmed = message.trim();
-                let status_text = if trimmed.is_empty() {
-                    FOOTER_HINT_TEXT
-                } else {
-                    trimmed
-                };
+                let status_text = trimmed;
                 state.status_is_error = !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
                 state.help_tip_visible = false;
                 unsafe {
@@ -451,6 +448,7 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
+                let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
                     if state.results_visible && !state.rows.is_empty() {
@@ -476,16 +474,30 @@ mod imp {
                     state.hover_index = -1;
                     state.row_anim_start = None;
                     state.row_anim_exiting = false;
+                    if !state.status_is_error {
+                        let wide = to_wide("");
+                        unsafe {
+                            SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                        }
+                    }
                     unsafe {
                         KillTimer(self.hwnd, TIMER_ROW_ANIM);
                     }
                     return;
                 }
 
-                state.row_anim_exiting = false;
-                state.row_anim_start = Some(Instant::now());
-                unsafe {
-                    SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
+                if !had_rows {
+                    state.row_anim_exiting = false;
+                    state.row_anim_start = Some(Instant::now());
+                    unsafe {
+                        SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
+                    }
+                } else {
+                    state.row_anim_start = None;
+                    state.row_anim_exiting = false;
+                    unsafe {
+                        KillTimer(self.hwnd, TIMER_ROW_ANIM);
+                    }
                 }
 
                 state.rows.clear();
@@ -504,6 +516,14 @@ mod imp {
                 }
 
                 self.expand_results(rows.len());
+                if !state.status_is_error {
+                    let wide = to_wide(FOOTER_HINT_TEXT);
+                    unsafe {
+                        SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                        InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+                    }
+                    layout_children(self.hwnd, state);
+                }
                 self.set_selected_index_internal(selected_index, false);
             }
         }
@@ -2056,14 +2076,29 @@ mod imp {
         let edit_width = (input_width - help_reserved).max(120);
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
+        let footer_hint_mode = status_visible && state.results_visible && !state.status_is_error;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
-        let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
+        let status_top = if footer_hint_mode {
+            (height - PANEL_MARGIN_X - STATUS_FOOTER_HEIGHT).max(COMPACT_HEIGHT + 2)
+        } else {
+            COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT
+        };
+        let status_height = if footer_hint_mode {
+            STATUS_FOOTER_HEIGHT
+        } else {
+            STATUS_HEIGHT
+        };
 
         let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
-        let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
+        let list_bottom_reserved = if footer_hint_mode {
+            PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + 3
+        } else {
+            PANEL_MARGIN_X + 1
+        };
+        let list_height = (height - list_top - list_bottom_reserved).max(0);
         let help_left = PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT;
         let help_top = input_top + (INPUT_HEIGHT - HELP_ICON_SIZE) / 2;
         let tip_left = (help_left + HELP_ICON_SIZE - HELP_TIP_WIDTH).max(PANEL_MARGIN_X);
@@ -2086,7 +2121,7 @@ mod imp {
                     PANEL_MARGIN_X,
                     status_top,
                     input_width,
-                    STATUS_HEIGHT,
+                    status_height,
                     1,
                 );
             } else {
