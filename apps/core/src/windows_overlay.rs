@@ -147,7 +147,7 @@ mod imp {
     const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
     const COLOR_HELP_TIP_BG: u32 = COLOR_PANEL_BG;
     const COLOR_HELP_TIP_TEXT: u32 = COLOR_TEXT_SECONDARY;
-    const HELP_TIP_WIDTH: i32 = 196;
+    const HELP_TIP_WIDTH: i32 = 156;
     const HELP_TIP_HEIGHT: i32 = 26;
     const HELP_TIP_RADIUS: i32 = 10;
     const HELP_TIP_TEXT_PAD_X: i32 = 10;
@@ -2157,7 +2157,7 @@ mod imp {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
             MoveWindow(state.help_hwnd, help_left, help_top, HELP_ICON_SIZE, HELP_ICON_SIZE, 1);
-            position_help_tip_popup(hwnd, state, help_top);
+            position_help_tip_popup(state);
             apply_help_tip_rounded_corners(state.help_tip_hwnd, HELP_TIP_WIDTH, HELP_TIP_HEIGHT);
             if state.help_tip_visible {
                 ShowWindow(state.help_tip_hwnd, SW_SHOW);
@@ -2289,21 +2289,23 @@ mod imp {
         }
     }
 
-    fn position_help_tip_popup(hwnd: HWND, state: &OverlayShellState, help_top: i32) {
-        let mut overlay_rect: RECT = unsafe { std::mem::zeroed() };
+    fn position_help_tip_popup(state: &OverlayShellState) {
+        let mut help_rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
-            GetWindowRect(hwnd, &mut overlay_rect);
+            GetWindowRect(state.help_hwnd, &mut help_rect);
+        }
+        if help_rect.right <= help_rect.left || help_rect.bottom <= help_rect.top {
+            return;
         }
 
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
         let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
 
-        // Keep the tip close to "?" and partly outside the panel edge.
-        let icon_screen_top = overlay_rect.top + help_top;
-        let mut tip_left = overlay_rect.right - HELP_TIP_WIDTH + 36;
-        let mut tip_top = icon_screen_top - HELP_TIP_HEIGHT - 8;
+        // Anchor to the help icon: starts above "?" and may extend outside the panel.
+        let mut tip_left = help_rect.left - HELP_TIP_TEXT_PAD_X;
+        let mut tip_top = help_rect.top - HELP_TIP_HEIGHT - 8;
         if tip_top < 8 {
-            tip_top = icon_screen_top + HELP_ICON_SIZE + 8;
+            tip_top = help_rect.bottom + 8;
         }
 
         let max_left = (screen_w - HELP_TIP_WIDTH - 8).max(8);
@@ -2438,8 +2440,9 @@ mod imp {
             unsafe {
                 SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
                 SetTimer(hwnd, TIMER_HELP_HOVER, HELP_HOVER_POLL_MS, None);
+                position_help_tip_popup(state);
+                ShowWindow(state.help_tip_hwnd, SW_SHOW);
             }
-            layout_children(hwnd, state);
             unsafe {
                 InvalidateRect(state.help_tip_hwnd, std::ptr::null(), 1);
             }
@@ -2448,12 +2451,10 @@ mod imp {
 
         if state.help_tip_visible {
             state.help_tip_visible = false;
-            let wide = to_wide(&help_hint_text(state));
             unsafe {
-                SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
                 KillTimer(hwnd, TIMER_HELP_HOVER);
+                ShowWindow(state.help_tip_hwnd, SW_HIDE);
             }
-            layout_children(hwnd, state);
         } else {
             unsafe {
                 KillTimer(hwnd, TIMER_HELP_HOVER);
