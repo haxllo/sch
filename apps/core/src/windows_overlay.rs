@@ -2063,7 +2063,7 @@ mod imp {
         if state.help_config_path.trim().is_empty() {
             HOTKEY_HELP_TEXT_FALLBACK.to_string()
         } else {
-            "Click to edit hotkey (config.json)".to_string()
+            "Click to edit hotkey".to_string()
         }
     }
 
@@ -2085,7 +2085,9 @@ mod imp {
                 .map_err(|e| format!("failed to create config directory: {e}"))?;
         }
         if !path.exists() {
-            std::fs::write(path, b"{}\n")
+            let cfg = crate::config::load(Some(path))
+                .map_err(|e| format!("failed to load default config template: {e}"))?;
+            crate::config::save_to_path(&cfg, path)
                 .map_err(|e| format!("failed to create config file: {e}"))?;
         }
 

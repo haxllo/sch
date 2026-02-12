@@ -14,6 +14,8 @@ pub struct Config {
     pub config_path: PathBuf,
     pub discovery_roots: Vec<PathBuf>,
     pub hotkey: String,
+    pub hotkey_help: String,
+    pub hotkey_recommended: Vec<String>,
 }
 
 impl Default for Config {
@@ -26,7 +28,16 @@ impl Default for Config {
             index_db_path: app_dir.join("index.sqlite3"),
             config_path,
             discovery_roots: default_discovery_roots(),
-            hotkey: "Alt+Space".to_string(),
+            hotkey: "Ctrl+Shift+Space".to_string(),
+            hotkey_help:
+                "Set `hotkey` as Modifier+Modifier+Key (example: Ctrl+Shift+Space), then restart SwiftFind."
+                    .to_string(),
+            hotkey_recommended: vec![
+                "Ctrl+Shift+Space".to_string(),
+                "Ctrl+Alt+Space".to_string(),
+                "Alt+Shift+Space".to_string(),
+                "Ctrl+Shift+P".to_string(),
+            ],
         }
     }
 }

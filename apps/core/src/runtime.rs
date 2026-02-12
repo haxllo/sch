@@ -49,6 +49,13 @@ impl From<HotkeyRuntimeError> for RuntimeError {
 
 pub fn run() -> Result<(), RuntimeError> {
     let config = config::load(None)?;
+    if !config.config_path.exists() {
+        config::save(&config)?;
+        println!(
+            "[swiftfind-core] wrote default config to {}",
+            config.config_path.display()
+        );
+    }
     println!(
         "[swiftfind-core] startup mode={} hotkey={} config_path={} index_db_path={}",
         runtime_mode(),

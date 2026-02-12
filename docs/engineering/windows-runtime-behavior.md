@@ -1,27 +1,33 @@
-# Windows Runtime Behavior (Sprint 7)
+# Windows Runtime Behavior (Current)
 
 Current hotkey-to-launcher behavior in `swiftfind-core`:
 
 1. Start runtime with `cargo run -p swiftfind-core`.
 2. Runtime loads config, logs startup mode/hotkey/paths, builds or opens index.
-3. Runtime registers global hotkey from config (default `Alt+Space`).
+3. Runtime registers global hotkey from config (default `Ctrl+Shift+Space`).
 4. Runtime creates a native borderless top-most launcher window (hidden by default).
 5. Hotkey behavior:
-   - `Alt+Space` shows launcher and focuses input when hidden.
-   - `Alt+Space` hides launcher when launcher is already focused.
-   - `Alt+Space` refocuses launcher if visible but not focused.
+   - configured hotkey shows launcher and focuses input when hidden.
+   - configured hotkey hides launcher when launcher is already focused.
+   - configured hotkey refocuses launcher if visible but not focused.
 6. Launcher interaction:
    - typing runs core search against indexed items
    - `Up`/`Down` changes selection
-   - `Enter` launches selected result and hides launcher on success
+   - `Enter` launches selected result and hides launcher immediately on success
+   - single-click on a result launches it immediately
    - `Esc` hides launcher
+   - clicking outside launcher hides launcher
+   - any close path clears query/results so next open starts fresh
 7. Search and launch errors are surfaced inside launcher status text.
 8. Visual/UX polish:
    - compact Spotlight/Wofi-like default bar state
    - no results panel shown when query is empty
    - results panel expands downward only when query has matches
-   - panel background `#1C1C1C` with border `#3E3E3E`
+   - panel background `#101010` with border `#2A2A2A`
    - structured two-line result rows (`title` + `path`) with type glyph
+   - rounded results panel; top edge flush to input section
+   - bottom margin matches left/right margin
+   - hover-driven row emphasis (no hard selected border)
    - lightweight show/hide and results expansion animations with smooth scroll behavior
 
 Known limitations in this milestone:

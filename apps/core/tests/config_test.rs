@@ -15,7 +15,9 @@ fn accepts_default_config() {
     let cfg = swiftfind_core::config::Config::default();
     assert_eq!(cfg.max_results, 20);
     assert_eq!(cfg.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
-    assert_eq!(cfg.hotkey, "Alt+Space");
+    assert_eq!(cfg.hotkey, "Ctrl+Shift+Space");
+    assert!(!cfg.hotkey_help.trim().is_empty());
+    assert!(!cfg.hotkey_recommended.is_empty());
     assert!(cfg.index_db_path.to_string_lossy().contains("swiftfind") || cfg.index_db_path.to_string_lossy().contains("SwiftFind"));
     assert!(cfg.config_path.to_string_lossy().contains("swiftfind") || cfg.config_path.to_string_lossy().contains("SwiftFind"));
     assert!(swiftfind_core::config::validate(&cfg).is_ok());
@@ -105,9 +107,11 @@ fn loads_partial_config_with_migration_safe_defaults() {
 
     assert_eq!(loaded.max_results, 25);
     assert_eq!(loaded.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
-    assert_eq!(loaded.hotkey, "Alt+Space");
+    assert_eq!(loaded.hotkey, "Ctrl+Shift+Space");
     assert_eq!(loaded.config_path, config_path);
     assert!(!loaded.index_db_path.as_os_str().is_empty());
+    assert!(!loaded.hotkey_help.trim().is_empty());
+    assert!(!loaded.hotkey_recommended.is_empty());
 
     if Path::new(&loaded.config_path).exists() {
         std::fs::remove_file(&loaded.config_path).unwrap();

@@ -1,4 +1,4 @@
-# Windows Operator Runbook (Sprint 7)
+# Windows Operator Runbook (Current)
 
 This runbook covers how to run and validate the SwiftFind native Windows overlay runtime.
 
@@ -27,41 +27,65 @@ When running on Windows:
 
 ## Default Hotkey and Config
 
-- Default hotkey: `Alt+Space`
+- Default hotkey: `Ctrl+Shift+Space`
 - Config file: `%APPDATA%\SwiftFind\config.json`
 - Index DB: `%APPDATA%\SwiftFind\index.sqlite3`
 
-If config file does not exist, runtime creates defaults in the stable app-data location.
+If config file does not exist, runtime writes defaults to the stable app-data location on startup.
+
+## Change Hotkey Safely
+
+1. Open `%APPDATA%\SwiftFind\config.json`.
+2. Update the `hotkey` value.
+3. Restart `swiftfind-core`.
+
+Recommended low-conflict hotkeys on Windows:
+
+- `Ctrl+Shift+Space` (default)
+- `Ctrl+Alt+Space`
+- `Alt+Shift+Space`
+- `Ctrl+Shift+P`
+
+Avoid these common system/reserved shortcuts:
+
+- `Win+...` combinations
+- `Alt+Tab`
+- `Ctrl+Esc`
+- `Alt+Space` (can conflict with the window system menu)
 
 ## Launcher Flow (Native Overlay)
 
-1. Press hotkey (`Alt+Space` by default).
+1. Press hotkey (`Ctrl+Shift+Space` by default).
 2. A centered floating launcher overlay appears and input is focused.
 3. Type query text to fetch ranked results.
 4. Use `Up` / `Down` to move selection.
-5. Press `Enter` to launch selected result.
+5. Press `Enter` to launch selected result, or single-click a result row.
 6. Press `Esc` to hide launcher.
 
 Behavior details:
 
-- Pressing `Alt+Space` while launcher is focused hides it.
-- Pressing `Alt+Space` while launcher is visible but not focused brings focus back.
+- Pressing the configured hotkey while launcher is focused hides it.
+- Pressing the configured hotkey while launcher is visible but not focused brings focus back.
+- Clicking outside launcher hides it.
+- Closing launcher clears current query/results (next open is clean).
 - Search and launch failures are shown in launcher status text.
 
 ## UI Characteristics (Final)
 
 - Compact centered launcher bar (default compact height; no oversized blank state).
 - Panel colors:
-  - background `#1C1C1C`
-  - border `#3E3E3E` (1px)
+  - background `#101010`
+  - border `#2A2A2A` (1px)
 - Rounded panel with subtle depth and improved typography hierarchy.
+- Input placeholder shown directly in the input box (`Type to search`).
 - Result rows are structured two-line cards:
   - primary title line (higher contrast, semibold)
   - secondary path line (muted, ellipsized)
 - Per-item glyph marks item type (`app`, `file`, `folder`) with restrained icon boxes.
-- Selected row uses soft highlight + accent strip + subtle border; hover uses lighter non-selected tone.
+- Active row uses soft hover-style emphasis without a hard selection border.
 - Input focus is forced on open and text is selected for immediate re-query.
 - Results panel stays collapsed for empty query, and expands downward only after matching query text.
+- Results panel has no top gap and uses matched side/bottom spacing.
 - Overlay and results transitions are short and smooth:
   - show/hide fade + scale (~150ms)
   - results expand/collapse height + opacity (~150ms)
@@ -88,19 +112,21 @@ Run these on a real Windows host:
 2. Confirm process visibility:
    - Task Manager shows `swiftfind-core.exe`.
 3. Confirm hotkey:
-   - `Alt+Space` opens the overlay.
+   - configured hotkey opens the overlay.
 4. Confirm search + launch:
    - Type a query with known indexed result.
    - Press `Enter` and verify target launches.
 5. Confirm hide behavior:
    - Press `Esc` to hide overlay.
-   - Press `Alt+Space` while focused to hide overlay.
+   - Press configured hotkey while focused to hide overlay.
+   - Click outside overlay and verify it hides immediately.
+   - Reopen overlay and verify prior query text is cleared.
 6. Confirm visual polish:
    - Window appears compact and centered (not oversized).
    - Empty query shows compact bar only (no visible results list).
    - Typing matching query expands results downward from a fixed top edge.
    - Result rows render as clean two-line title/path entries (no literal tab separators).
-   - Result row selection updates using keyboard and hover visuals.
+   - Result rows have no hard border selection box; emphasis is subtle/hover-style.
    - Status line color changes for error states.
 
 ## Screenshot Notes (Before/After)
@@ -114,7 +140,7 @@ Capture two screenshots on a Windows host for release notes:
 
 Recommended capture points:
 
-- `overlay-idle.png`: just opened (`Alt+Space`), empty query, focused input.
+- `overlay-idle.png`: just opened (configured hotkey), empty query, focused input.
 - `overlay-results.png`: populated results with one selected row.
 - `overlay-error.png`: launch/search error status visible.
 - `overlay-expand.gif` (or short video): compact bar expanding downward while typing.
@@ -126,9 +152,9 @@ Recommended capture points:
    - Check startup log for `hotkey registered native_id=...`.
    - Try changing hotkey in `%APPDATA%\SwiftFind\config.json` to avoid OS/app conflicts.
    - Restart runtime after config change.
-   - Check if another launcher utility (PowerToys, Flow Launcher, etc.) is intercepting `Alt+Space`.
+   - Check if another launcher utility (PowerToys, Flow Launcher, etc.) is intercepting your chosen hotkey.
 2. Overlay does not focus or appears behind apps:
-   - Trigger hotkey twice (`Alt+Space`) to force refocus.
+   - Trigger the configured hotkey twice to force refocus.
    - Ensure runtime is still active (`swiftfind-core.exe`).
    - Disable conflicting always-on-top/focus-stealing utilities while validating.
 3. No results returned:
