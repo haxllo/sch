@@ -21,6 +21,16 @@ Run on Windows PowerShell:
 scripts/windows/package-windows-artifact.ps1 -Version "0.4.0-milestone"
 ```
 
+Signed packaging (PFX):
+
+```powershell
+scripts/windows/package-windows-artifact.ps1 `
+  -Version "0.4.0-milestone" `
+  -Sign `
+  -CertPath "C:\secure\certs\swiftfind-signing.pfx" `
+  -CertPassword "<PFX_PASSWORD>"
+```
+
 Expected outputs:
 
 - `artifacts/windows/swiftfind-0.4.0-milestone-windows-x64.zip`
@@ -35,6 +45,20 @@ Expected outputs:
 - `docs/release-notes-template.md`
 - `scripts/install-swiftfind.ps1`
 - `scripts/uninstall-swiftfind.ps1`
+
+## Signing Requirements
+
+- `signtool.exe` available in `PATH` (Windows SDK).
+- Valid Authenticode certificate (`.pfx`).
+- Timestamp server reachable (default: `http://timestamp.digicert.com`).
+
+If `-Sign` is enabled, packaging script will:
+
+1. Sign `target/release/swiftfind-core.exe`
+2. Verify signature via `signtool verify`
+3. Validate status via `Get-AuthenticodeSignature`
+
+If any of these fail, packaging fails.
 
 ## Installer-Prep Notes
 

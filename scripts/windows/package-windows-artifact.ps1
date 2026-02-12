@@ -1,6 +1,11 @@
 param(
   [string]$Version,
-  [string]$OutputRoot = "artifacts/windows"
+  [string]$OutputRoot = "artifacts/windows",
+  [switch]$Sign,
+  [string]$CertPath,
+  [string]$CertPassword,
+  [string]$TimestampUrl = "http://timestamp.digicert.com",
+  [string]$SignTool = "signtool.exe"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -38,6 +43,53 @@ if (-not (Test-Path $coreExe)) {
   throw "Expected core executable not found at $coreExe"
 }
 
+if ($Sign) {
+  Write-Host "Signing enabled. Signing $coreExe ..." -ForegroundColor Cyan
+
+  if (-not $CertPath -or $CertPath.Trim().Length -eq 0) {
+    throw "Signing requested but -CertPath was not provided."
+  }
+  if (-not (Test-Path $CertPath)) {
+    throw "Signing requested but certificate file was not found: $CertPath"
+  }
+
+  $signtoolCmd = Get-Command $SignTool -ErrorAction SilentlyContinue
+  if (-not $signtoolCmd) {
+    throw "Signing requested but signtool was not found. Install Windows SDK SignTool or pass -SignTool with full path."
+  }
+
+  $signArgs = @(
+    "sign",
+    "/fd", "SHA256",
+    "/tr", $TimestampUrl,
+    "/td", "SHA256",
+    "/f", $CertPath
+  )
+  if ($CertPassword -and $CertPassword.Length -gt 0) {
+    $signArgs += @("/p", $CertPassword)
+  }
+  $signArgs += $coreExe
+
+  & $signtoolCmd.Source @signArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "signtool sign failed with exit code $LASTEXITCODE"
+  }
+
+  & $signtoolCmd.Source verify /pa /v $coreExe
+  if ($LASTEXITCODE -ne 0) {
+    throw "signtool verify failed with exit code $LASTEXITCODE"
+  }
+
+  $signature = Get-AuthenticodeSignature $coreExe
+  if ($signature.Status -ne "Valid") {
+    throw "Authenticode signature is not valid: $($signature.Status)"
+  }
+  Write-Host "Signature verified: $($signature.SignerCertificate.Subject)" -ForegroundColor Green
+}
+else {
+  Write-Host "Signing skipped (unsigned artifact)." -ForegroundColor Yellow
+}
+
 Copy-Item $coreExe (Join-Path $stageDir "bin/swiftfind-core.exe") -Force
 if (Test-Path "apps/assets/swiftfinder.svg") {
   Copy-Item "apps/assets/swiftfinder.svg" (Join-Path $stageDir "assets/swiftfinder.svg") -Force
@@ -53,6 +105,7 @@ $manifest = [ordered]@{
   built_utc = (Get-Date).ToUniversalTime().ToString('o')
   build_stamp = $stamp
   os = "windows-x64"
+  signed = [bool]$Sign
   files = @(
     "bin/swiftfind-core.exe",
     "assets/swiftfinder.svg",
