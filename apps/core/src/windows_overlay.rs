@@ -45,7 +45,6 @@ mod imp {
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SETFOCUS, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
-        WM_MOUSELEAVE, TrackMouseEvent, TRACKMOUSEEVENT, TME_LEAVE,
         WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
@@ -100,6 +99,7 @@ mod imp {
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
     const TIMER_ROW_ANIM: usize = 0xBEF2;
+    const TIMER_HELP_HOVER: usize = 0xBEF3;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
@@ -109,6 +109,7 @@ mod imp {
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
+    const HELP_HOVER_POLL_MS: u32 = 33;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -1158,6 +1159,11 @@ mod imp {
                         }
                     }
                 }
+                if wparam == TIMER_HELP_HOVER {
+                    if let Some(state) = state_for(hwnd) {
+                        sync_help_hover_with_cursor(hwnd, state);
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -1173,6 +1179,9 @@ mod imp {
                 0
             }
             WM_NCDESTROY => {
+                unsafe {
+                    KillTimer(hwnd, TIMER_HELP_HOVER);
+                }
                 let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
                 if !state_ptr.is_null() {
                     unsafe {
@@ -1221,22 +1230,10 @@ mod imp {
             }
             if message == WM_MOUSEMOVE {
                 if hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd {
-                    let mut tme = TRACKMOUSEEVENT {
-                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                        dwFlags: TME_LEAVE,
-                        hwndTrack: hwnd,
-                        dwHoverTime: 0,
-                    };
-                    unsafe {
-                        TrackMouseEvent(&mut tme);
-                    }
                     set_help_hover_state(parent, state, true);
                 } else if state.help_hovered {
-                    set_help_hover_state(parent, state, false);
+                    sync_help_hover_with_cursor(parent, state);
                 }
-            }
-            if message == WM_MOUSELEAVE && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd) {
-                set_help_hover_state(parent, state, false);
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
                 && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
@@ -2079,6 +2076,7 @@ mod imp {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_ROW_ANIM);
+            KillTimer(hwnd, TIMER_HELP_HOVER);
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
@@ -2394,6 +2392,28 @@ mod imp {
         }
     }
 
+    fn sync_help_hover_with_cursor(hwnd: HWND, state: &mut OverlayShellState) {
+        let mut cursor = POINT { x: 0, y: 0 };
+        unsafe {
+            GetCursorPos(&mut cursor);
+        }
+
+        let mut help_rect: RECT = unsafe { std::mem::zeroed() };
+        let mut tip_rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetWindowRect(state.help_hwnd, &mut help_rect);
+            GetWindowRect(state.help_tip_hwnd, &mut tip_rect);
+        }
+
+        let over_help = point_in_rect(&help_rect, cursor);
+        let over_tip = state.help_tip_visible && point_in_rect(&tip_rect, cursor);
+        set_help_hover_state(hwnd, state, over_help || over_tip);
+    }
+
+    fn point_in_rect(rect: &RECT, point: POINT) -> bool {
+        point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
+    }
+
     fn set_help_hover_state(hwnd: HWND, state: &mut OverlayShellState, hovered: bool) {
         if state.help_hovered == hovered {
             return;
@@ -2409,6 +2429,7 @@ mod imp {
             let wide = to_wide(&help_hint_text(state));
             unsafe {
                 SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
+                SetTimer(hwnd, TIMER_HELP_HOVER, HELP_HOVER_POLL_MS, None);
             }
             layout_children(hwnd, state);
             unsafe {
@@ -2422,8 +2443,13 @@ mod imp {
             let wide = to_wide(&help_hint_text(state));
             unsafe {
                 SetWindowTextW(state.help_tip_hwnd, wide.as_ptr());
+                KillTimer(hwnd, TIMER_HELP_HOVER);
             }
             layout_children(hwnd, state);
+        } else {
+            unsafe {
+                KillTimer(hwnd, TIMER_HELP_HOVER);
+            }
         }
     }
 
