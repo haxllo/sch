@@ -1114,6 +1114,14 @@ mod imp {
             WM_ACTIVATE => {
                 let activation = (wparam & 0xFFFF) as u32;
                 if activation == 0 {
+                    let activated_hwnd = lparam as HWND;
+                    if let Some(state) = state_for(hwnd) {
+                        // The help tip is a no-activate popup owned by this overlay.
+                        // Ignore this activation change so hovering/clicking "?" does not close the launcher.
+                        if activated_hwnd == state.help_tip_hwnd {
+                            return 0;
+                        }
+                    }
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_ESCAPE, 0, 0);
                     }
