@@ -48,6 +48,14 @@ Behavior details:
 - Pressing `Alt+Space` while launcher is visible but not focused brings focus back.
 - Search and launch failures are shown in launcher status text.
 
+## UI Characteristics (Final)
+
+- Compact centered launcher window (approx. 640x340) with rounded panel edges.
+- High-contrast input field, result list, and status line tuned for low visual noise.
+- Result rows show `title` and a trimmed path column for quick scanning.
+- Subtle fade-in/fade-out transitions on show/hide.
+- Input focus is forced on open and text is selected for immediate re-query.
+
 ## Manual Validation Checklist
 
 Run these on a real Windows host:
@@ -64,6 +72,25 @@ Run these on a real Windows host:
 5. Confirm hide behavior:
    - Press `Esc` to hide overlay.
    - Press `Alt+Space` while focused to hide overlay.
+6. Confirm visual polish:
+   - Window appears compact and centered (not oversized).
+   - Result row selection updates using keyboard and mouse hover.
+   - Status line color changes for error states.
+
+## Screenshot Notes (Before/After)
+
+Capture two screenshots on a Windows host for release notes:
+
+1. Before polish reference:
+   - plain large launcher shell from earlier Sprint 6 state.
+2. After polish reference:
+   - compact rounded launcher shell with styled input/list/status and fade transitions.
+
+Recommended capture points:
+
+- `overlay-idle.png`: just opened (`Alt+Space`), empty query, focused input.
+- `overlay-results.png`: populated results with one selected row.
+- `overlay-error.png`: launch/search error status visible.
 
 ## Troubleshooting Checklist
 

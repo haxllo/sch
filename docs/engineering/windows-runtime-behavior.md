@@ -16,6 +16,10 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - `Enter` launches selected result and hides launcher on success
    - `Esc` hides launcher
 7. Search and launch errors are surfaced inside launcher status text.
+8. Visual/UX polish:
+   - compact Spotlight-like proportions
+   - styled input/list/status contrast with readable hierarchy
+   - lightweight fade animation for show/hide transitions
 
 Known limitations in this milestone:
 
@@ -25,3 +29,6 @@ Known limitations in this milestone:
 
 Operator steps and troubleshooting are documented in:
 - `docs/engineering/windows-operator-runbook.md`
+
+Screenshot capture checklist is documented in:
+- `docs/engineering/windows-operator-runbook.md` (`Screenshot Notes (Before/After)`)
