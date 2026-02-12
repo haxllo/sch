@@ -1,4 +1,8 @@
 fn main() {
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let allow_missing_icon = std::env::var("SWIFTFIND_ALLOW_MISSING_ICON")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "windows" {
         return;
@@ -6,7 +10,15 @@ fn main() {
 
     let icon_path = "../assets/swiftfinder.ico";
     if !std::path::Path::new(icon_path).exists() {
-        panic!("missing Windows icon file: {icon_path}");
+        if profile == "release" && !allow_missing_icon {
+            panic!(
+                "missing Windows icon file for release build: {icon_path}. Add apps/assets/swiftfinder.ico"
+            );
+        }
+        println!(
+            "cargo:warning=swiftfind-core: Windows icon missing at {icon_path}; continuing without embedded icon"
+        );
+        return;
     }
 
     let mut res = winres::WindowsResource::new();

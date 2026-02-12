@@ -10,8 +10,10 @@ use crate::windows_overlay::{
     is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
     NativeOverlayShell, OverlayEvent, OverlayRow,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
+static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -127,8 +129,10 @@ pub fn run() -> Result<(), RuntimeError> {
 }
 
 pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
+    configure_stdio_logging(options);
+
     if let Err(error) = crate::logging::init() {
-        eprintln!("[swiftfind-core] logging init warning: {error}");
+        log_warn(&format!("[swiftfind-core] logging init warning: {error}"));
     }
 
     #[cfg(target_os = "windows")]
@@ -435,6 +439,7 @@ fn spawn_background_process() -> Result<(), RuntimeError> {
     let exe = std::env::current_exe()?;
     let mut command = std::process::Command::new(exe);
     command.arg("--foreground");
+    command.env("SWIFTFIND_SUPPRESS_STDIO", "1");
     command.creation_flags(0x00000008 | 0x00000200 | 0x08000000);
     command.stdin(std::process::Stdio::null());
     command.stdout(std::process::Stdio::null());
@@ -671,14 +676,32 @@ fn onboarding_hint(hotkey: &str) -> String {
     format!("Welcome to SwiftFind. Hotkey: {hotkey}. If this conflicts, click ? to edit config.")
 }
 
+fn configure_stdio_logging(options: RuntimeOptions) {
+    let suppress_from_env = std::env::var("SWIFTFIND_SUPPRESS_STDIO")
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let suppress_for_background = options.command == RuntimeCommand::Run && options.background;
+    STDIO_LOGGING_ENABLED.store(
+        !(suppress_from_env || suppress_for_background),
+        Ordering::Relaxed,
+    );
+}
+
+fn should_log_to_stdio() -> bool {
+    STDIO_LOGGING_ENABLED.load(Ordering::Relaxed)
+}
+
 fn log_info(message: &str) {
-    println!("{message}");
+    if should_log_to_stdio() {
+        println!("{message}");
+    }
     crate::logging::info(message);
 }
 
-#[cfg(target_os = "windows")]
 fn log_warn(message: &str) {
-    eprintln!("{message}");
+    if should_log_to_stdio() {
+        eprintln!("{message}");
+    }
     crate::logging::warn(message);
 }
 
