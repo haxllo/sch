@@ -11,7 +11,7 @@ mod imp {
         EndPaint, FillRect, FillRgn, FrameRgn, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
-        FR_PRIVATE, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED};
@@ -137,6 +137,7 @@ mod imp {
         edit_hwnd: HWND,
         list_hwnd: HWND,
         status_hwnd: HWND,
+        cue_text_wide: Vec<u16>,
 
         edit_prev_proc: isize,
         list_prev_proc: isize,
@@ -664,7 +665,7 @@ mod imp {
                         unsafe { CreateSolidBrush(COLOR_SELECTION_ACCENT) } as isize;
                     state.icon_brush = unsafe { CreateSolidBrush(COLOR_ICON_BG) } as isize;
 
-                    state.input_font = create_font(FONT_INPUT_HEIGHT, FW_SEMIBOLD as i32);
+                    state.input_font = create_font(FONT_INPUT_HEIGHT, FW_MEDIUM as i32);
                     state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
                     state.meta_font = create_font(FONT_META_HEIGHT, FW_MEDIUM as i32);
                     state.status_font = create_font(FONT_STATUS_HEIGHT, FW_MEDIUM as i32);
@@ -729,12 +730,12 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
-                        let cue_text = to_wide("Type to search");
+                        state.cue_text_wide = to_wide("Type to search");
                         SendMessageW(
                             state.edit_hwnd,
                             EM_SETCUEBANNER,
                             1,
-                            cue_text.as_ptr() as LPARAM,
+                            state.cue_text_wide.as_ptr() as LPARAM,
                         );
 
                         state.edit_prev_proc = SetWindowLongPtrW(
@@ -824,10 +825,10 @@ mod imp {
                     if target == state.edit_hwnd {
                         unsafe {
                             SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
-                            SetBkColor(wparam as _, COLOR_PANEL_BG);
-                            SetBkMode(wparam as _, TRANSPARENT as i32);
+                            SetBkColor(wparam as _, COLOR_INPUT_BG);
+                            SetBkMode(wparam as _, OPAQUE as i32);
                         }
-                        return state.panel_brush;
+                        return state.input_brush;
                     }
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
