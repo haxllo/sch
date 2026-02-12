@@ -34,9 +34,29 @@ When running on Windows:
 If config file does not exist, runtime writes defaults to the stable app-data location on startup.
 The generated file is a user-focused template with inline comments (JSON5-compatible).
 
-## Change Hotkey Safely
+## Settings UI (Hotkey, Startup, Max Results)
 
-1. Open `%APPDATA%\SwiftFind\config.json`.
+Use the in-app settings window from the launcher:
+
+1. Open launcher with your configured hotkey.
+2. Click `?` in the right side of the input area.
+3. Edit:
+   - `Hotkey`
+   - `Launch at Windows startup`
+   - `Max results`
+4. Click `Save`.
+5. Restart `swiftfind-core` to apply the new hotkey registration.
+
+Behavior notes:
+
+- Settings window is created only on demand (lazy-created), then closed.
+- If settings window cannot open, SwiftFind falls back to opening `%APPDATA%\SwiftFind\config.json`.
+- Hotkey and max-results values are validated before save.
+- Startup toggle updates both config and current Windows startup registration.
+
+## Change Hotkey via Config File (Fallback)
+
+1. Open `%APPDATA%\SwiftFind\config.json` directly.
 2. Update the `hotkey` value.
 3. Restart `swiftfind-core`.
 
@@ -44,7 +64,7 @@ Notes:
 
 - You can keep inline comments in this file (`// ...`).
 - Most users only need to edit `hotkey`.
-- `max_results` and `discovery_roots` are optional tuning.
+- `launch_at_startup`, `max_results`, and `discovery_roots` are optional tuning.
 
 Recommended low-conflict hotkeys on Windows:
 
@@ -52,6 +72,7 @@ Recommended low-conflict hotkeys on Windows:
 - `Ctrl+Alt+Space`
 - `Alt+Shift+Space`
 - `Ctrl+Shift+P`
+- `Ctrl+Alt+P`
 
 Avoid these common system/reserved shortcuts:
 
@@ -177,6 +198,12 @@ Recommended capture points:
    - Verify `swiftfind-core.exe` in Task Manager Details tab.
 6. JS tests flaky on Windows:
    - Use `pnpm vitest --run` with repo `vitest.config.ts` (single-fork mode configured).
+7. Settings save fails:
+   - Ensure `%APPDATA%\SwiftFind\config.json` is writable.
+   - Check if the config file is locked by another process/editor.
+8. Startup toggle does not stick:
+   - Verify Windows per-user Run key allows writes in your environment.
+   - Reopen settings and confirm `Launch at Windows startup` state persisted.
 
 ## Validation Commands
 

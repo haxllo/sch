@@ -41,9 +41,29 @@ Expected:
 
 5. Press `Enter` on a valid result.
 - Expected: selected launch path is executed.
+ - Expected: launcher closes immediately after successful launch.
 
-6. Trigger an invalid launch target (missing path or denied access).
+6. Single-click a valid result row.
+- Expected: clicked result launches immediately (no separate confirm click required).
+
+7. Trigger an invalid launch target (missing path or denied access).
 - Expected: user-visible error message appears in launcher UI.
+
+8. Close behavior checks.
+- Press `Esc`: launcher hides and query clears.
+- Click outside launcher: launcher hides and query clears.
+- Reopen with hotkey: input starts clean with no stale query text.
+
+9. Settings window checks.
+- Click `?` in launcher input area.
+- Expected: settings window opens with fields for hotkey, startup toggle, and max results.
+- Change `max results`, save, reopen settings, and confirm persisted value.
+- Toggle startup on/off and save.
+- Expected: setting persists after reopening settings.
+
+10. Fallback checks.
+- If settings UI fails to open in your environment, fallback opens `%APPDATA%\SwiftFind\config.json`.
+- Expected: no crash; user still has a path to update hotkey and startup options.
 
 Record pass/fail evidence:
 
