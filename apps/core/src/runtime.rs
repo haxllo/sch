@@ -205,8 +205,29 @@ fn runtime_mode() -> &'static str {
 fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
     results
         .iter()
-        .map(|item| format!("{}  -  {}", item.title, item.path))
+        .map(|item| {
+            let display_path = trim_path_for_row(&item.path, 72);
+            format!("{}\\t{}", item.title, display_path)
+        })
         .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn trim_path_for_row(path: &str, max_chars: usize) -> String {
+    if path.chars().count() <= max_chars {
+        return path.to_string();
+    }
+
+    let tail_len = max_chars.saturating_sub(3);
+    let tail: String = path
+        .chars()
+        .rev()
+        .take(tail_len)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("...{tail}")
 }
 
 #[cfg(target_os = "windows")]

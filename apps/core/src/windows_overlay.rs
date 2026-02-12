@@ -4,27 +4,32 @@ mod imp {
     use std::sync::OnceLock;
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
-    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn, COLOR_WINDOW};
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, SetBkColor, SetBkMode,
+        SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, FF_DONTCARE, FW_MEDIUM,
+        FW_SEMIBOLD, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::EM_SETSEL;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
-        GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics, GetWindowLongPtrW,
-        GetWindowTextLengthW, GetWindowTextW, IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL,
-        LB_RESETCONTENT, LB_SETCURSEL, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
-        RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-        SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-        CW_USEDEFAULT, GWLP_USERDATA, GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, MSG,
-        SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_APP,
-        WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE,
-        WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
-        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EN_CHANGE, ES_AUTOHSCROLL, LBN_DBLCLK, LBS_NOTIFY,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, FillRect,
+        GetClientRect, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
+        GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, InvalidateRect, IsChild,
+        LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
+        LB_SETTABSTOPS, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
+        SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
+        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
+        CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, GWLP_USERDATA, GWLP_WNDPROC, HMENU,
+        HWND_TOPMOST, IDC_ARROW, LBN_DBLCLK, LBS_NOTIFY, MSG, SM_CXSCREEN, SM_CYSCREEN,
+        SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WM_APP,
+        WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT,
+        WM_CTLCOLORSTATIC, WM_DESTROY, WM_ERASEBKGND, WM_HOTKEY, WM_KEYDOWN, WM_MOUSEMOVE,
+        WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD,
+        WS_CLIPCHILDREN, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
+        WS_VSCROLL,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -44,11 +49,19 @@ mod imp {
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
     const CONTROL_ID_STATUS: usize = 1003;
+
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
     const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
     const SWIFTFIND_WM_MOVE_UP: u32 = WM_APP + 3;
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
+
+    const COLOR_PANEL_BG: u32 = 0x001A1511;
+    const COLOR_EDIT_BG: u32 = 0x00201814;
+    const COLOR_LIST_BG: u32 = 0x001E1712;
+    const COLOR_TEXT_PRIMARY: u32 = 0x00F0EAE3;
+    const COLOR_TEXT_SECONDARY: u32 = 0x00B8ADA1;
+    const COLOR_TEXT_ERROR: u32 = 0x007268FF;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -70,6 +83,13 @@ mod imp {
         status_hwnd: HWND,
         edit_prev_proc: isize,
         list_prev_proc: isize,
+        input_font: isize,
+        list_font: isize,
+        status_font: isize,
+        panel_brush: isize,
+        edit_brush: isize,
+        list_brush: isize,
+        status_is_error: bool,
     }
 
     impl NativeOverlayShell {
@@ -78,17 +98,16 @@ mod imp {
             let class_name = class_name_wide();
 
             let mut class: WNDCLASSW = unsafe { std::mem::zeroed() };
-            class.style = CS_HREDRAW | CS_VREDRAW;
+            class.style = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW;
             class.lpfnWndProc = Some(overlay_wnd_proc);
             class.hInstance = instance;
             class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
-            class.hbrBackground = (COLOR_WINDOW as isize + 1) as _;
+            class.hbrBackground = std::ptr::null_mut();
             class.lpszClassName = class_name.as_ptr();
 
             let atom = unsafe { RegisterClassW(&class) };
             if atom == 0 {
                 let error = unsafe { GetLastError() };
-                // ERROR_CLASS_ALREADY_EXISTS
                 if error != 1410 {
                     return Err(format!("RegisterClassW failed with error {error}"));
                 }
@@ -127,10 +146,6 @@ mod imp {
             shell.apply_rounded_corners();
             shell.hide();
             Ok(shell)
-        }
-
-        pub fn hwnd(&self) -> HWND {
-            self.hwnd
         }
 
         pub fn is_visible(&self) -> bool {
@@ -196,9 +211,11 @@ mod imp {
 
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
+                state.status_is_error = status_is_error(message);
                 let wide = to_wide(message);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
                 }
             }
         }
@@ -274,7 +291,7 @@ mod imp {
                 return;
             }
             unsafe {
-                let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 22, 22);
+                let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 24, 24);
                 SetWindowRgn(self.hwnd, region, 1);
             }
         }
@@ -294,7 +311,7 @@ mod imp {
                     return Ok(());
                 }
 
-                 match msg.message {
+                match msg.message {
                     WM_HOTKEY => on_event(OverlayEvent::Hotkey(msg.wParam as i32)),
                     SWIFTFIND_WM_QUERY_CHANGED => {
                         on_event(OverlayEvent::QueryChanged(self.query_text()));
@@ -334,11 +351,12 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
-                    let font = unsafe {
-                        windows_sys::Win32::Graphics::Gdi::GetStockObject(
-                            windows_sys::Win32::Graphics::Gdi::DEFAULT_GUI_FONT,
-                        )
-                    };
+                    state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
+                    state.edit_brush = unsafe { CreateSolidBrush(COLOR_EDIT_BG) } as isize;
+                    state.list_brush = unsafe { CreateSolidBrush(COLOR_LIST_BG) } as isize;
+                    state.input_font = create_font(-22, FW_SEMIBOLD as i32);
+                    state.list_font = create_font(-17, FW_MEDIUM as i32);
+                    state.status_font = create_font(-15, FW_MEDIUM as i32);
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -376,7 +394,7 @@ mod imp {
                         CreateWindowExW(
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
-                            to_wide("").as_ptr(),
+                            to_wide("Ready").as_ptr(),
                             WS_CHILD | WS_VISIBLE,
                             0,
                             0,
@@ -390,26 +408,44 @@ mod imp {
                     };
 
                     unsafe {
-                        SendMessageW(state.edit_hwnd, WM_SETFONT, font as usize, 1);
-                        SendMessageW(state.list_hwnd, WM_SETFONT, font as usize, 1);
-                        SendMessageW(state.status_hwnd, WM_SETFONT, font as usize, 1);
+                        SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
+                        SendMessageW(state.list_hwnd, WM_SETFONT, state.list_font as usize, 1);
+                        SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        let tab_stop = [252_i32];
+                        SendMessageW(
+                            state.list_hwnd,
+                            LB_SETTABSTOPS,
+                            1,
+                            tab_stop.as_ptr() as LPARAM,
+                        );
 
-                        state.edit_prev_proc =
-                            SetWindowLongPtrW(
-                                state.edit_hwnd,
-                                GWLP_WNDPROC,
-                                control_subclass_proc as *const () as isize,
-                            );
-                        state.list_prev_proc =
-                            SetWindowLongPtrW(
-                                state.list_hwnd,
-                                GWLP_WNDPROC,
-                                control_subclass_proc as *const () as isize,
-                            );
+                        state.edit_prev_proc = SetWindowLongPtrW(
+                            state.edit_hwnd,
+                            GWLP_WNDPROC,
+                            control_subclass_proc as *const () as isize,
+                        );
+                        state.list_prev_proc = SetWindowLongPtrW(
+                            state.list_hwnd,
+                            GWLP_WNDPROC,
+                            control_subclass_proc as *const () as isize,
+                        );
                     }
                     layout_children(hwnd, state);
                 }
                 0
+            }
+            WM_ERASEBKGND => {
+                if let Some(state) = state_for(hwnd) {
+                    if state.panel_brush != 0 {
+                        let mut rect: RECT = unsafe { std::mem::zeroed() };
+                        unsafe {
+                            GetClientRect(hwnd, &mut rect);
+                            FillRect(wparam as _, &rect, state.panel_brush as _);
+                        }
+                        return 1;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
             WM_COMMAND => {
                 let control_id = wparam & 0xffff;
@@ -425,6 +461,51 @@ mod imp {
                         PostMessageW(hwnd, SWIFTFIND_WM_SUBMIT, 0, 0);
                     }
                     return 0;
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            WM_CTLCOLOREDIT => {
+                if let Some(state) = state_for(hwnd) {
+                    unsafe {
+                        SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
+                        SetBkColor(wparam as _, COLOR_EDIT_BG);
+                    }
+                    if state.edit_brush != 0 {
+                        return state.edit_brush;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            WM_CTLCOLORLISTBOX => {
+                if let Some(state) = state_for(hwnd) {
+                    unsafe {
+                        SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
+                        SetBkColor(wparam as _, COLOR_LIST_BG);
+                    }
+                    if state.list_brush != 0 {
+                        return state.list_brush;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            WM_CTLCOLORSTATIC => {
+                if let Some(state) = state_for(hwnd) {
+                    let control = lparam as HWND;
+                    if control == state.status_hwnd {
+                        let text_color = if state.status_is_error {
+                            COLOR_TEXT_ERROR
+                        } else {
+                            COLOR_TEXT_SECONDARY
+                        };
+                        unsafe {
+                            SetTextColor(wparam as _, text_color);
+                            SetBkColor(wparam as _, COLOR_PANEL_BG);
+                            SetBkMode(wparam as _, TRANSPARENT as i32);
+                        }
+                        if state.panel_brush != 0 {
+                            return state.panel_brush;
+                        }
+                    }
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
@@ -455,6 +536,24 @@ mod imp {
                 let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
                 if !state_ptr.is_null() {
                     unsafe {
+                        if (*state_ptr).input_font != 0 {
+                            DeleteObject((*state_ptr).input_font as _);
+                        }
+                        if (*state_ptr).list_font != 0 {
+                            DeleteObject((*state_ptr).list_font as _);
+                        }
+                        if (*state_ptr).status_font != 0 {
+                            DeleteObject((*state_ptr).status_font as _);
+                        }
+                        if (*state_ptr).panel_brush != 0 {
+                            DeleteObject((*state_ptr).panel_brush as _);
+                        }
+                        if (*state_ptr).edit_brush != 0 {
+                            DeleteObject((*state_ptr).edit_brush as _);
+                        }
+                        if (*state_ptr).list_brush != 0 {
+                            DeleteObject((*state_ptr).list_brush as _);
+                        }
                         let _ = Box::from_raw(state_ptr);
                         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                     }
@@ -474,6 +573,20 @@ mod imp {
         let parent = unsafe { GetParent(hwnd) };
         if parent.is_null() {
             return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
+        }
+
+        if let Some(state) = state_for(parent) {
+            if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
+                let idx = unsafe { SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, lparam) };
+                let item_index = (idx & 0xFFFF) as usize;
+                let outside = ((idx >> 16) & 0xFFFF) != 0;
+                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
+                if !outside && count > 0 && item_index < count as usize {
+                    unsafe {
+                        SendMessageW(hwnd, LB_SETCURSEL, item_index, 0);
+                    }
+                }
+            }
         }
 
         if message == WM_KEYDOWN {
@@ -523,10 +636,9 @@ mod imp {
         }
 
         let prev_proc = unsafe {
-            std::mem::transmute::<
-                isize,
-                windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC,
-            >(prev_ptr)
+            std::mem::transmute::<isize, windows_sys::Win32::UI::WindowsAndMessaging::WNDPROC>(
+                prev_ptr,
+            )
         };
         unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) }
     }
@@ -586,9 +698,32 @@ mod imp {
 
     fn class_name_wide() -> &'static [u16] {
         static CLASS_NAME_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
-        CLASS_NAME_WIDE
-            .get_or_init(|| to_wide(CLASS_NAME))
-            .as_slice()
+        CLASS_NAME_WIDE.get_or_init(|| to_wide(CLASS_NAME)).as_slice()
+    }
+
+    fn create_font(height: i32, weight: i32) -> isize {
+        unsafe {
+            CreateFontW(
+                height,
+                0,
+                0,
+                0,
+                weight,
+                0,
+                0,
+                0,
+                DEFAULT_CHARSET as u32,
+                OUT_DEFAULT_PRECIS,
+                0,
+                DEFAULT_QUALITY,
+                FF_DONTCARE as u32,
+                to_wide("Segoe UI").as_ptr(),
+            )
+        } as isize
+    }
+
+    fn status_is_error(message: &str) -> bool {
+        message.to_ascii_lowercase().contains("error")
     }
 
     fn to_wide(value: &str) -> Vec<u16> {
