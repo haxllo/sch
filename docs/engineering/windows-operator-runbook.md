@@ -1,6 +1,6 @@
-# Windows Operator Runbook (Sprint 5)
+# Windows Operator Runbook (Sprint 6)
 
-This runbook covers how to run and validate the current SwiftFind Windows runtime milestone.
+This runbook covers how to run and validate the SwiftFind native Windows overlay runtime.
 
 ## Start Runtime
 
@@ -33,13 +33,37 @@ When running on Windows:
 
 If config file does not exist, runtime creates defaults in the stable app-data location.
 
-## Launcher Flow (Current Milestone)
+## Launcher Flow (Native Overlay)
 
 1. Press hotkey (`Alt+Space` by default).
-2. Runtime enters console launcher prompt.
-3. Type query and press Enter.
-4. Select numbered result and press Enter.
-5. Runtime attempts launch and prints success/error.
+2. A centered floating launcher overlay appears and input is focused.
+3. Type query text to fetch ranked results.
+4. Use `Up` / `Down` to move selection.
+5. Press `Enter` to launch selected result.
+6. Press `Esc` to hide launcher.
+
+Behavior details:
+
+- Pressing `Alt+Space` while launcher is focused hides it.
+- Pressing `Alt+Space` while launcher is visible but not focused brings focus back.
+- Search and launch failures are shown in launcher status text.
+
+## Manual Validation Checklist
+
+Run these on a real Windows host:
+
+1. Start runtime:
+   - `cargo run -p swiftfind-core`
+2. Confirm process visibility:
+   - Task Manager shows `swiftfind-core.exe`.
+3. Confirm hotkey:
+   - `Alt+Space` opens the overlay.
+4. Confirm search + launch:
+   - Type a query with known indexed result.
+   - Press `Enter` and verify target launches.
+5. Confirm hide behavior:
+   - Press `Esc` to hide overlay.
+   - Press `Alt+Space` while focused to hide overlay.
 
 ## Troubleshooting Checklist
 
@@ -47,17 +71,23 @@ If config file does not exist, runtime creates defaults in the stable app-data l
    - Check startup log for `hotkey registered native_id=...`.
    - Try changing hotkey in `%APPDATA%\SwiftFind\config.json` to avoid OS/app conflicts.
    - Restart runtime after config change.
-2. No results returned:
+   - Check if another launcher utility (PowerToys, Flow Launcher, etc.) is intercepting `Alt+Space`.
+2. Overlay does not focus or appears behind apps:
+   - Trigger hotkey twice (`Alt+Space`) to force refocus.
+   - Ensure runtime is still active (`swiftfind-core.exe`).
+   - Disable conflicting always-on-top/focus-stealing utilities while validating.
+3. No results returned:
    - Check startup `indexed_items` value.
    - Confirm discovery roots in config are valid and accessible.
    - Re-run runtime to rebuild index.
-3. Launch fails:
-   - Read printed `launcher error` text.
+4. Launch fails:
+   - Read launcher status text (`Launch error: ...`).
    - Confirm selected item path still exists.
-4. Process not visible:
+   - Verify the path is launchable from Explorer/Run dialog.
+5. Process not visible:
    - Ensure `cargo run -p swiftfind-core` is still running.
    - Verify `swiftfind-core.exe` in Task Manager Details tab.
-5. JS tests flaky on Windows:
+6. JS tests flaky on Windows:
    - Use `pnpm vitest --run` with repo `vitest.config.ts` (single-fork mode configured).
 
 ## Validation Commands
