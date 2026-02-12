@@ -1318,12 +1318,8 @@ mod imp {
         let input_width = width - PANEL_MARGIN_X * 2;
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
-        let idle_compact = !state.results_visible && !status_visible;
-        let input_top = if idle_compact {
-            ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0)
-        } else {
-            PANEL_MARGIN_TOP
-        };
+        // Keep the input bar anchored at a stable vertical position in all states.
+        let input_top = ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0);
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
         let list_top = COMPACT_HEIGHT + ROW_GAP / 2;
