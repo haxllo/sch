@@ -222,6 +222,7 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
             kind: item.kind.clone(),
             title: item.title.clone(),
             path: overlay_subtitle(item),
+            icon_path: item.path.clone(),
         })
         .collect()
 }

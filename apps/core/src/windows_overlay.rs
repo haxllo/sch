@@ -1,26 +1,34 @@
 #[cfg(target_os = "windows")]
 mod imp {
+    use std::collections::HashMap;
     use std::ffi::c_void;
     use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
     use std::time::Instant;
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+    };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FillRgn, FrameRgn, FrameRect, GetDC, GetTextMetricsW, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
+        EndPaint, FillRect, FillRgn, FrameRgn, GetDC, GetTextMetricsW, HDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT,
         TEXTMETRICW,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::Shell::{
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+    };
     use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
+        DestroyIcon, DI_NORMAL, DrawIconEx,
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX,
@@ -133,6 +141,7 @@ mod imp {
         pub kind: String,
         pub title: String,
         pub path: String,
+        pub icon_path: String,
     }
 
     pub struct NativeOverlayShell {
@@ -175,6 +184,7 @@ mod imp {
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
+        icon_cache: HashMap<String, isize>,
     }
 
     struct WindowAnimation {
@@ -908,7 +918,7 @@ mod imp {
                 let state_ptr = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
                 if !state_ptr.is_null() {
                     unsafe {
-                        cleanup_state_resources(&*state_ptr);
+                        cleanup_state_resources(&mut *state_ptr);
                         let _ = Box::from_raw(state_ptr);
                         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                     }
@@ -1125,6 +1135,7 @@ mod imp {
                 kind: "file".to_string(),
                 title: String::new(),
                 path: String::new(),
+                icon_path: String::new(),
             });
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
@@ -1162,21 +1173,23 @@ mod imp {
                 bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE,
             };
             FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
-            FrameRect(dis.hDC, &icon_rect, state.border_brush as _);
 
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
 
-            let mut icon_text_rect = icon_rect;
-            SetTextColor(dis.hDC, COLOR_ICON_TEXT);
-            DrawTextW(
-                dis.hDC,
-                to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
-                -1,
-                &mut icon_text_rect,
-                DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-            );
+            let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
+            if !icon_drawn {
+                let mut icon_text_rect = icon_rect;
+                SetTextColor(dis.hDC, COLOR_ICON_TEXT);
+                DrawTextW(
+                    dis.hDC,
+                    to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
+                    -1,
+                    &mut icon_text_rect,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                );
+            }
 
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
             let text_left = icon_rect.right + ROW_ICON_GAP;
@@ -1233,6 +1246,130 @@ mod imp {
         } else {
             "F"
         }
+    }
+
+    fn draw_row_icon(hdc: HDC, icon_rect: &RECT, row: &OverlayRow, state: &mut OverlayShellState) -> bool {
+        let Some(icon_handle) = icon_handle_for_row(state, row) else {
+            return false;
+        };
+        let icon_size = (ROW_ICON_SIZE - 4).max(16);
+        let x = icon_rect.left + (ROW_ICON_SIZE - icon_size) / 2;
+        let y = icon_rect.top + (ROW_ICON_SIZE - icon_size) / 2;
+        unsafe {
+            DrawIconEx(
+                hdc,
+                x,
+                y,
+                icon_handle as _,
+                icon_size,
+                icon_size,
+                0,
+                std::ptr::null_mut(),
+                DI_NORMAL,
+            ) != 0
+        }
+    }
+
+    fn icon_handle_for_row(state: &mut OverlayShellState, row: &OverlayRow) -> Option<isize> {
+        let key = icon_cache_key(row);
+        if let Some(cached) = state.icon_cache.get(&key) {
+            return if *cached == 0 { None } else { Some(*cached) };
+        }
+
+        let loaded = load_shell_icon_for_row(row).unwrap_or(0);
+        state.icon_cache.insert(key, loaded);
+        if loaded == 0 {
+            None
+        } else {
+            Some(loaded)
+        }
+    }
+
+    fn icon_cache_key(row: &OverlayRow) -> String {
+        let kind = row.kind.to_ascii_lowercase();
+        let source = row.icon_path.trim().to_ascii_lowercase();
+        if source.is_empty() {
+            format!("kind:{kind}")
+        } else {
+            format!("kind:{kind}|{source}")
+        }
+    }
+
+    fn load_shell_icon_for_row(row: &OverlayRow) -> Option<isize> {
+        let kind = row.kind.to_ascii_lowercase();
+        let source = row.icon_path.trim();
+
+        if kind == "folder" {
+            return shell_icon_with_attrs("folder", FILE_ATTRIBUTE_DIRECTORY);
+        }
+
+        if !source.is_empty() {
+            if let Some(icon) = shell_icon_for_existing_path(source) {
+                return Some(icon);
+            }
+            if let Some(icon) = shell_icon_with_attrs(source, FILE_ATTRIBUTE_NORMAL) {
+                return Some(icon);
+            }
+        }
+
+        if kind == "app" {
+            if let Some(icon) = shell_icon_with_attrs("swiftfind.exe", FILE_ATTRIBUTE_NORMAL) {
+                return Some(icon);
+            }
+        }
+
+        shell_icon_with_attrs("swiftfind.file", FILE_ATTRIBUTE_NORMAL)
+    }
+
+    fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
+        let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let wide = to_wide(path);
+        let flags = SHGFI_ICON | SHGFI_SMALLICON;
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide.as_ptr(),
+                0,
+                &mut sfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                flags,
+            )
+        };
+        if result == 0 || sfi.hIcon.is_null() {
+            None
+        } else {
+            Some(sfi.hIcon as isize)
+        }
+    }
+
+    fn shell_icon_with_attrs(path_hint: &str, attrs: u32) -> Option<isize> {
+        let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let wide = to_wide(path_hint);
+        let flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide.as_ptr(),
+                attrs,
+                &mut sfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                flags,
+            )
+        };
+        if result == 0 || sfi.hIcon.is_null() {
+            None
+        } else {
+            Some(sfi.hIcon as isize)
+        }
+    }
+
+    fn clear_icon_cache(state: &mut OverlayShellState) {
+        for handle in state.icon_cache.values() {
+            if *handle != 0 {
+                unsafe {
+                    DestroyIcon(*handle as _);
+                }
+            }
+        }
+        state.icon_cache.clear();
     }
 
 
@@ -1632,7 +1769,7 @@ mod imp {
         }
     }
 
-    fn cleanup_state_resources(state: &OverlayShellState) {
+    fn cleanup_state_resources(state: &mut OverlayShellState) {
         unsafe {
             if state.input_font != 0 {
                 DeleteObject(state.input_font as _);
@@ -1677,6 +1814,7 @@ mod imp {
                 DeleteObject(state.icon_brush as _);
             }
         }
+        clear_icon_cache(state);
     }
 
     fn state_for(hwnd: HWND) -> Option<&'static mut OverlayShellState> {
