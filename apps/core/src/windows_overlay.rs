@@ -67,6 +67,7 @@ mod imp {
     const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
     const STATUS_FOOTER_HEIGHT: i32 = 13;
+    const STATUS_FOOTER_BOTTOM_GAP: i32 = 3;
     const ROW_HEIGHT: i32 = 56;
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
@@ -679,7 +680,10 @@ mod imp {
         fn expand_results(&self, result_count: usize) {
             let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
             let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
-            let target_height = list_top + rows * ROW_HEIGHT + PANEL_MARGIN_X;
+            // Keep enough vertical space for list rows plus footer hint area.
+            // This must mirror layout_children() bottom reserve in footer mode.
+            let footer_reserve = PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP;
+            let target_height = list_top + rows * ROW_HEIGHT + footer_reserve;
 
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = true;
@@ -2168,7 +2172,7 @@ mod imp {
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_bottom_reserved = if footer_hint_mode {
-            PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + 3
+            PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP
         } else {
             PANEL_MARGIN_X + 1
         };
