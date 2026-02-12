@@ -4,24 +4,27 @@ mod imp {
     use std::sync::OnceLock;
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
-    use windows_sys::Win32::Graphics::Gdi::CreateRoundRectRgn;
+    use windows_sys::Win32::Graphics::Gdi::{CreateRoundRectRgn, SetWindowRgn, COLOR_WINDOW};
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::Controls::EM_SETSEL;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetClientRect,
         GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics, GetWindowLongPtrW,
         GetWindowTextLengthW, GetWindowTextW, IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL,
         LB_RESETCONTENT, LB_SETCURSEL, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage,
-        RegisterClassW, SendMessageW, SetFocus, SetForegroundWindow, SetWindowLongPtrW,
-        SetWindowPos, SetWindowRgn, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
-        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EM_SETSEL, GWLP_USERDATA, GWLP_WNDPROC, HMENU,
-        HWND_TOPMOST, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW,
-        SWP_NOACTIVATE, SWP_SHOWWINDOW, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP, WM_APP, WM_CLOSE,
-        WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY,
-        WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+        RegisterClassW, SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+        SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
+        CW_USEDEFAULT, GWLP_USERDATA, GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, MSG,
+        SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_SHOWWINDOW, WM_APP,
+        WM_CLOSE, WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE,
+        WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+        WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        COLOR_WINDOW, EN_CHANGE, ES_AUTOHSCROLL, LBN_DBLCLK, LBS_NOTIFY,
+        EN_CHANGE, ES_AUTOHSCROLL, LBN_DBLCLK, LBS_NOTIFY,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -339,7 +342,7 @@ mod imp {
                             0,
                             to_wide(INPUT_CLASS).as_ptr(),
                             to_wide("").as_ptr(),
-                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL as u32,
                             0,
                             0,
                             0,
@@ -355,7 +358,7 @@ mod imp {
                             0,
                             to_wide(LIST_CLASS).as_ptr(),
                             std::ptr::null(),
-                            WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | WS_BORDER,
+                            WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY as u32 | WS_BORDER,
                             0,
                             0,
                             0,
