@@ -77,7 +77,6 @@ mod imp {
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
     const EM_SETCUEBANNER: u32 = 0x1501;
-    const EM_GETRECT: u32 = 0x00B2;
 
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
@@ -1066,15 +1065,10 @@ mod imp {
 
         let mut text_rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
-            SendMessageW(edit_hwnd, EM_GETRECT, 0, &mut text_rect as *mut RECT as LPARAM);
+            GetClientRect(edit_hwnd, &mut text_rect);
         }
-        if text_rect.right <= text_rect.left || text_rect.bottom <= text_rect.top {
-            unsafe {
-                GetClientRect(edit_hwnd, &mut text_rect);
-            }
-            text_rect.left += 10;
-            text_rect.right -= 10;
-        }
+        text_rect.left += 10;
+        text_rect.right -= 10;
         if text_rect.right <= text_rect.left {
             return;
         }
