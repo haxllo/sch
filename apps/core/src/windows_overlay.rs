@@ -466,7 +466,7 @@ mod imp {
         }
 
         if message == WM_KEYDOWN {
-            match wparam as u32 {
+            match wparam as u16 {
                 VK_ESCAPE => {
                     unsafe {
                         PostMessageW(parent, SWIFTFIND_WM_ESCAPE, 0, 0);
