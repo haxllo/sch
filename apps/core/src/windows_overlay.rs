@@ -4,10 +4,10 @@ mod imp {
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
-    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
+    use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkColor,
+        EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         OUT_DEFAULT_PRECIS, TRANSPARENT,
@@ -22,7 +22,8 @@ mod imp {
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-        LB_GETTOPINDEX, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS, LB_SETTOPINDEX, LoadCursorW,
+        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS,
+        LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
@@ -31,7 +32,7 @@ mod imp {
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
-        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEWHEEL, WM_NCCREATE,
+        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE, WS_VSCROLL,
@@ -98,6 +99,8 @@ mod imp {
     const COLOR_SELECTION: u32 = 0x00503E31;
     const COLOR_SELECTION_BORDER: u32 = 0x00614B39;
     const COLOR_ROW_HOVER: u32 = 0x00382D24;
+    const COLOR_ROW_SEPARATOR: u32 = 0x002B2B2B;
+    const COLOR_SELECTION_ACCENT: u32 = 0x007A5D45;
     const COLOR_ICON_BG: u32 = 0x00312A24;
     const COLOR_ICON_TEXT: u32 = 0x00D8D0C8;
 
@@ -898,6 +901,30 @@ mod imp {
         }
 
         if let Some(state) = state_for(parent) {
+            if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
+                let mut cursor = POINT { x: 0, y: 0 };
+                unsafe {
+                    GetCursorPos(&mut cursor);
+                    ScreenToClient(hwnd, &mut cursor);
+                }
+                let packed = ((cursor.y as u32) << 16) | (cursor.x as u32 & 0xFFFF);
+                let hit = unsafe { SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, packed as isize) };
+                let row = (hit & 0xFFFF) as i32;
+                let outside = ((hit >> 16) & 0xFFFF) != 0;
+                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) as i32 };
+                let next_hover = if outside || count <= 0 || row < 0 || row >= count {
+                    -1
+                } else {
+                    row
+                };
+
+                if next_hover != state.hover_index {
+                    state.hover_index = next_hover;
+                    unsafe {
+                        InvalidateRect(hwnd, std::ptr::null(), 1);
+                    }
+                }
+            }
             if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
@@ -1063,7 +1090,27 @@ mod imp {
                 let border_brush = CreateSolidBrush(COLOR_SELECTION_BORDER);
                 FrameRect(dis.hDC, &dis.rcItem, border_brush);
                 DeleteObject(border_brush as _);
+
+                let accent_rect = RECT {
+                    left: dis.rcItem.left + 1,
+                    top: dis.rcItem.top + 1,
+                    right: dis.rcItem.left + 4,
+                    bottom: dis.rcItem.bottom - 1,
+                };
+                let accent_brush = CreateSolidBrush(COLOR_SELECTION_ACCENT);
+                FillRect(dis.hDC, &accent_rect, accent_brush);
+                DeleteObject(accent_brush as _);
             }
+
+            let separator_rect = RECT {
+                left: dis.rcItem.left + ROW_INSET_X,
+                top: dis.rcItem.bottom - 1,
+                right: dis.rcItem.right - ROW_INSET_X,
+                bottom: dis.rcItem.bottom,
+            };
+            let separator_brush = CreateSolidBrush(COLOR_ROW_SEPARATOR);
+            FillRect(dis.hDC, &separator_rect, separator_brush);
+            DeleteObject(separator_brush as _);
 
             SelectObject(dis.hDC, old_font);
         }
