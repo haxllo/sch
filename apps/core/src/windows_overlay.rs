@@ -53,16 +53,18 @@ mod imp {
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
+    const INPUT_TOP: i32 = (COMPACT_HEIGHT - INPUT_HEIGHT) / 2;
+    const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
     const ROW_HEIGHT: i32 = 50;
-    const LIST_RADIUS: i32 = 12;
+    const LIST_RADIUS: i32 = 14;
     const MAX_VISIBLE_ROWS: usize = 6;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
-    const ROW_VERTICAL_INSET: i32 = 2;
+    const ROW_VERTICAL_INSET: i32 = 0;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -95,13 +97,13 @@ mod imp {
     const COLOR_PANEL_BG: u32 = 0x00101010;
     const COLOR_PANEL_BORDER: u32 = 0x002A2A2A;
     const COLOR_INPUT_BG: u32 = 0x00141414;
-    const COLOR_RESULTS_BG: u32 = 0x000C0C0C;
+    const COLOR_RESULTS_BG: u32 = 0x00101010;
     const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
     const COLOR_SELECTION: u32 = 0x00222222;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
-    const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
+    const COLOR_ROW_HOVER: u32 = 0x00080808;
     const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
     const COLOR_SELECTION_ACCENT: u32 = 0x004A4A4A;
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
@@ -487,7 +489,8 @@ mod imp {
 
         fn expand_results(&self, result_count: usize) {
             let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
-            let target_height = COMPACT_HEIGHT + rows * ROW_HEIGHT + PANEL_MARGIN_X;
+            let list_top = INPUT_TOP + INPUT_HEIGHT + INPUT_TO_LIST_GAP;
+            let target_height = list_top + rows * ROW_HEIGHT + PANEL_MARGIN_X;
 
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = true;
@@ -1345,10 +1348,10 @@ mod imp {
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
         // Keep input exactly centered in compact mode and stable across states.
-        let input_top = ((COMPACT_HEIGHT - INPUT_HEIGHT) / 2).max(0);
+        let input_top = INPUT_TOP.max(0);
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
-        let list_top = COMPACT_HEIGHT;
+        let list_top = input_top + INPUT_HEIGHT + INPUT_TO_LIST_GAP;
         let list_height = (height - list_top - PANEL_MARGIN_X).max(0);
 
         unsafe {
