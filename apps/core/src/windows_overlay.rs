@@ -24,7 +24,7 @@ mod imp {
         GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
         GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
         IsChild, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETTEXT, LB_GETTEXTLEN,
-        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTABSTOPS,
+        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTOPINDEX, LoadCursorW,
         MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW,
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
@@ -35,9 +35,9 @@ mod imp {
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD,
+        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
-        WS_VISIBLE, WS_VSCROLL,
+        WS_VISIBLE,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -90,20 +90,21 @@ mod imp {
     const FONT_STATUS_HEIGHT: i32 = -13;
 
     // Visual tokens.
-    const COLOR_PANEL_BG: u32 = 0x0029231F; // #1F2329 (BGR)
-    const COLOR_PANEL_BORDER: u32 = 0x00453B35; // #353B45 (BGR)
-    const COLOR_INPUT_BG: u32 = 0x00191919;
-    const COLOR_RESULTS_BG: u32 = 0x00151515;
-    const COLOR_TEXT_PRIMARY: u32 = 0x00F2EEE9;
-    const COLOR_TEXT_SECONDARY: u32 = 0x00B4AEA8;
-    const COLOR_TEXT_ERROR: u32 = 0x006666CC;
-    const COLOR_SELECTION: u32 = 0x00323232;
-    const COLOR_SELECTION_BORDER: u32 = 0x00484848;
-    const COLOR_ROW_HOVER: u32 = 0x00262626;
-    const COLOR_ROW_SEPARATOR: u32 = 0x00222222;
-    const COLOR_SELECTION_ACCENT: u32 = 0x00555555;
-    const COLOR_ICON_BG: u32 = 0x00202020;
-    const COLOR_ICON_TEXT: u32 = 0x00D0D0D0;
+    const COLOR_PANEL_BG: u32 = 0x00101010;
+    const COLOR_PANEL_BORDER: u32 = 0x002A2A2A;
+    const COLOR_INPUT_BG: u32 = 0x00141414;
+    const COLOR_RESULTS_BG: u32 = 0x000C0C0C;
+    const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
+    const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
+    const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
+    const COLOR_SELECTION: u32 = 0x00222222;
+    const COLOR_SELECTION_BORDER: u32 = 0x00383838;
+    const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
+    const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
+    const COLOR_SELECTION_ACCENT: u32 = 0x004A4A4A;
+    const COLOR_ICON_BG: u32 = 0x001D1D1D;
+    const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
+    const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -643,8 +644,6 @@ mod imp {
                             std::ptr::null(),
                             WS_CHILD
                                 | WS_TABSTOP
-                                | WS_VSCROLL
-                                | WS_BORDER
                                 | LBS_NOTIFY as u32
                                 | LBS_OWNERDRAWFIXED as u32
                                 | LBS_HASSTRINGS as u32
@@ -681,9 +680,6 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
-
-                        let tab_stop = [268_i32];
-                        SendMessageW(state.list_hwnd, LB_SETTABSTOPS, 1, tab_stop.as_ptr() as LPARAM);
 
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
@@ -909,7 +905,11 @@ mod imp {
                     if notches != 0 {
                         let target_top =
                             (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
-                        begin_scroll_animation_to_top(parent, state, target_top);
+                        state.scroll_anim_start = None;
+                        unsafe {
+                            KillTimer(parent, TIMER_SCROLL_ANIM);
+                            SendMessageW(hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+                        }
                     }
                 }
                 return 0;
@@ -1408,6 +1408,20 @@ mod imp {
         CLASS_NAME_WIDE.get_or_init(|| to_wide(CLASS_NAME)).as_slice()
     }
 
+    fn font_family_wide() -> &'static [u16] {
+        static FONT_FAMILY_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
+        FONT_FAMILY_WIDE
+            .get_or_init(|| {
+                let family = std::env::var("SWIFTFIND_FONT_FAMILY")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| DEFAULT_FONT_FAMILY.to_string());
+                to_wide(&family)
+            })
+            .as_slice()
+    }
+
     fn create_font(height: i32, weight: i32) -> isize {
         (unsafe {
             CreateFontW(
@@ -1424,7 +1438,7 @@ mod imp {
                 0,
                 DEFAULT_QUALITY as u32,
                 FF_DONTCARE as u32,
-                to_wide("Segoe UI").as_ptr(),
+                font_family_wide().as_ptr(),
             )
         }) as isize
     }
