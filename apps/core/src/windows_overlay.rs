@@ -8,10 +8,11 @@ mod imp {
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FillRgn, FrameRgn, FrameRect, GetDC, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
+        EndPaint, FillRect, FillRgn, FrameRgn, FrameRect, GetDC, GetTextMetricsW, InvalidateRect, PAINTSTRUCT, ReleaseDC, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
-        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
+        DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         FR_PRIVATE, OPAQUE, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        TEXTMETRICW,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED};
@@ -96,7 +97,7 @@ mod imp {
     const FONT_STATUS_HEIGHT: i32 = -13;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
-    const INPUT_TEXT_LINE_HEIGHT: i32 = 18;
+    const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
 
@@ -1073,7 +1074,12 @@ mod imp {
             unsafe {
                 GetClientRect(edit_hwnd, &mut client);
             }
-            text_rect = compute_input_text_rect(client.right - client.left, client.bottom - client.top);
+            let line_height = input_line_height_for_edit(edit_hwnd, state.input_font);
+            text_rect = compute_input_text_rect(
+                client.right - client.left,
+                client.bottom - client.top,
+                line_height,
+            );
         }
         if text_rect.right <= text_rect.left {
             return;
@@ -1094,7 +1100,7 @@ mod imp {
                 placeholder.as_ptr(),
                 -1,
                 &mut text_rect,
-                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
+                DT_LEFT | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER | DT_END_ELLIPSIS,
             );
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
@@ -1472,7 +1478,8 @@ mod imp {
             return;
         }
 
-        let text_rect = compute_input_text_rect(width, height);
+        let line_height = input_line_height_for_edit(edit_hwnd, 0);
+        let text_rect = compute_input_text_rect(width, height, line_height);
 
         unsafe {
             SendMessageW(
@@ -1485,15 +1492,16 @@ mod imp {
         }
     }
 
-    fn compute_input_text_rect(width: i32, height: i32) -> RECT {
-        let centered_top = ((height - INPUT_TEXT_LINE_HEIGHT) / 2).max(0) + INPUT_TEXT_SHIFT_Y;
-        let max_top = (height - INPUT_TEXT_LINE_HEIGHT).max(0);
+    fn compute_input_text_rect(width: i32, height: i32, line_height: i32) -> RECT {
+        let line_height = line_height.clamp(14, (height - 2).max(14));
+        let centered_top = ((height - line_height) / 2).max(0) + INPUT_TEXT_SHIFT_Y;
+        let max_top = (height - line_height).max(0);
         let top = centered_top.clamp(0, max_top);
         let mut text_rect = RECT {
             left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X,
             top,
             right: width - INPUT_TEXT_RIGHT_INSET + INPUT_TEXT_SHIFT_X,
-            bottom: top + INPUT_TEXT_LINE_HEIGHT,
+            bottom: top + line_height,
         };
         if text_rect.right <= text_rect.left {
             text_rect.right = width;
@@ -1503,6 +1511,45 @@ mod imp {
             text_rect.bottom = height;
         }
         text_rect
+    }
+
+    fn input_line_height_for_edit(edit_hwnd: HWND, fallback_font: isize) -> i32 {
+        let hdc = unsafe { GetDC(edit_hwnd) };
+        if hdc.is_null() {
+            return INPUT_TEXT_LINE_HEIGHT_FALLBACK;
+        }
+
+        let font_to_use = if fallback_font != 0 {
+            fallback_font
+        } else if let Some(state) = state_for(unsafe { GetParent(edit_hwnd) }) {
+            state.input_font
+        } else {
+            0
+        };
+
+        let old_font = if font_to_use != 0 {
+            unsafe { SelectObject(hdc, font_to_use as _) }
+        } else {
+            std::ptr::null_mut()
+        };
+
+        let mut tm: TEXTMETRICW = unsafe { std::mem::zeroed() };
+        let ok = unsafe { GetTextMetricsW(hdc, &mut tm) };
+
+        if !old_font.is_null() {
+            unsafe {
+                SelectObject(hdc, old_font);
+            }
+        }
+        unsafe {
+            ReleaseDC(edit_hwnd, hdc);
+        }
+
+        if ok == 0 {
+            INPUT_TEXT_LINE_HEIGHT_FALLBACK
+        } else {
+            tm.tmHeight as i32
+        }
     }
 
     fn apply_list_rounded_corners(list_hwnd: HWND, width: i32, height: i32) {
