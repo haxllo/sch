@@ -79,7 +79,7 @@ mod imp {
     const RESULTS_ANIM_MS: u32 = 150;
     const SELECTION_ANIM_MS: u64 = 90;
     const SCROLL_ANIM_MS: u64 = 120;
-    const ANIM_FRAME_MS: u64 = 10;
+    const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
 
     // Typography tokens.
@@ -466,15 +466,20 @@ mod imp {
                         target_height,
                         SWP_NOACTIVATE,
                     );
+                    SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
                 }
                 return;
             }
 
             let steps = (duration_ms / ANIM_FRAME_MS as u32).max(1);
+            let expanding = target_height > current_height;
+            let start_alpha = if expanding { 236 } else { 255 };
+            let end_alpha = if expanding { 255 } else { 236 };
             for step in 1..=steps {
                 let t = step as f32 / steps as f32;
                 let eased = ease_out(t);
                 let h = lerp_i32(current_height, target_height, eased);
+                let alpha = lerp_i32(start_alpha, end_alpha, eased) as u8;
                 unsafe {
                     SetWindowPos(
                         self.hwnd,
@@ -485,6 +490,7 @@ mod imp {
                         h,
                         SWP_NOACTIVATE,
                     );
+                    SetLayeredWindowAttributes(self.hwnd, 0, alpha, LWA_ALPHA);
                 }
                 std::thread::sleep(Duration::from_millis(ANIM_FRAME_MS));
             }
@@ -499,6 +505,7 @@ mod imp {
                     target_height,
                     SWP_NOACTIVATE,
                 );
+                SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
             }
         }
 
