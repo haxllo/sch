@@ -2565,44 +2565,15 @@ mod imp {
         };
 
         let path = std::path::Path::new(&target);
-        let mut cfg = crate::config::load(Some(path))
-            .map_err(|e| format!("failed to load config: {e}"))?;
-        cfg.config_path = path.to_path_buf();
-
-        match crate::settings_window::open_settings_dialog(&cfg) {
-            Ok(Some(result)) => {
-                cfg.hotkey = result.hotkey;
-                cfg.max_results = result.max_results;
-                cfg.launch_at_startup = result.launch_at_startup;
-                crate::config::save(&cfg).map_err(|e| format!("failed to save config: {e}"))?;
-
-                let exe = std::env::current_exe()
-                    .map_err(|e| format!("failed to resolve current executable path: {e}"))?;
-                crate::startup::set_enabled(cfg.launch_at_startup, &exe)
-                    .map_err(|e| format!("failed to apply startup setting: {e}"))?;
-
-                state.status_is_error = false;
-                state.help_tip_visible = false;
-                let wide = to_wide("Settings saved. Restart SwiftFind to apply hotkey changes.");
-                unsafe {
-                    SetWindowTextW(state.status_hwnd, wide.as_ptr());
-                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
-                }
-                Ok(())
-            }
-            Ok(None) => Ok(()),
-            Err(_) => {
-                open_config_file_in_notepad(path)?;
-                state.status_is_error = false;
-                state.help_tip_visible = false;
-                let wide = to_wide("Settings unavailable. Opened config file.");
-                unsafe {
-                    SetWindowTextW(state.status_hwnd, wide.as_ptr());
-                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
-                }
-                Ok(())
-            }
+        open_config_file_in_notepad(path)?;
+        state.status_is_error = false;
+        state.help_tip_visible = false;
+        let wide = to_wide("Opened config file. Restart SwiftFind after changes.");
+        unsafe {
+            SetWindowTextW(state.status_hwnd, wide.as_ptr());
+            InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
         }
+        Ok(())
     }
 
     fn open_config_file_in_notepad(path: &std::path::Path) -> Result<(), String> {

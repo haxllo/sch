@@ -18,13 +18,12 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - `Esc` hides launcher
    - clicking outside launcher hides launcher
    - any close path clears query/results so next open starts fresh
-   - clicking `?` opens native settings (hotkey/startup/max-results)
-   - if settings cannot open, SwiftFind opens `%APPDATA%\SwiftFind\config.json` as fallback
+   - clicking `?` opens `%APPDATA%\SwiftFind\config.json` for manual edits
 7. Search and launch errors are surfaced inside launcher status text.
 8. Settings persistence behavior:
    - config remains source of truth (`%APPDATA%\SwiftFind\config.json`)
    - save path uses safe temp-write + replace flow
-   - startup toggle writes per-user Run registration on Windows
+   - startup behavior is controlled by config values
 9. Visual/UX polish:
    - compact Spotlight/Wofi-like default bar state
    - no results panel shown when query is empty
@@ -42,6 +41,7 @@ Known limitations in this milestone:
 - Animations are intentionally lightweight to prioritize runtime stability.
 - Runtime must remain active in its process; stopping `swiftfind-core.exe` unregisters hotkey and closes launcher.
 - Hotkey registration changes still require process restart to apply globally.
+- Native settings UI is temporarily disabled from `?` pending design polish pass.
 
 Operator steps and troubleshooting are documented in:
 - `docs/engineering/windows-operator-runbook.md`

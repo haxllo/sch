@@ -54,16 +54,14 @@ Expected:
 - Click outside launcher: launcher hides and query clears.
 - Reopen with hotkey: input starts clean with no stale query text.
 
-9. Settings window checks.
+9. Settings access checks.
 - Click `?` in launcher input area.
-- Expected: settings window opens with fields for hotkey, startup toggle, and max results.
-- Change `max results`, save, reopen settings, and confirm persisted value.
-- Toggle startup on/off and save.
-- Expected: setting persists after reopening settings.
+- Expected: `%APPDATA%\SwiftFind\config.json` opens for manual edits.
+- Edit `hotkey` or `max_results`, save, restart runtime, verify behavior updates.
 
-10. Fallback checks.
-- If settings UI fails to open in your environment, fallback opens `%APPDATA%\SwiftFind\config.json`.
-- Expected: no crash; user still has a path to update hotkey and startup options.
+10. Future settings UI note.
+- Native settings UI is intentionally disabled from `?` for now.
+- Expected: no crash; manual config path remains available.
 
 Record pass/fail evidence:
 
