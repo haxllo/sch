@@ -57,9 +57,9 @@ mod imp {
     const INPUT_TOP: i32 = (COMPACT_HEIGHT - INPUT_HEIGHT) / 2;
     const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
-    const ROW_HEIGHT: i32 = 50;
+    const ROW_HEIGHT: i32 = 56;
     const LIST_RADIUS: i32 = 16;
-    const MAX_VISIBLE_ROWS: usize = 6;
+    const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
     const ROW_ICON_GAP: i32 = 10;
@@ -502,7 +502,7 @@ mod imp {
 
         fn expand_results(&self, result_count: usize) {
             let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
-            let list_top = INPUT_TOP + INPUT_HEIGHT + INPUT_TO_LIST_GAP;
+            let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
             let target_height = list_top + rows * ROW_HEIGHT + PANEL_MARGIN_X;
 
             if let Some(state) = state_for(self.hwnd) {
@@ -1427,7 +1427,7 @@ mod imp {
         let input_top = INPUT_TOP.max(0);
         let status_top = COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT;
 
-        let list_top = input_top + INPUT_HEIGHT + INPUT_TO_LIST_GAP;
+        let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_height = (height - list_top - PANEL_MARGIN_X - 1).max(0);
