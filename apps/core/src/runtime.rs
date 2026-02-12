@@ -207,10 +207,7 @@ fn runtime_mode() -> &'static str {
 fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
     results
         .iter()
-        .map(|item| {
-            let display_path = trim_path_for_row(&item.path, 72);
-            format!("{}\\t{}", item.title, display_path)
-        })
+        .map(|item| format!("{}\u{1f}{}\u{1f}{}", item.kind, item.title, item.path))
         .collect()
 }
 
@@ -218,24 +215,6 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
 fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
     overlay.set_results(&[], 0);
     overlay.set_status_text("Type to search apps and files.");
-}
-
-#[cfg(target_os = "windows")]
-fn trim_path_for_row(path: &str, max_chars: usize) -> String {
-    if path.chars().count() <= max_chars {
-        return path.to_string();
-    }
-
-    let tail_len = max_chars.saturating_sub(3);
-    let tail: String = path
-        .chars()
-        .rev()
-        .take(tail_len)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("...{tail}")
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]

@@ -8,8 +8,8 @@ mod imp {
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
         EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, SelectObject, SetBkColor,
-        SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_END_ELLIPSIS,
-        DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
+        SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
+        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -55,6 +55,11 @@ mod imp {
     const ROW_GAP: i32 = 8;
     const ROW_HEIGHT: i32 = 44;
     const MAX_VISIBLE_ROWS: usize = 6;
+    const ROW_INSET_X: i32 = 10;
+    const ROW_ICON_SIZE: i32 = 22;
+    const ROW_ICON_GAP: i32 = 10;
+    const ROW_TEXT_TOP_PAD: i32 = 6;
+    const ROW_TEXT_BOTTOM_PAD: i32 = 5;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -92,6 +97,9 @@ mod imp {
     const COLOR_TEXT_ERROR: u32 = 0x007779E8;
     const COLOR_SELECTION: u32 = 0x00503E31;
     const COLOR_SELECTION_BORDER: u32 = 0x00614B39;
+    const COLOR_ROW_HOVER: u32 = 0x00382D24;
+    const COLOR_ICON_BG: u32 = 0x00312A24;
+    const COLOR_ICON_TEXT: u32 = 0x00D8D0C8;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -131,6 +139,7 @@ mod imp {
         selection_prev: i32,
         selection_current: i32,
         selection_anim_start: Option<Instant>,
+        hover_index: i32,
 
         scroll_from_top: i32,
         scroll_to_top: i32,
@@ -715,6 +724,7 @@ mod imp {
                     state.results_visible = false;
                     state.selection_prev = -1;
                     state.selection_current = -1;
+                    state.hover_index = -1;
                     layout_children(hwnd, state);
                 }
                 0
@@ -972,16 +982,19 @@ mod imp {
 
         let item_index = dis.itemID as i32;
         let row_text = listbox_row_text(state.list_hwnd, item_index);
-        let (title, path) = split_row(&row_text);
+        let row = parse_result_row(&row_text);
 
         let progress = selection_progress(state);
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
+        let hovered = state.hover_index == item_index;
         let mut row_bg = COLOR_RESULTS_BG;
 
         if selected_flag {
             row_bg = blend_color(COLOR_RESULTS_BG, COLOR_SELECTION, progress);
         } else if state.selection_prev == item_index && progress < 1.0 {
             row_bg = blend_color(COLOR_SELECTION, COLOR_RESULTS_BG, progress);
+        } else if hovered {
+            row_bg = COLOR_ROW_HOVER;
         }
 
         unsafe {
@@ -989,16 +1002,42 @@ mod imp {
             FillRect(dis.hDC, &dis.rcItem, row_brush);
             DeleteObject(row_brush as _);
 
+            let icon_rect = RECT {
+                left: dis.rcItem.left + ROW_INSET_X,
+                top: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2,
+                right: dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE,
+                bottom: dis.rcItem.top + (ROW_HEIGHT - ROW_ICON_SIZE) / 2 + ROW_ICON_SIZE,
+            };
+            let icon_brush = CreateSolidBrush(COLOR_ICON_BG);
+            FillRect(dis.hDC, &icon_rect, icon_brush);
+            DeleteObject(icon_brush as _);
+            FrameRect(dis.hDC, &icon_rect, state.border_brush as _);
+
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
 
-            let mut title_rect = dis.rcItem;
-            title_rect.left += 12;
-            title_rect.right = title_rect.left + 214;
+            let mut icon_text_rect = icon_rect;
+            SetTextColor(dis.hDC, COLOR_ICON_TEXT);
             DrawTextW(
                 dis.hDC,
-                to_wide(&title).as_ptr(),
+                to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
+                -1,
+                &mut icon_text_rect,
+                DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+            );
+
+            SetTextColor(dis.hDC, COLOR_TEXT_PRIMARY);
+            let text_left = icon_rect.right + ROW_ICON_GAP;
+            let mut title_rect = RECT {
+                left: text_left,
+                top: dis.rcItem.top + ROW_TEXT_TOP_PAD,
+                right: dis.rcItem.right - ROW_INSET_X,
+                bottom: dis.rcItem.top + ROW_HEIGHT / 2,
+            };
+            DrawTextW(
+                dis.hDC,
+                to_wide(&row.title).as_ptr(),
                 -1,
                 &mut title_rect,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -1006,12 +1045,15 @@ mod imp {
 
             SelectObject(dis.hDC, state.meta_font as _);
             SetTextColor(dis.hDC, COLOR_TEXT_SECONDARY);
-            let mut path_rect = dis.rcItem;
-            path_rect.left = title_rect.right + 8;
-            path_rect.right -= 12;
+            let mut path_rect = RECT {
+                left: text_left,
+                top: dis.rcItem.top + ROW_HEIGHT / 2 - 1,
+                right: dis.rcItem.right - ROW_INSET_X,
+                bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD,
+            };
             DrawTextW(
                 dis.hDC,
-                to_wide(&path).as_ptr(),
+                to_wide(&row.path).as_ptr(),
                 -1,
                 &mut path_rect,
                 DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
@@ -1027,11 +1069,43 @@ mod imp {
         }
     }
 
-    fn split_row(row: &str) -> (String, String) {
-        if let Some((left, right)) = row.split_once('\t') {
-            (left.to_string(), right.to_string())
+    struct ResultRow {
+        kind: String,
+        title: String,
+        path: String,
+    }
+
+    fn parse_result_row(row: &str) -> ResultRow {
+        if let Some((kind, rest)) = row.split_once('\u{1f}') {
+            if let Some((title, path)) = rest.split_once('\u{1f}') {
+                return ResultRow {
+                    kind: kind.to_string(),
+                    title: title.to_string(),
+                    path: path.to_string(),
+                };
+            }
+        }
+        if let Some((title, path)) = row.split_once('\t') {
+            return ResultRow {
+                kind: "file".to_string(),
+                title: title.to_string(),
+                path: path.to_string(),
+            };
+        }
+        ResultRow {
+            kind: "file".to_string(),
+            title: row.to_string(),
+            path: String::new(),
+        }
+    }
+
+    fn icon_glyph_for_kind(kind: &str) -> &'static str {
+        if kind.eq_ignore_ascii_case("app") {
+            "A"
+        } else if kind.eq_ignore_ascii_case("folder") {
+            "D"
         } else {
-            (row.to_string(), String::new())
+            "F"
         }
     }
 
