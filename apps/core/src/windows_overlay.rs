@@ -96,10 +96,9 @@ mod imp {
     const FONT_STATUS_HEIGHT: i32 = -13;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 10;
+    const INPUT_TEXT_LINE_HEIGHT: i32 = 18;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
-    const INPUT_TEXT_TOP_PAD: i32 = 17;
-    const INPUT_TEXT_BOTTOM_PAD: i32 = 8;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
@@ -1487,11 +1486,14 @@ mod imp {
     }
 
     fn compute_input_text_rect(width: i32, height: i32) -> RECT {
+        let centered_top = ((height - INPUT_TEXT_LINE_HEIGHT) / 2).max(0) + INPUT_TEXT_SHIFT_Y;
+        let max_top = (height - INPUT_TEXT_LINE_HEIGHT).max(0);
+        let top = centered_top.clamp(0, max_top);
         let mut text_rect = RECT {
             left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X,
-            top: INPUT_TEXT_TOP_PAD + INPUT_TEXT_SHIFT_Y,
+            top,
             right: width - INPUT_TEXT_RIGHT_INSET + INPUT_TEXT_SHIFT_X,
-            bottom: height - INPUT_TEXT_BOTTOM_PAD + INPUT_TEXT_SHIFT_Y,
+            bottom: top + INPUT_TEXT_LINE_HEIGHT,
         };
         if text_rect.right <= text_rect.left {
             text_rect.right = width;
