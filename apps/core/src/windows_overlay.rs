@@ -43,16 +43,18 @@ mod imp {
     const LIST_CLASS: &str = "LISTBOX";
     const STATUS_CLASS: &str = "STATIC";
 
-    const WINDOW_WIDTH: i32 = 560;
-    const COMPACT_HEIGHT: i32 = 84;
+    // Overlay layout tokens.
+    const WINDOW_WIDTH: i32 = 576;
+    const COMPACT_HEIGHT: i32 = 90;
+    const PANEL_RADIUS: i32 = 20;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_TOP: i32 = 12;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
-    const INPUT_HEIGHT: i32 = 34;
+    const INPUT_HEIGHT: i32 = 36;
     const STATUS_HEIGHT: i32 = 18;
-    const ROW_GAP: i32 = 6;
-    const ROW_HEIGHT: i32 = 32;
-    const MAX_VISIBLE_ROWS: usize = 7;
+    const ROW_GAP: i32 = 8;
+    const ROW_HEIGHT: i32 = 44;
+    const MAX_VISIBLE_ROWS: usize = 6;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -67,23 +69,29 @@ mod imp {
     const TIMER_SELECTION_ANIM: usize = 0xBEEF;
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
 
-    const OVERLAY_ANIM_MS: u32 = 140;
-    const RESULTS_ANIM_MS: u32 = 140;
+    const OVERLAY_ANIM_MS: u32 = 150;
+    const RESULTS_ANIM_MS: u32 = 150;
     const SELECTION_ANIM_MS: u64 = 90;
     const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 10;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
 
-    // Required visual colors.
+    // Typography tokens.
+    const FONT_INPUT_HEIGHT: i32 = -22;
+    const FONT_TITLE_HEIGHT: i32 = -15;
+    const FONT_META_HEIGHT: i32 = -13;
+    const FONT_STATUS_HEIGHT: i32 = -13;
+
+    // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x001C1C1C; // #1C1C1C (BGR)
     const COLOR_PANEL_BORDER: u32 = 0x003E3E3E; // #3E3E3E (BGR)
-    const COLOR_INPUT_BG: u32 = 0x001C1C1C;
-    const COLOR_RESULTS_BG: u32 = 0x00171717;
-    const COLOR_TEXT_PRIMARY: u32 = 0x00ECE7E1;
-    const COLOR_TEXT_SECONDARY: u32 = 0x00B7ADA3;
-    const COLOR_TEXT_ERROR: u32 = 0x006766F6;
-    const COLOR_SELECTION: u32 = 0x004F4032;
-    const COLOR_SELECTION_BORDER: u32 = 0x005A4A39;
+    const COLOR_INPUT_BG: u32 = 0x00191919;
+    const COLOR_RESULTS_BG: u32 = 0x00151515;
+    const COLOR_TEXT_PRIMARY: u32 = 0x00F2EEE9;
+    const COLOR_TEXT_SECONDARY: u32 = 0x00B4AEA8;
+    const COLOR_TEXT_ERROR: u32 = 0x007779E8;
+    const COLOR_SELECTION: u32 = 0x00503E31;
+    const COLOR_SELECTION_BORDER: u32 = 0x00614B39;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -619,10 +627,10 @@ mod imp {
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
                     state.results_brush = unsafe { CreateSolidBrush(COLOR_RESULTS_BG) } as isize;
 
-                    state.input_font = create_font(-22, FW_SEMIBOLD as i32);
-                    state.title_font = create_font(-15, FW_SEMIBOLD as i32);
-                    state.meta_font = create_font(-14, FW_MEDIUM as i32);
-                    state.status_font = create_font(-13, FW_MEDIUM as i32);
+                    state.input_font = create_font(FONT_INPUT_HEIGHT, FW_SEMIBOLD as i32);
+                    state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
+                    state.meta_font = create_font(FONT_META_HEIGHT, FW_MEDIUM as i32);
+                    state.status_font = create_font(FONT_STATUS_HEIGHT, FW_MEDIUM as i32);
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -1247,7 +1255,14 @@ mod imp {
         }
 
         unsafe {
-            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 22, 22);
+            let region = CreateRoundRectRgn(
+                0,
+                0,
+                width + 1,
+                height + 1,
+                PANEL_RADIUS,
+                PANEL_RADIUS,
+            );
             SetWindowRgn(hwnd, region, 1);
         }
     }
