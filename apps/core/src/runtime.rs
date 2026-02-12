@@ -166,7 +166,7 @@ pub fn run() -> Result<(), RuntimeError> {
                     match launch_overlay_selection(&service, &current_results, selected_index) {
                         Ok(()) => {
                             overlay.set_status_text("");
-                            overlay.hide();
+                            overlay.hide_now();
                             overlay_state.on_escape();
                             overlay.clear_query_text();
                             current_results.clear();

@@ -34,7 +34,8 @@ mod imp {
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
-        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WNDCLASSW, WS_CHILD,
+        WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
+        WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
     };
@@ -271,6 +272,10 @@ mod imp {
 
         pub fn hide(&self) {
             self.animate_hide();
+        }
+
+        pub fn hide_now(&self) {
+            hide_overlay_immediate(self.hwnd);
         }
 
         pub fn query_text(&self) -> String {
@@ -838,6 +843,13 @@ mod imp {
                 apply_rounded_corners_hwnd(hwnd);
                 0
             }
+            WM_ACTIVATE => {
+                let activation = (wparam & 0xFFFF) as u32;
+                if activation == 0 {
+                    hide_overlay_immediate(hwnd);
+                }
+                0
+            }
             WM_PAINT => {
                 draw_panel_background(hwnd);
                 0
@@ -1303,6 +1315,14 @@ mod imp {
                 SWP_NOACTIVATE,
             );
             SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+        }
+    }
+
+    fn hide_overlay_immediate(hwnd: HWND) {
+        unsafe {
+            KillTimer(hwnd, TIMER_WINDOW_ANIM);
+            SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+            ShowWindow(hwnd, SW_HIDE);
         }
     }
 
