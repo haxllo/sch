@@ -26,6 +26,7 @@ $outputRootAbs = if ([System.IO.Path]::IsPathRooted($OutputRoot)) {
 $artifactName = "swiftfind-$Version-windows-x64"
 $stageDir = Join-Path $outputRootAbs "$artifactName-stage"
 $issPath = Join-Path $repoRoot "scripts/windows/swiftfind.iss"
+$setupIconPath = Join-Path $repoRoot "apps/assets/swiftfinder.ico"
 
 Write-Host "== Building SwiftFind Setup.exe for $Version ==" -ForegroundColor Cyan
 
@@ -53,6 +54,10 @@ if (-not (Test-Path $issPath)) {
   throw "Installer spec not found at '$issPath'."
 }
 
+if (-not (Test-Path $setupIconPath)) {
+  throw "Setup icon not found at '$setupIconPath'. Expected apps/assets/swiftfinder.ico."
+}
+
 if (-not (Test-Path $stageDir)) {
   Write-Host "Staged artifact not found. Building package stage first..." -ForegroundColor Yellow
   & (Join-Path $repoRoot "scripts/windows/package-windows-artifact.ps1") -Version $Version -OutputRoot $outputRootAbs
@@ -66,7 +71,7 @@ if (-not (Test-Path (Join-Path $stageDir "bin/swiftfind-core.exe"))) {
 }
 
 New-Item -ItemType Directory -Force -Path $outputRootAbs | Out-Null
-& $InnoCompiler "/DAppVersion=$Version" "/DStageDir=$stageDir" "/O$outputRootAbs" $issPath
+& $InnoCompiler "/DAppVersion=$Version" "/DStageDir=$stageDir" "/DSetupIconPath=$setupIconPath" "/O$outputRootAbs" $issPath
 if ($LASTEXITCODE -ne 0) {
   throw "Inno Setup compilation failed with exit code $LASTEXITCODE."
 }

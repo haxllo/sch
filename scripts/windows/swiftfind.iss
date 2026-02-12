@@ -8,6 +8,10 @@
   #error StageDir must be passed to ISCC via /DStageDir=...
 #endif
 
+#ifndef SetupIconPath
+  #error SetupIconPath must be passed to ISCC via /DSetupIconPath=...
+#endif
+
 [Setup]
 AppId={{E3A739E3-FAF7-4E18-BD8B-01744C9E7C27}
 AppName={#MyAppName}
@@ -24,7 +28,7 @@ PrivilegesRequired=lowest
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\bin\swiftfind-core.exe
-SetupIconFile={#SourcePath}..\..\apps\assets\swiftfinder.ico
+SetupIconFile={#SetupIconPath}
 
 [Files]
 Source: "{#StageDir}\bin\swiftfind-core.exe"; DestDir: "{app}\bin"; Flags: ignoreversion
