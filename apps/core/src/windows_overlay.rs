@@ -8,8 +8,8 @@ mod imp {
     use windows_sys::Win32::Graphics::Gdi::{
         BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
         EndPaint, FillRect, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject,
-        SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_END_ELLIPSIS,
-        DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
+        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY,
+        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -30,10 +30,11 @@ mod imp {
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
-        WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM,
-        WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER,
-        WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
-        WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
+        WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
+        WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
+        WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN,
+        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
+        WS_VSCROLL,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -629,7 +630,7 @@ mod imp {
                             0,
                             to_wide(INPUT_CLASS).as_ptr(),
                             to_wide("").as_ptr(),
-                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL as u32,
+                            WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL as u32,
                             0,
                             0,
                             0,
@@ -768,6 +769,33 @@ mod imp {
                             SetBkMode(wparam as _, TRANSPARENT as i32);
                         }
                         return state.panel_brush;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            WM_CTLCOLOREDIT => {
+                if let Some(state) = state_for(hwnd) {
+                    let target = lparam as HWND;
+                    if target == state.edit_hwnd {
+                        unsafe {
+                            SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
+                            SetBkColor(wparam as _, COLOR_PANEL_BG);
+                            SetBkMode(wparam as _, TRANSPARENT as i32);
+                        }
+                        return state.panel_brush;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
+            WM_CTLCOLORLISTBOX => {
+                if let Some(state) = state_for(hwnd) {
+                    let target = lparam as HWND;
+                    if target == state.list_hwnd {
+                        unsafe {
+                            SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
+                            SetBkColor(wparam as _, COLOR_RESULTS_BG);
+                        }
+                        return state.results_brush;
                     }
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
