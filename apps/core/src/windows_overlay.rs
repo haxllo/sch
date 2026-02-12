@@ -5,9 +5,9 @@ mod imp {
 
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
-        CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, SetBkColor, SetBkMode,
-        SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, FF_DONTCARE, FW_MEDIUM,
-        FW_SEMIBOLD, OUT_DEFAULT_PRECIS, TRANSPARENT,
+        CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, FillRect, InvalidateRect,
+        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY,
+        FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::EM_SETSEL;
@@ -15,9 +15,9 @@ mod imp {
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW, FillRect,
+        CallWindowProcW, CreateWindowExW, DefWindowProcW, DispatchMessageW,
         GetClientRect, GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics,
-        GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, InvalidateRect, IsChild,
+        GetWindowLongPtrW, GetWindowTextLengthW, GetWindowTextW, IsChild,
         LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL,
         LB_SETTABSTOPS, LoadCursorW, MoveWindow, PostMessageW, PostQuitMessage, RegisterClassW,
         SendMessageW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
@@ -712,7 +712,7 @@ mod imp {
     }
 
     fn create_font(height: i32, weight: i32) -> isize {
-        unsafe {
+        (unsafe {
             CreateFontW(
                 height,
                 0,
@@ -723,13 +723,13 @@ mod imp {
                 0,
                 0,
                 DEFAULT_CHARSET as u32,
-                OUT_DEFAULT_PRECIS,
+                OUT_DEFAULT_PRECIS as u32,
                 0,
-                DEFAULT_QUALITY,
+                DEFAULT_QUALITY as u32,
                 FF_DONTCARE as u32,
                 to_wide("Segoe UI").as_ptr(),
             )
-        } as isize
+        }) as isize
     }
 
     fn status_is_error(message: &str) -> bool {
