@@ -366,19 +366,7 @@ mod imp {
         }
 
         fn apply_rounded_corners(&self) {
-            let mut rect: RECT = unsafe { std::mem::zeroed() };
-            unsafe {
-                GetClientRect(self.hwnd, &mut rect);
-            }
-            let width = rect.right - rect.left;
-            let height = rect.bottom - rect.top;
-            if width <= 0 || height <= 0 {
-                return;
-            }
-            unsafe {
-                let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 22, 22);
-                SetWindowRgn(self.hwnd, region, 1);
-            }
+            apply_rounded_corners_hwnd(self.hwnd);
         }
 
         fn hide_immediate(&self) {
@@ -804,6 +792,7 @@ mod imp {
                 if let Some(state) = state_for(hwnd) {
                     layout_children(hwnd, state);
                 }
+                apply_rounded_corners_hwnd(hwnd);
                 0
             }
             WM_PAINT => {
@@ -1135,6 +1124,23 @@ mod imp {
             FillRect(hdc, &paint.rcPaint, state.panel_brush as _);
             FrameRect(hdc, &paint.rcPaint, state.border_brush as _);
             EndPaint(hwnd, &paint);
+        }
+    }
+
+    fn apply_rounded_corners_hwnd(hwnd: HWND) {
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(hwnd, &mut rect);
+        }
+        let width = rect.right - rect.left;
+        let height = rect.bottom - rect.top;
+        if width <= 0 || height <= 0 {
+            return;
+        }
+
+        unsafe {
+            let region = CreateRoundRectRgn(0, 0, width + 1, height + 1, 22, 22);
+            SetWindowRgn(hwnd, region, 1);
         }
     }
 
