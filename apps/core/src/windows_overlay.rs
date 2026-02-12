@@ -95,8 +95,8 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
-    const INPUT_TEXT_TOP_PAD: i32 = 10;
-    const INPUT_TEXT_BOTTOM_PAD: i32 = 4;
+    const INPUT_TEXT_TOP_PAD: i32 = 8;
+    const INPUT_TEXT_BOTTOM_PAD: i32 = 8;
 
     // Visual tokens.
     const COLOR_PANEL_BG: u32 = 0x00101010;
@@ -1101,7 +1101,7 @@ mod imp {
                 placeholder.as_ptr(),
                 -1,
                 &mut text_rect,
-                DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                DT_LEFT | DT_SINGLELINE | DT_END_ELLIPSIS,
             );
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
