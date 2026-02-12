@@ -129,6 +129,11 @@ pub fn clear_items(db: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+pub fn delete_item(db: &Connection, id: &str) -> Result<(), StoreError> {
+    db.execute("DELETE FROM item WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 fn init_schema(conn: &Connection) -> Result<(), StoreError> {
     let current_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 

@@ -394,6 +394,13 @@ mod tests {
 
     #[test]
     fn overlay_search_returns_ranked_results() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("swiftfind-overlay-search-{unique}.tmp"));
+        std::fs::write(&path, b"ok").expect("temp file should be created");
+
         let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
             .expect("service should initialize");
         service
@@ -401,7 +408,7 @@ mod tests {
                 "item-1",
                 "app",
                 "Visual Studio Code",
-                "C:\\Code.exe",
+                path.to_string_lossy().as_ref(),
             ))
             .expect("item should upsert");
 
@@ -409,6 +416,8 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "item-1");
+
+        std::fs::remove_file(path).expect("temp file should be removed");
     }
 
     #[test]
@@ -442,6 +451,12 @@ mod tests {
         let missing_path = std::env::temp_dir().join("swiftfind-does-not-exist-launch-flow.exe");
         let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
             .expect("service should initialize");
+        let item = SearchItem::new(
+            "missing",
+            "file",
+            "Missing Item",
+            missing_path.to_string_lossy().as_ref(),
+        );
         service
             .upsert_item(&SearchItem::new(
                 "missing",
@@ -451,7 +466,7 @@ mod tests {
             ))
             .expect("item should upsert");
 
-        let results = search_overlay_results(&service, "missing", 20).expect("search should succeed");
+        let results = vec![item];
         let error = launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));

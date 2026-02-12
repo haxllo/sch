@@ -18,6 +18,13 @@ fn serializes_and_deserializes_search_request() {
 
 #[test]
 fn handles_search_command_and_serializes_response() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let item_path = std::env::temp_dir().join(format!("swiftfind-contract-search-{unique}.tmp"));
+    std::fs::write(&item_path, b"ok").unwrap();
+
     let config = swiftfind_core::config::Config::default();
     let db = swiftfind_core::index_store::open_memory().unwrap();
     let service = CoreService::with_connection(config, db).unwrap();
@@ -27,7 +34,7 @@ fn handles_search_command_and_serializes_response() {
             "s1",
             "app",
             "Visual Studio Code",
-            "C:\\Code.exe",
+            item_path.to_string_lossy().as_ref(),
         ))
         .unwrap();
 
@@ -49,6 +56,8 @@ fn handles_search_command_and_serializes_response() {
         }
         _ => panic!("expected search response"),
     }
+
+    std::fs::remove_file(&item_path).unwrap();
 }
 
 #[test]

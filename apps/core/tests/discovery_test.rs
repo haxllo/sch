@@ -70,21 +70,43 @@ fn file_system_provider_discovers_files_in_roots() {
 
 #[test]
 fn rebuild_index_uses_registered_providers() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let app_path = std::env::temp_dir().join(format!("swiftfind-app-provider-{unique}.tmp"));
+    let file_path = std::env::temp_dir().join(format!("swiftfind-file-provider-{unique}.tmp"));
+    std::fs::write(&app_path, b"app").unwrap();
+    std::fs::write(&file_path, b"file").unwrap();
+
     let config = swiftfind_core::config::Config::default();
     let db = swiftfind_core::index_store::open_memory().unwrap();
 
     let service = CoreService::with_connection(config, db)
         .unwrap()
         .with_providers(vec![
-            Box::new(AppProvider::deterministic_fixture()),
-            Box::new(FileProvider::deterministic_fixture()),
+            Box::new(AppProvider::from_apps(vec![swiftfind_core::model::SearchItem::new(
+                "app-code",
+                "app",
+                "Visual Studio Code",
+                app_path.to_string_lossy().as_ref(),
+            )])),
+            Box::new(FileProvider::from_files(vec![swiftfind_core::model::SearchItem::new(
+                "file-report",
+                "file",
+                "Q4_Report.xlsx",
+                file_path.to_string_lossy().as_ref(),
+            )])),
         ]);
 
     let inserted = service.rebuild_index().unwrap();
-    assert_eq!(inserted, 4);
+    assert_eq!(inserted, 2);
 
     let results = service.search("report", 10).unwrap();
     assert_eq!(results[0].id, "file-report");
+
+    std::fs::remove_file(app_path).unwrap();
+    std::fs::remove_file(file_path).unwrap();
 }
 
 #[test]

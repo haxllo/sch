@@ -8,6 +8,7 @@ use crate::discovery::{
 };
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
+use std::path::Path;
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -103,13 +104,28 @@ impl CoreService {
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchItem>, ServiceError> {
         let all = index_store::list_items(&self.db)?;
+        let mut valid = Vec::with_capacity(all.len());
+        let mut stale_ids = Vec::new();
+
+        for item in all {
+            if is_stale_index_entry(&item) {
+                stale_ids.push(item.id.clone());
+            } else {
+                valid.push(item);
+            }
+        }
+
+        for stale_id in stale_ids {
+            index_store::delete_item(&self.db, &stale_id)?;
+        }
+
         let effective_limit = if limit == 0 {
             self.config.max_results as usize
         } else {
             limit.min(self.config.max_results as usize)
         };
 
-        Ok(crate::search::search(&all, query, effective_limit))
+        Ok(crate::search::search(&valid, query, effective_limit))
     }
 
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
@@ -118,7 +134,14 @@ impl CoreService {
             LaunchTarget::Id(id) => {
                 let item = index_store::get_item(&self.db, id)?
                     .ok_or_else(|| ServiceError::ItemNotFound(id.to_string()))?;
-                launch_path(&item.path).map_err(ServiceError::from)
+                match launch_path(&item.path) {
+                    Ok(()) => Ok(()),
+                    Err(error @ LaunchError::MissingPath(_)) => {
+                        index_store::delete_item(&self.db, &item.id)?;
+                        Err(ServiceError::from(error))
+                    }
+                    Err(error) => Err(ServiceError::from(error)),
+                }
             }
         }
     }
@@ -176,4 +199,37 @@ impl CoreService {
             }
         }
     }
+}
+
+fn is_stale_index_entry(item: &SearchItem) -> bool {
+    if !(item.kind.eq_ignore_ascii_case("app")
+        || item.kind.eq_ignore_ascii_case("file")
+        || item.kind.eq_ignore_ascii_case("folder"))
+    {
+        return false;
+    }
+
+    let path = item.path.trim();
+    if path.is_empty() {
+        return false;
+    }
+    if path.contains("://") {
+        return false;
+    }
+    if !looks_like_filesystem_path(path) {
+        return false;
+    }
+
+    !Path::new(path).exists()
+}
+
+fn looks_like_filesystem_path(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with('\\') {
+        return true;
+    }
+
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
