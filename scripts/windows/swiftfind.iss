@@ -27,6 +27,9 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 DisableDirPage=yes
 DisableProgramGroupPage=yes
+CloseApplications=yes
+CloseApplicationsFilter=swiftfind-core.exe
+RestartApplications=no
 UninstallDisplayIcon={app}\bin\swiftfind-core.exe
 SetupIconFile={#SetupIconPath}
 
@@ -47,3 +50,11 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--ensure-config"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--sync-startup"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--background"; Description: "Launch SwiftFind now"; Flags: runhidden nowait postinstall skipifsilent
+
+[UninstallRun]
+; Ask running instance to terminate cleanly first.
+Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--quit"; Flags: runhidden waituntilterminated skipifdoesntexist
+; Remove per-user startup registration even if config still had launch_at_startup=true.
+Filename: "{cmd}"; Parameters: "/C reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v SwiftFind /f >NUL 2>&1 || exit /b 0"; Flags: runhidden
+; Hard-stop any leftover process to avoid ghost hotkey/runtime after uninstall.
+Filename: "{cmd}"; Parameters: "/C taskkill /IM swiftfind-core.exe /F /T >NUL 2>&1 || exit /b 0"; Flags: runhidden
