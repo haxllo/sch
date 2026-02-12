@@ -218,7 +218,7 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
 #[cfg(target_os = "windows")]
 fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
     overlay.set_results(&[], 0);
-    overlay.set_status_text("Type to search apps and files.");
+    overlay.set_status_text("");
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]

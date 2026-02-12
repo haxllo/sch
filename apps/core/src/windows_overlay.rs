@@ -14,9 +14,7 @@ mod imp {
         FR_PRIVATE, OUT_DEFAULT_PRECIS, TRANSPARENT,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::UI::Controls::{
-        DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
-    };
+    use windows_sys::Win32::UI::Controls::{DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED};
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
@@ -74,6 +72,7 @@ mod imp {
     const SWIFTFIND_WM_MOVE_UP: u32 = WM_APP + 3;
     const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
     const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
+    const EM_SETCUEBANNER: u32 = 0x1501;
 
     const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
@@ -301,8 +300,8 @@ mod imp {
             }
         }
 
-        pub fn set_hotkey_hint(&self, hotkey: &str) {
-            self.set_status_text(&format!("Ready. Press {hotkey} to open launcher."));
+        pub fn set_hotkey_hint(&self, _hotkey: &str) {
+            self.set_status_text("");
         }
 
         pub fn clear_query_text(&self) {
@@ -694,7 +693,7 @@ mod imp {
                         CreateWindowExW(
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
-                            to_wide("Type to search apps and files.").as_ptr(),
+                            to_wide("").as_ptr(),
                             WS_CHILD | WS_VISIBLE,
                             0,
                             0,
@@ -711,6 +710,13 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        let cue_text = to_wide("Type to search");
+                        SendMessageW(
+                            state.edit_hwnd,
+                            EM_SETCUEBANNER,
+                            0,
+                            cue_text.as_ptr() as LPARAM,
+                        );
 
                         state.edit_prev_proc = SetWindowLongPtrW(
                             state.edit_hwnd,
