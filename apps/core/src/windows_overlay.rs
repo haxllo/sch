@@ -846,6 +846,9 @@ mod imp {
             WM_ACTIVATE => {
                 let activation = (wparam & 0xFFFF) as u32;
                 if activation == 0 {
+                    unsafe {
+                        PostMessageW(hwnd, SWIFTFIND_WM_ESCAPE, 0, 0);
+                    }
                     hide_overlay_immediate(hwnd);
                 }
                 0

@@ -101,12 +101,22 @@ pub fn run() -> Result<(), RuntimeError> {
                         }
                         HotkeyAction::Hide => {
                             overlay.hide();
+                            reset_overlay_session(
+                                &overlay,
+                                &mut current_results,
+                                &mut selected_index,
+                            );
                         }
                     }
                 }
                 OverlayEvent::Escape => {
                     if overlay_state.on_escape() {
-                        overlay.hide();
+                        overlay.hide_now();
+                        reset_overlay_session(
+                            &overlay,
+                            &mut current_results,
+                            &mut selected_index,
+                        );
                     }
                 }
                 OverlayEvent::QueryChanged(query) => {
@@ -168,10 +178,11 @@ pub fn run() -> Result<(), RuntimeError> {
                             overlay.set_status_text("");
                             overlay.hide_now();
                             overlay_state.on_escape();
-                            overlay.clear_query_text();
-                            current_results.clear();
-                            selected_index = 0;
-                            set_idle_overlay_state(&overlay);
+                            reset_overlay_session(
+                                &overlay,
+                                &mut current_results,
+                                &mut selected_index,
+                            );
                         }
                         Err(error) => {
                             overlay.set_status_text(&format!("Launch error: {error}"));
@@ -219,6 +230,18 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
 fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
     overlay.set_results(&[], 0);
     overlay.set_status_text("");
+}
+
+#[cfg(target_os = "windows")]
+fn reset_overlay_session(
+    overlay: &NativeOverlayShell,
+    current_results: &mut Vec<crate::model::SearchItem>,
+    selected_index: &mut usize,
+) {
+    overlay.clear_query_text();
+    current_results.clear();
+    *selected_index = 0;
+    set_idle_overlay_state(overlay);
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
