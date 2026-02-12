@@ -154,7 +154,6 @@ mod imp {
         hwnd: HWND,
     }
 
-    #[derive(Default)]
     struct OverlayShellState {
         edit_hwnd: HWND,
         list_hwnd: HWND,
@@ -194,6 +193,49 @@ mod imp {
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
         icon_cache: HashMap<String, isize>,
+    }
+
+    impl Default for OverlayShellState {
+        fn default() -> Self {
+            Self {
+                edit_hwnd: std::ptr::null_mut(),
+                list_hwnd: std::ptr::null_mut(),
+                status_hwnd: std::ptr::null_mut(),
+                edit_prev_proc: 0,
+                list_prev_proc: 0,
+                input_font: 0,
+                title_font: 0,
+                meta_font: 0,
+                status_font: 0,
+                panel_brush: 0,
+                border_brush: 0,
+                input_brush: 0,
+                results_brush: 0,
+                selection_brush: 0,
+                selection_border_brush: 0,
+                row_hover_brush: 0,
+                row_separator_brush: 0,
+                selection_accent_brush: 0,
+                icon_brush: 0,
+                status_is_error: false,
+                help_hovered: false,
+                help_status_visible: false,
+                results_visible: false,
+                help_rect: RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                },
+                hover_index: -1,
+                scroll_from_top: 0,
+                scroll_to_top: 0,
+                scroll_anim_start: None,
+                window_anim: None,
+                rows: Vec::new(),
+                icon_cache: HashMap::new(),
+            }
+        }
     }
 
     struct WindowAnimation {
