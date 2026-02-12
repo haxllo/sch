@@ -15,6 +15,7 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - `Up`/`Down` changes selection
    - `Enter` launches selected result and hides launcher immediately on success
    - single-click on a result launches it immediately
+   - typing a query starting with `log` includes a built-in action: `Open SwiftFind Logs Folder`
    - `Esc` hides launcher
    - clicking outside launcher hides launcher
    - any close path clears query/results so next open starts fresh
@@ -24,7 +25,10 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - config remains source of truth (`%APPDATA%\SwiftFind\config.json`)
    - save path uses safe temp-write + replace flow
    - startup behavior is controlled by config values
-9. Visual/UX polish:
+9. Runtime diagnostics:
+   - runtime writes local logs to `%APPDATA%\SwiftFind\logs`
+   - panic hook records crash context in log file
+10. Visual/UX polish:
    - compact Spotlight/Wofi-like default bar state
    - no results panel shown when query is empty
    - results panel expands downward only when query has matches

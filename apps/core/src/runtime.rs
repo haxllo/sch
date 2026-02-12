@@ -11,6 +11,8 @@ use crate::windows_overlay::{
     NativeOverlayShell, OverlayEvent, OverlayRow,
 };
 
+const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
+
 #[derive(Debug)]
 pub enum RuntimeError {
     Args(String),
@@ -125,6 +127,10 @@ pub fn run() -> Result<(), RuntimeError> {
 }
 
 pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
+    if let Err(error) = crate::logging::init() {
+        eprintln!("[swiftfind-core] logging init warning: {error}");
+    }
+
     #[cfg(target_os = "windows")]
     if options.background && options.command == RuntimeCommand::Run {
         return spawn_background_process();
@@ -140,30 +146,36 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
     }
 
     let config = config::load(None)?;
+    #[cfg(target_os = "windows")]
+    let mut first_run_onboarding = false;
     if !config.config_path.exists() {
         config::write_user_template(&config, &config.config_path)?;
-        println!(
+        #[cfg(target_os = "windows")]
+        {
+            first_run_onboarding = true;
+        }
+        log_info(&format!(
             "[swiftfind-core] wrote user config template to {}",
             config.config_path.display()
-        );
+        ));
     }
-    println!(
+    log_info(&format!(
         "[swiftfind-core] startup mode={} hotkey={} config_path={} index_db_path={}",
         runtime_mode(),
         config.hotkey,
         config.config_path.display(),
         config.index_db_path.display(),
-    );
+    ));
 
     let service = CoreService::new(config.clone())?.with_runtime_providers();
     let indexed = service.rebuild_index()?;
-    println!("[swiftfind-core] startup indexed_items={indexed}");
+    log_info(&format!("[swiftfind-core] startup indexed_items={indexed}"));
 
     #[cfg(target_os = "windows")]
     {
         if let Ok(exe) = std::env::current_exe() {
             if let Err(error) = crate::startup::set_enabled(config.launch_at_startup, &exe) {
-                eprintln!("[swiftfind-core] startup sync warning: {error}");
+                log_warn(&format!("[swiftfind-core] startup sync warning: {error}"));
             }
         }
 
@@ -173,7 +185,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         };
         if _single_instance.is_none() {
             let _ = signal_existing_instance_show();
-            println!("[swiftfind-core] runtime already active; signaled existing instance");
+            log_info("[swiftfind-core] runtime already active; signaled existing instance");
             return Ok(());
         }
 
@@ -181,12 +193,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
         overlay.set_help_config_path(config.config_path.to_string_lossy().as_ref());
         overlay.set_hotkey_hint(&config.hotkey);
-        println!("[swiftfind-core] native overlay shell initialized (hidden)");
+        log_info("[swiftfind-core] native overlay shell initialized (hidden)");
 
         let mut registrar = default_hotkey_registrar();
         let registration = registrar.register_hotkey(&config.hotkey)?;
         log_registration(&registration);
-        println!("[swiftfind-core] event loop running (native overlay)");
+        log_info("[swiftfind-core] event loop running (native overlay)");
 
         let max_results = config.max_results as usize;
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
@@ -195,7 +207,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         overlay
             .run_message_loop_with_events(|event| match event {
                 OverlayEvent::Hotkey(_) => {
-                    println!("[swiftfind-core] hotkey_event received");
+                    log_info("[swiftfind-core] hotkey_event received");
                     overlay_state.set_visible(overlay.is_visible());
                     let action = overlay_state.on_hotkey(overlay.has_focus());
                     match action {
@@ -203,6 +215,10 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             overlay.show_and_focus();
                             if overlay.query_text().trim().is_empty() {
                                 set_idle_overlay_state(&overlay);
+                                if first_run_onboarding {
+                                    overlay.set_status_text(&onboarding_hint(&config.hotkey));
+                                    first_run_onboarding = false;
+                                }
                             }
                         }
                         HotkeyAction::Hide => {
@@ -220,6 +236,10 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     overlay.show_and_focus();
                     if overlay.query_text().trim().is_empty() {
                         set_idle_overlay_state(&overlay);
+                        if first_run_onboarding {
+                            overlay.set_status_text(&onboarding_hint(&config.hotkey));
+                            first_run_onboarding = false;
+                        }
                     }
                 }
                 OverlayEvent::ExternalQuit => {
@@ -244,7 +264,8 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
 
                     match search_overlay_results(&service, trimmed, max_results) {
-                        Ok(results) => {
+                        Ok(mut results) => {
+                            prepend_runtime_actions(trimmed, max_results, &mut results);
                             current_results = results;
                             selected_index = 0;
                             if current_results.is_empty() {
@@ -309,7 +330,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        println!("[swiftfind-core] non-windows runtime mode: no global hotkey loop");
+        log_info("[swiftfind-core] non-windows runtime mode: no global hotkey loop");
         Ok(())
     }
 }
@@ -318,15 +339,15 @@ fn command_ensure_config() -> Result<(), RuntimeError> {
     let cfg = config::load(None)?;
     if !cfg.config_path.exists() {
         config::write_user_template(&cfg, &cfg.config_path)?;
-        println!(
+        log_info(&format!(
             "[swiftfind-core] wrote user config template to {}",
             cfg.config_path.display()
-        );
+        ));
     }
-    println!(
+    log_info(&format!(
         "[swiftfind-core] config ready at {}",
         cfg.config_path.display()
-    );
+    ));
     Ok(())
 }
 
@@ -336,16 +357,16 @@ fn command_sync_startup() -> Result<(), RuntimeError> {
         let cfg = config::load(None)?;
         let exe = std::env::current_exe()?;
         crate::startup::set_enabled(cfg.launch_at_startup, &exe)?;
-        println!(
+        log_info(&format!(
             "[swiftfind-core] startup registration synced: enabled={}",
             cfg.launch_at_startup
-        );
+        ));
         return Ok(());
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        println!("[swiftfind-core] startup sync is unsupported on this platform");
+        log_info("[swiftfind-core] startup sync is unsupported on this platform");
         Ok(())
     }
 }
@@ -354,16 +375,16 @@ fn command_status() -> Result<(), RuntimeError> {
     #[cfg(target_os = "windows")]
     {
         let running = is_instance_window_present();
-        println!(
+        log_info(&format!(
             "[swiftfind-core] status: {}",
             if running { "running" } else { "stopped" }
-        );
+        ));
         return Ok(());
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        println!("[swiftfind-core] status: unsupported on this platform");
+        log_info("[swiftfind-core] status: unsupported on this platform");
         Ok(())
     }
 }
@@ -372,20 +393,20 @@ fn command_quit() -> Result<(), RuntimeError> {
     #[cfg(target_os = "windows")]
     {
         let signaled = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
-        println!(
+        log_info(&format!(
             "[swiftfind-core] quit signal {}",
             if signaled {
                 "sent"
             } else {
                 "skipped (not running)"
             }
-        );
+        ));
         return Ok(());
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        println!("[swiftfind-core] quit is unsupported on this platform");
+        log_info("[swiftfind-core] quit is unsupported on this platform");
         Ok(())
     }
 }
@@ -419,7 +440,7 @@ fn spawn_background_process() -> Result<(), RuntimeError> {
     command.stdout(std::process::Stdio::null());
     command.stderr(std::process::Stdio::null());
     command.spawn()?;
-    println!("[swiftfind-core] background process started");
+    log_info("[swiftfind-core] background process started");
     Ok(())
 }
 
@@ -452,6 +473,9 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
 fn overlay_subtitle(item: &crate::model::SearchItem) -> String {
     if item.kind.eq_ignore_ascii_case("app") {
         return String::new();
+    }
+    if item.kind.eq_ignore_ascii_case("action") {
+        return "Open SwiftFind logs folder".to_string();
     }
     abbreviate_path(&item.path)
 }
@@ -522,10 +546,12 @@ fn next_selection_index(current: usize, len: usize, direction: i32) -> usize {
 fn log_registration(registration: &HotkeyRegistration) {
     match registration {
         HotkeyRegistration::Native(id) => {
-            println!("[swiftfind-core] hotkey registered native_id={id}");
+            log_info(&format!(
+                "[swiftfind-core] hotkey registered native_id={id}"
+            ));
         }
         HotkeyRegistration::Noop(label) => {
-            println!("[swiftfind-core] hotkey registered noop={label}");
+            log_info(&format!("[swiftfind-core] hotkey registered noop={label}"));
         }
     }
 }
@@ -602,16 +628,65 @@ fn launch_overlay_selection(
     }
 
     let selected = &results[selected_index];
+    if selected.id == ACTION_OPEN_LOGS_ID {
+        return crate::logging::open_logs_folder()
+            .map_err(|error| format!("open logs folder failed: {error}"));
+    }
     service
         .launch(LaunchTarget::Id(&selected.id))
         .map_err(|error| format!("launch failed: {error}"))
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn prepend_runtime_actions(query: &str, limit: usize, results: &mut Vec<crate::model::SearchItem>) {
+    if limit == 0 {
+        return;
+    }
+
+    let normalized = query.trim().to_ascii_lowercase();
+    if !normalized.starts_with("log") {
+        return;
+    }
+    if results.iter().any(|item| item.id == ACTION_OPEN_LOGS_ID) {
+        return;
+    }
+
+    let logs_path = crate::logging::logs_dir();
+    results.insert(
+        0,
+        crate::model::SearchItem::new(
+            ACTION_OPEN_LOGS_ID,
+            "action",
+            "Open SwiftFind Logs Folder",
+            logs_path.to_string_lossy().as_ref(),
+        ),
+    );
+    if results.len() > limit {
+        results.truncate(limit);
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn onboarding_hint(hotkey: &str) -> String {
+    format!("Welcome to SwiftFind. Hotkey: {hotkey}. If this conflicts, click ? to edit config.")
+}
+
+fn log_info(message: &str) {
+    println!("{message}");
+    crate::logging::info(message);
+}
+
+#[cfg(target_os = "windows")]
+fn log_warn(message: &str) {
+    eprintln!("{message}");
+    crate::logging::warn(message);
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        launch_overlay_selection, next_selection_index, parse_cli_args, search_overlay_results,
-        RuntimeCommand, RuntimeOptions,
+        launch_overlay_selection, next_selection_index, parse_cli_args, prepend_runtime_actions,
+        search_overlay_results, RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
     };
     use crate::config::Config;
     use crate::core_service::CoreService;
@@ -760,5 +835,20 @@ mod tests {
         let args = vec!["--quit".to_string(), "--background".to_string()];
         let error = parse_cli_args(&args).expect_err("invalid combination should fail");
         assert!(error.contains("background mode"));
+    }
+
+    #[test]
+    fn prepends_logs_action_for_log_query() {
+        let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
+        prepend_runtime_actions("logs", 5, &mut results);
+        assert_eq!(results[0].id, ACTION_OPEN_LOGS_ID);
+        assert_eq!(results[0].kind, "action");
+    }
+
+    #[test]
+    fn does_not_prepend_logs_action_for_non_log_query() {
+        let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
+        prepend_runtime_actions("code", 5, &mut results);
+        assert_ne!(results[0].id, ACTION_OPEN_LOGS_ID);
     }
 }

@@ -11,6 +11,5 @@ fn main() {
 
     let mut res = winres::WindowsResource::new();
     res.set_icon(icon_path);
-    res.compile()
-        .expect("failed to compile Windows resources");
+    res.compile().expect("failed to compile Windows resources");
 }

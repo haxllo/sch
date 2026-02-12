@@ -122,7 +122,16 @@ Behavior details:
 - Pressing the configured hotkey while launcher is visible but not focused brings focus back.
 - Clicking outside launcher hides it.
 - Closing launcher clears current query/results (next open is clean).
+- On first run (new config), launcher shows a brief onboarding hint with hotkey/config guidance.
 - Search and launch failures are shown in launcher status text.
+- Typing `log` in launcher adds an action to open `%APPDATA%\SwiftFind\logs`.
+
+## Logs and Diagnostics
+
+- Log directory: `%APPDATA%\SwiftFind\logs`
+- Current file: `swiftfind.log`
+- Rotation: old logs are archived when current file reaches size threshold.
+- Panic/crash details are written to logs via runtime panic hook.
 
 ## UI Characteristics (Final)
 
