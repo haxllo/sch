@@ -96,10 +96,20 @@ fn service_rebuild_index_reports_item_count() {
     let service = CoreService::with_connection(config, db).unwrap();
 
     service
-        .upsert_item(&swiftfind_core::model::SearchItem::new("1", "file", "A", "C:\\A.txt"))
+        .upsert_item(&swiftfind_core::model::SearchItem::new(
+            "1",
+            "file",
+            "A",
+            "C:\\A.txt",
+        ))
         .unwrap();
     service
-        .upsert_item(&swiftfind_core::model::SearchItem::new("2", "file", "B", "C:\\B.txt"))
+        .upsert_item(&swiftfind_core::model::SearchItem::new(
+            "2",
+            "file",
+            "B",
+            "C:\\B.txt",
+        ))
         .unwrap();
 
     let rebuilt_count = service.rebuild_index().unwrap();
@@ -170,7 +180,8 @@ fn service_launch_missing_path_prunes_item() {
 
     let first = service.launch(LaunchTarget::Id("stale-launch"));
     match first {
-        Err(ServiceError::Launch(swiftfind_core::action_executor::LaunchError::MissingPath(_))) => {}
+        Err(ServiceError::Launch(swiftfind_core::action_executor::LaunchError::MissingPath(_))) => {
+        }
         other => panic!("unexpected first launch result: {other:?}"),
     }
 

@@ -25,7 +25,10 @@ fn non_windows_fallback_smoke_still_roundtrips() {
     let registration = registrar
         .register_hotkey("Alt+Space")
         .expect("non-windows registrar should return noop registration");
-    assert_eq!(registration, HotkeyRegistration::Noop("Alt+Space".to_string()));
+    assert_eq!(
+        registration,
+        HotkeyRegistration::Noop("Alt+Space".to_string())
+    );
     registrar
         .unregister_all()
         .expect("non-windows registrar should unregister noop entries");
@@ -47,7 +50,9 @@ fn non_windows_fallback_smoke_still_roundtrips() {
 #[test]
 fn windows_runtime_smoke_registers_hotkey_and_transport_roundtrip() {
     if std::env::var("SWIFTFIND_WINDOWS_RUNTIME_SMOKE").as_deref() != Ok("1") {
-        eprintln!("skipping windows runtime smoke (set SWIFTFIND_WINDOWS_RUNTIME_SMOKE=1 to enable)");
+        eprintln!(
+            "skipping windows runtime smoke (set SWIFTFIND_WINDOWS_RUNTIME_SMOKE=1 to enable)"
+        );
         return;
     }
 
@@ -83,7 +88,8 @@ fn windows_runtime_smoke_registers_hotkey_and_transport_roundtrip() {
     .expect("request should serialize");
 
     let response = swiftfind_core::transport::handle_json(&service, &payload);
-    let parsed: TransportResponse = serde_json::from_str(&response).expect("response should deserialize");
+    let parsed: TransportResponse =
+        serde_json::from_str(&response).expect("response should deserialize");
 
     match parsed {
         TransportResponse::Ok { response: _ } => {}

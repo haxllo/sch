@@ -8,10 +8,11 @@ mod imp {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, GetWindowLongPtrW,
         GetWindowTextLengthW, GetWindowTextW, IsWindow, LoadCursorW, MessageBoxW, RegisterClassW,
-        SendMessageW, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
-        CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW, MB_ICONERROR, MB_OK,
-        MSG, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_NCCREATE, WM_NCDESTROY, WNDCLASSW, WS_CAPTION,
-        WS_CHILD, WS_EX_TOOLWINDOW, WS_OVERLAPPED, WS_SYSMENU, WS_TABSTOP, WS_VISIBLE,
+        SendMessageW, SetWindowLongPtrW, SetWindowTextW, ShowWindow, TranslateMessage,
+        CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HMENU, IDC_ARROW,
+        MB_ICONERROR, MB_OK, MSG, SW_SHOW, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_NCCREATE,
+        WM_NCDESTROY, WNDCLASSW, WS_CAPTION, WS_CHILD, WS_EX_TOOLWINDOW, WS_OVERLAPPED, WS_SYSMENU,
+        WS_TABSTOP, WS_VISIBLE,
     };
 
     const CLASS_NAME: &str = "SwiftFindSettingsWindowClass";
@@ -103,7 +104,9 @@ mod imp {
         };
         if hwnd.is_null() {
             let error = unsafe { GetLastError() };
-            return Err(format!("CreateWindowExW settings failed with error {error}"));
+            return Err(format!(
+                "CreateWindowExW settings failed with error {error}"
+            ));
         }
 
         if let Some(s) = state_for(hwnd) {
@@ -260,7 +263,9 @@ mod imp {
                                     state.result = Some(result);
                                     state.closed = true;
                                     unsafe {
-                                        windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(hwnd);
+                                        windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(
+                                            hwnd,
+                                        );
                                     }
                                 }
                                 Err(error) => {
@@ -392,7 +397,9 @@ mod imp {
 
     fn class_name_wide() -> &'static [u16] {
         static CLASS_NAME_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
-        CLASS_NAME_WIDE.get_or_init(|| to_wide(CLASS_NAME)).as_slice()
+        CLASS_NAME_WIDE
+            .get_or_init(|| to_wide(CLASS_NAME))
+            .as_slice()
     }
 
     fn to_wide(value: &str) -> Vec<u16> {

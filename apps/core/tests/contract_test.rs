@@ -82,5 +82,8 @@ fn handles_launch_command_by_path() {
 
     std::fs::remove_file(&launch_path).unwrap();
 
-    assert_eq!(response, CoreResponse::Launch(swiftfind_core::contract::LaunchResponse { launched: true }));
+    assert_eq!(
+        response,
+        CoreResponse::Launch(swiftfind_core::contract::LaunchResponse { launched: true })
+    );
 }

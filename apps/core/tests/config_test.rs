@@ -19,18 +19,27 @@ fn accepts_default_config() {
     assert!(!cfg.launch_at_startup);
     assert!(!cfg.hotkey_help.trim().is_empty());
     assert!(!cfg.hotkey_recommended.is_empty());
-    assert!(cfg.index_db_path.to_string_lossy().contains("swiftfind") || cfg.index_db_path.to_string_lossy().contains("SwiftFind"));
-    assert!(cfg.config_path.to_string_lossy().contains("swiftfind") || cfg.config_path.to_string_lossy().contains("SwiftFind"));
+    assert!(
+        cfg.index_db_path.to_string_lossy().contains("swiftfind")
+            || cfg.index_db_path.to_string_lossy().contains("SwiftFind")
+    );
+    assert!(
+        cfg.config_path.to_string_lossy().contains("swiftfind")
+            || cfg.config_path.to_string_lossy().contains("SwiftFind")
+    );
     assert!(swiftfind_core::config::validate(&cfg).is_ok());
 }
 
 #[test]
 fn opens_index_store_from_config_path() {
     let mut cfg = swiftfind_core::config::Config::default();
-    cfg.index_db_path = std::env::temp_dir().join("swiftfind").join("cfg-open.sqlite3");
+    cfg.index_db_path = std::env::temp_dir()
+        .join("swiftfind")
+        .join("cfg-open.sqlite3");
 
     let db = swiftfind_core::index_store::open_from_config(&cfg).unwrap();
-    let item = swiftfind_core::model::SearchItem::new("cfg-1", "app", "Terminal", "C:\\Terminal.exe");
+    let item =
+        swiftfind_core::model::SearchItem::new("cfg-1", "app", "Terminal", "C:\\Terminal.exe");
     swiftfind_core::index_store::upsert_item(&db, &item).unwrap();
 
     let got = swiftfind_core::index_store::get_item(&db, "cfg-1").unwrap();
@@ -81,7 +90,10 @@ fn saves_and_reloads_config_file() {
     assert_eq!(loaded.hotkey, "Ctrl+Space");
     assert!(loaded.launch_at_startup);
     assert_eq!(loaded.discovery_roots.len(), 1);
-    assert_eq!(loaded.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
+    assert_eq!(
+        loaded.version,
+        swiftfind_core::config::CURRENT_CONFIG_VERSION
+    );
 
     std::fs::remove_file(&config_path).unwrap();
 }
@@ -109,7 +121,10 @@ fn loads_partial_config_with_migration_safe_defaults() {
     let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
 
     assert_eq!(loaded.max_results, 25);
-    assert_eq!(loaded.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
+    assert_eq!(
+        loaded.version,
+        swiftfind_core::config::CURRENT_CONFIG_VERSION
+    );
     assert_eq!(loaded.hotkey, "Ctrl+Shift+Space");
     assert!(!loaded.launch_at_startup);
     assert_eq!(loaded.config_path, config_path);

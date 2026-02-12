@@ -111,7 +111,9 @@ pub fn stable_config_path() -> PathBuf {
 }
 
 pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
-    let resolved_path = path.map(Path::to_path_buf).unwrap_or_else(stable_config_path);
+    let resolved_path = path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(stable_config_path);
 
     if !resolved_path.exists() {
         let cfg = default_for_path(&resolved_path);
@@ -191,13 +193,19 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         }
     }
 
-    text.push_str("  // Avoid common OS-reserved/conflicting shortcuts like Win+..., Alt+Tab, Ctrl+Esc.\n");
+    text.push_str(
+        "  // Avoid common OS-reserved/conflicting shortcuts like Win+..., Alt+Tab, Ctrl+Esc.\n",
+    );
     text.push_str("  \"hotkey\": ");
     text.push_str(&json_string(&cfg.hotkey));
     text.push_str(",\n");
     text.push_str("  // Start SwiftFind automatically when you sign in (true/false)\n");
     text.push_str("  \"launch_at_startup\": ");
-    text.push_str(if cfg.launch_at_startup { "true" } else { "false" });
+    text.push_str(if cfg.launch_at_startup {
+        "true"
+    } else {
+        "false"
+    });
     text.push_str(",\n\n");
 
     text.push_str("  // Optional tuning:\n");

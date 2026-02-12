@@ -1,11 +1,11 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use swiftfind_core::core_service::CoreService;
+#[cfg(not(target_os = "windows"))]
+use swiftfind_core::discovery::StartMenuAppDiscoveryProvider;
 use swiftfind_core::discovery::{
     AppProvider, DiscoveryProvider, FileProvider, FileSystemDiscoveryProvider,
 };
-#[cfg(not(target_os = "windows"))]
-use swiftfind_core::discovery::StartMenuAppDiscoveryProvider;
 
 #[test]
 fn app_provider_fixture_is_deterministic() {
@@ -85,18 +85,22 @@ fn rebuild_index_uses_registered_providers() {
     let service = CoreService::with_connection(config, db)
         .unwrap()
         .with_providers(vec![
-            Box::new(AppProvider::from_apps(vec![swiftfind_core::model::SearchItem::new(
-                "app-code",
-                "app",
-                "Visual Studio Code",
-                app_path.to_string_lossy().as_ref(),
-            )])),
-            Box::new(FileProvider::from_files(vec![swiftfind_core::model::SearchItem::new(
-                "file-report",
-                "file",
-                "Q4_Report.xlsx",
-                file_path.to_string_lossy().as_ref(),
-            )])),
+            Box::new(AppProvider::from_apps(vec![
+                swiftfind_core::model::SearchItem::new(
+                    "app-code",
+                    "app",
+                    "Visual Studio Code",
+                    app_path.to_string_lossy().as_ref(),
+                ),
+            ])),
+            Box::new(FileProvider::from_files(vec![
+                swiftfind_core::model::SearchItem::new(
+                    "file-report",
+                    "file",
+                    "Q4_Report.xlsx",
+                    file_path.to_string_lossy().as_ref(),
+                ),
+            ])),
         ]);
 
     let inserted = service.rebuild_index().unwrap();

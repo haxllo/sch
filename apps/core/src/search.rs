@@ -14,14 +14,8 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         .iter()
         .enumerate()
         .filter_map(|(index, item)| {
-            score_item(item, &normalized_query).map(|score| {
-                (
-                    category_priority(item),
-                    score,
-                    index,
-                    item,
-                )
-            })
+            score_item(item, &normalized_query)
+                .map(|score| (category_priority(item), score, index, item))
         })
         .collect();
 

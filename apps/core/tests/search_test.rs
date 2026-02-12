@@ -83,8 +83,18 @@ fn frequency_influences_ties_predictably() {
 #[test]
 fn apps_then_local_files_then_other_results() {
     let items = vec![
-        SearchItem::new("remote", "doc", "Code Reference", "https://example.com/code"),
-        SearchItem::new("local", "file", "Code Notes", "C:\\Users\\Admin\\code-notes.txt"),
+        SearchItem::new(
+            "remote",
+            "doc",
+            "Code Reference",
+            "https://example.com/code",
+        ),
+        SearchItem::new(
+            "local",
+            "file",
+            "Code Notes",
+            "C:\\Users\\Admin\\code-notes.txt",
+        ),
         SearchItem::new("app", "app", "Code", "C:\\Program Files\\Code\\Code.exe"),
     ];
 

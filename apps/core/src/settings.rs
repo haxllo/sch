@@ -42,7 +42,9 @@ pub fn validate_hotkey(input: &str) -> Result<String, String> {
 
     let canonical = canonical_hotkey(&modifiers, &key);
     if is_reserved_hotkey(&canonical) {
-        return Err("This hotkey is commonly reserved by Windows. Choose a different one.".to_string());
+        return Err(
+            "This hotkey is commonly reserved by Windows. Choose a different one.".to_string(),
+        );
     }
 
     Ok(canonical)
@@ -62,7 +64,9 @@ fn normalize_modifier(input: &str) -> Result<&'static str, String> {
         "alt" => Ok("Alt"),
         "shift" => Ok("Shift"),
         "win" | "windows" | "meta" => Err("Win/Meta combinations are not supported.".to_string()),
-        _ => Err(format!("Unsupported modifier '{input}'. Use Ctrl, Alt, or Shift.")),
+        _ => Err(format!(
+            "Unsupported modifier '{input}'. Use Ctrl, Alt, or Shift."
+        )),
     }
 }
 
@@ -114,11 +118,6 @@ fn canonical_hotkey(modifiers: &BTreeSet<&'static str>, key: &str) -> String {
 fn is_reserved_hotkey(canonical: &str) -> bool {
     matches!(
         canonical,
-        "Alt+Tab"
-            | "Alt+F4"
-            | "Ctrl+Esc"
-            | "Alt+Esc"
-            | "Ctrl+Shift+Esc"
-            | "Alt+Space"
+        "Alt+Tab" | "Alt+F4" | "Ctrl+Esc" | "Alt+Esc" | "Ctrl+Shift+Esc" | "Alt+Space"
     )
 }

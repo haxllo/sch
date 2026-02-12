@@ -21,7 +21,10 @@ fn default_registrar_is_noop_on_non_windows() {
     let mut registrar = default_hotkey_registrar();
 
     let registration = registrar.register_hotkey("Alt+Space").unwrap();
-    assert_eq!(registration, HotkeyRegistration::Noop("Alt+Space".to_string()));
+    assert_eq!(
+        registration,
+        HotkeyRegistration::Noop("Alt+Space".to_string())
+    );
     registrar.unregister_all().unwrap();
 }
 

@@ -229,7 +229,5 @@ fn looks_like_filesystem_path(path: &str) -> bool {
     }
 
     let bytes = path.as_bytes();
-    bytes.len() >= 3
-        && bytes[1] == b':'
-        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
