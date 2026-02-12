@@ -8,3 +8,4 @@ pub mod hotkey_runtime;
 pub mod index_store;
 pub mod model;
 pub mod search;
+pub mod transport;
