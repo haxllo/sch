@@ -137,7 +137,7 @@ mod imp {
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
     const COLOR_TEXT_HIGHLIGHT: u32 = 0x00FFFFFF;
-    const COLOR_TEXT_HINT: u32 = 0x009B9B9B;
+    const COLOR_TEXT_HINT: u32 = 0x00BEBEBE;
     const COLOR_SELECTION: u32 = 0x00262626;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
     const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
@@ -526,14 +526,13 @@ mod imp {
                 }
 
                 self.expand_results(rows.len());
-                if !state.status_is_error {
-                    let wide = to_wide(FOOTER_HINT_TEXT);
-                    unsafe {
-                        SetWindowTextW(state.status_hwnd, wide.as_ptr());
-                        InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
-                    }
-                    layout_children(self.hwnd, state);
+                state.status_is_error = false;
+                let wide = to_wide(FOOTER_HINT_TEXT);
+                unsafe {
+                    SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                    InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
                 }
+                layout_children(self.hwnd, state);
                 self.set_selected_index_internal(selected_index, false);
             }
         }
@@ -2144,8 +2143,14 @@ mod imp {
         let help_reserved = HELP_ICON_SIZE + HELP_ICON_RIGHT_INSET + HELP_ICON_GAP_FROM_INPUT;
         let edit_width = (input_width - help_reserved).max(120);
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
-        let status_visible = status_len > 0;
-        let footer_hint_mode = status_visible && state.results_visible && !state.status_is_error;
+        let footer_hint_mode = state.results_visible && !state.status_is_error;
+        if footer_hint_mode && status_len == 0 {
+            let wide = to_wide(FOOTER_HINT_TEXT);
+            unsafe {
+                SetWindowTextW(state.status_hwnd, wide.as_ptr());
+            }
+        }
+        let status_visible = footer_hint_mode || status_len > 0;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
         let status_top = if footer_hint_mode {
