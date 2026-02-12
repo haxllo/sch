@@ -38,14 +38,14 @@ mod imp {
         SetForegroundWindow, SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos,
         SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW,
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
+        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, KillTimer, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LWA_ALPHA, MSG, SM_CXSCREEN,
         SM_CYSCREEN, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
         WM_CTLCOLORLISTBOX, WM_CTLCOLOREDIT, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM,
         WM_HOTKEY, WM_KEYDOWN, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
         WM_NCDESTROY, WM_PAINT, WM_SETFONT, WM_SIZE, WM_TIMER, WM_LBUTTONUP, WM_ACTIVATE,
         WNDCLASSW, WS_CHILD,
-        WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
+        WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP,
         WS_VISIBLE,
     };
 
@@ -229,7 +229,7 @@ mod imp {
 
             let hwnd = unsafe {
                 CreateWindowExW(
-                    WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED,
+                    WS_EX_TOOLWINDOW | WS_EX_LAYERED,
                     class_name.as_ptr(),
                     to_wide(WINDOW_TITLE).as_ptr(),
                     WS_POPUP | WS_CLIPCHILDREN,
@@ -473,7 +473,7 @@ mod imp {
             unsafe {
                 SetWindowPos(
                     self.hwnd,
-                    HWND_TOPMOST,
+                    HWND_TOP,
                     x,
                     y,
                     WINDOW_WIDTH,
@@ -1528,7 +1528,7 @@ mod imp {
         unsafe {
             SetWindowPos(
                 hwnd,
-                HWND_TOPMOST,
+                HWND_TOP,
                 left,
                 top,
                 width.max(1),
