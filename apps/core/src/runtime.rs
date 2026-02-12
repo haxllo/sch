@@ -4,9 +4,9 @@ use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
 use crate::overlay_state::{HotkeyAction, OverlayState};
 #[cfg(target_os = "windows")]
-use crate::hotkey_runtime::{default_hotkey_registrar, run_message_loop, HotkeyRegistration};
+use crate::hotkey_runtime::{default_hotkey_registrar, HotkeyRegistration};
 #[cfg(target_os = "windows")]
-use crate::windows_overlay::NativeOverlayShell;
+use crate::windows_overlay::{NativeOverlayShell, OverlayEvent};
 use std::io::{self, BufRead, Write};
 
 #[derive(Debug)]
@@ -81,19 +81,104 @@ pub fn run() -> Result<(), RuntimeError> {
         let mut registrar = default_hotkey_registrar();
         let registration = registrar.register_hotkey(&config.hotkey)?;
         log_registration(&registration);
-        println!("[swiftfind-core] event loop running (WM_HOTKEY)");
-        run_message_loop(|_| {
-            overlay_state.set_visible(overlay.is_visible());
-            let action = overlay_state.on_hotkey(overlay.has_focus());
-            match action {
-                HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
-                    overlay.show_and_focus();
+        println!("[swiftfind-core] event loop running (native overlay)");
+
+        let max_results = config.max_results as usize;
+        let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
+        let mut selected_index = 0_usize;
+
+        overlay
+            .run_message_loop_with_events(|event| match event {
+                OverlayEvent::Hotkey(_) => {
+                    overlay_state.set_visible(overlay.is_visible());
+                    let action = overlay_state.on_hotkey(overlay.has_focus());
+                    match action {
+                        HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
+                            overlay.show_and_focus();
+                        }
+                        HotkeyAction::Hide => {
+                            overlay.hide();
+                        }
+                    }
                 }
-                HotkeyAction::Hide => {
-                    overlay.hide();
+                OverlayEvent::Escape => {
+                    if overlay_state.on_escape() {
+                        overlay.hide();
+                    }
                 }
-            }
-        })?;
+                OverlayEvent::QueryChanged(query) => {
+                    let trimmed = query.trim();
+                    if trimmed.is_empty() {
+                        current_results.clear();
+                        selected_index = 0;
+                        overlay.set_results(&[], 0);
+                        overlay.set_status_text("");
+                        return;
+                    }
+
+                    match service.search(trimmed, max_results) {
+                        Ok(results) => {
+                            current_results = results;
+                            selected_index = 0;
+                            let rows = overlay_rows(&current_results);
+                            overlay.set_results(&rows, selected_index);
+                            if current_results.is_empty() {
+                                overlay.set_status_text("No results");
+                            } else {
+                                overlay.set_status_text("");
+                            }
+                        }
+                        Err(error) => {
+                            current_results.clear();
+                            selected_index = 0;
+                            overlay.set_results(&[], 0);
+                            overlay.set_status_text(&format!("Search error: {error}"));
+                        }
+                    }
+                }
+                OverlayEvent::MoveSelection(direction) => {
+                    if current_results.is_empty() {
+                        return;
+                    }
+
+                    let max = current_results.len() - 1;
+                    if direction < 0 {
+                        selected_index = selected_index.saturating_sub(1);
+                    } else if direction > 0 {
+                        selected_index = (selected_index + 1).min(max);
+                    }
+
+                    let rows = overlay_rows(&current_results);
+                    overlay.set_results(&rows, selected_index);
+                }
+                OverlayEvent::Submit => {
+                    if current_results.is_empty() {
+                        overlay.set_status_text("No result selected");
+                        return;
+                    }
+
+                    if let Some(list_selection) = overlay.selected_index() {
+                        selected_index = list_selection.min(current_results.len() - 1);
+                    }
+                    let selected = &current_results[selected_index];
+
+                    match service.launch(LaunchTarget::Id(&selected.id)) {
+                        Ok(()) => {
+                            overlay.set_status_text("");
+                            overlay.hide();
+                            overlay_state.on_escape();
+                            overlay.clear_query_text();
+                            current_results.clear();
+                            selected_index = 0;
+                            overlay.set_results(&[], 0);
+                        }
+                        Err(error) => {
+                            overlay.set_status_text(&format!("Launch error: {error}"));
+                        }
+                    }
+                }
+            })
+            .map_err(RuntimeError::Overlay)?;
         registrar.unregister_all()?;
         Ok(())
     }
@@ -115,6 +200,14 @@ fn runtime_mode() -> &'static str {
     {
         "non-windows-noop"
     }
+}
+
+#[cfg(target_os = "windows")]
+fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<String> {
+    results
+        .iter()
+        .map(|item| format!("{}  -  {}", item.title, item.path))
+        .collect()
 }
 
 #[cfg(target_os = "windows")]

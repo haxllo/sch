@@ -15,12 +15,14 @@ mod imp {
         SetWindowPos, SetWindowRgn, SetWindowTextW, ShowWindow, TranslateMessage, CREATESTRUCTW,
         CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, EM_SETSEL, GWLP_USERDATA, GWLP_WNDPROC, HMENU,
         HWND_TOPMOST, IDC_ARROW, MSG, SM_CXSCREEN, SM_CYSCREEN, SW_HIDE, SW_SHOW,
-        SWP_NOACTIVATE, SWP_SHOWWINDOW, VK_ESCAPE, WM_APP, WM_CLOSE, WM_CREATE, WM_DESTROY,
-        WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY, WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER,
-        WS_CHILD, WS_CLIPCHILDREN, WS_EX_TOOLWINDOW, WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP,
-        WS_VISIBLE, WS_VSCROLL,
+        SWP_NOACTIVATE, SWP_SHOWWINDOW, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP, WM_APP, WM_CLOSE,
+        WM_COMMAND, WM_CREATE, WM_DESTROY, WM_HOTKEY, WM_KEYDOWN, WM_NCCREATE, WM_NCDESTROY,
+        WM_SETFONT, WM_SIZE, WNDCLASSW, WS_BORDER, WS_CHILD, WS_CLIPCHILDREN, WS_EX_TOOLWINDOW,
+        WS_EX_TOPMOST, WS_POPUP, WS_TABSTOP, WS_VISIBLE, WS_VSCROLL,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{COLOR_WINDOW, ES_AUTOHSCROLL, LBS_NOTIFY};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        COLOR_WINDOW, EN_CHANGE, ES_AUTOHSCROLL, LBN_DBLCLK, LBS_NOTIFY,
+    };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
     const WINDOW_TITLE: &str = "SwiftFind Launcher";
@@ -33,7 +35,23 @@ mod imp {
     const PANEL_MARGIN: i32 = 18;
     const INPUT_HEIGHT: i32 = 44;
     const STATUS_HEIGHT: i32 = 26;
+    const CONTROL_ID_INPUT: usize = 1001;
+    const CONTROL_ID_LIST: usize = 1002;
+    const CONTROL_ID_STATUS: usize = 1003;
     const SWIFTFIND_WM_ESCAPE: u32 = WM_APP + 1;
+    const SWIFTFIND_WM_QUERY_CHANGED: u32 = WM_APP + 2;
+    const SWIFTFIND_WM_MOVE_UP: u32 = WM_APP + 3;
+    const SWIFTFIND_WM_MOVE_DOWN: u32 = WM_APP + 4;
+    const SWIFTFIND_WM_SUBMIT: u32 = WM_APP + 5;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum OverlayEvent {
+        Hotkey(i32),
+        QueryChanged(String),
+        MoveSelection(i32),
+        Submit,
+        Escape,
+    }
 
     pub struct NativeOverlayShell {
         hwnd: HWND,
@@ -136,6 +154,10 @@ mod imp {
                 ShowWindow(self.hwnd, SW_SHOW);
                 SetForegroundWindow(self.hwnd);
             }
+            self.focus_input_and_select_all();
+        }
+
+        pub fn focus_input_and_select_all(&self) {
             if let Some(state) = state_for(self.hwnd) {
                 unsafe {
                     SetFocus(state.edit_hwnd);
@@ -171,6 +193,14 @@ mod imp {
                 let wide = to_wide(message);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
+                }
+            }
+        }
+
+        pub fn clear_query_text(&self) {
+            if let Some(state) = state_for(self.hwnd) {
+                unsafe {
+                    SetWindowTextW(state.edit_hwnd, to_wide("").as_ptr());
                 }
             }
         }
@@ -243,7 +273,10 @@ mod imp {
             }
         }
 
-        pub fn run_message_loop(&self) -> Result<(), String> {
+        pub fn run_message_loop_with_events<F>(&self, mut on_event: F) -> Result<(), String>
+        where
+            F: FnMut(OverlayEvent),
+        {
             let mut msg: MSG = unsafe { std::mem::zeroed() };
             loop {
                 let status = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
@@ -254,6 +287,19 @@ mod imp {
                 if status == 0 {
                     return Ok(());
                 }
+
+                 match msg.message {
+                    WM_HOTKEY => on_event(OverlayEvent::Hotkey(msg.wParam as i32)),
+                    SWIFTFIND_WM_QUERY_CHANGED => {
+                        on_event(OverlayEvent::QueryChanged(self.query_text()));
+                    }
+                    SWIFTFIND_WM_MOVE_UP => on_event(OverlayEvent::MoveSelection(-1)),
+                    SWIFTFIND_WM_MOVE_DOWN => on_event(OverlayEvent::MoveSelection(1)),
+                    SWIFTFIND_WM_SUBMIT => on_event(OverlayEvent::Submit),
+                    SWIFTFIND_WM_ESCAPE => on_event(OverlayEvent::Escape),
+                    _ => {}
+                }
+
                 unsafe {
                     TranslateMessage(&msg);
                     DispatchMessageW(&msg);
@@ -299,7 +345,7 @@ mod imp {
                             0,
                             0,
                             hwnd,
-                            1001 as HMENU,
+                            CONTROL_ID_INPUT as HMENU,
                             std::ptr::null_mut(),
                             std::ptr::null_mut(),
                         )
@@ -315,7 +361,7 @@ mod imp {
                             0,
                             0,
                             hwnd,
-                            1002 as HMENU,
+                            CONTROL_ID_LIST as HMENU,
                             std::ptr::null_mut(),
                             std::ptr::null_mut(),
                         )
@@ -331,7 +377,7 @@ mod imp {
                             0,
                             0,
                             hwnd,
-                            1003 as HMENU,
+                            CONTROL_ID_STATUS as HMENU,
                             std::ptr::null_mut(),
                             std::ptr::null_mut(),
                         )
@@ -351,6 +397,23 @@ mod imp {
                 }
                 0
             }
+            WM_COMMAND => {
+                let control_id = wparam & 0xffff;
+                let notification = (wparam >> 16) & 0xffff;
+                if control_id == CONTROL_ID_INPUT && notification as u32 == EN_CHANGE as u32 {
+                    unsafe {
+                        PostMessageW(hwnd, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
+                    }
+                    return 0;
+                }
+                if control_id == CONTROL_ID_LIST && notification as u32 == LBN_DBLCLK as u32 {
+                    unsafe {
+                        PostMessageW(hwnd, SWIFTFIND_WM_SUBMIT, 0, 0);
+                    }
+                    return 0;
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
             WM_SIZE => {
                 if let Some(state) = state_for(hwnd) {
                     layout_children(hwnd, state);
@@ -363,12 +426,11 @@ mod imp {
                 }
                 0
             }
-            SWIFTFIND_WM_ESCAPE => {
-                unsafe {
-                    ShowWindow(hwnd, SW_HIDE);
-                }
-                0
-            }
+            SWIFTFIND_WM_ESCAPE => 0,
+            SWIFTFIND_WM_QUERY_CHANGED => 0,
+            SWIFTFIND_WM_MOVE_UP => 0,
+            SWIFTFIND_WM_MOVE_DOWN => 0,
+            SWIFTFIND_WM_SUBMIT => 0,
             WM_DESTROY => {
                 unsafe {
                     PostQuitMessage(0);
@@ -400,11 +462,34 @@ mod imp {
             return unsafe { DefWindowProcW(hwnd, message, wparam, lparam) };
         }
 
-        if message == WM_KEYDOWN && (wparam as u32) == VK_ESCAPE {
-            unsafe {
-                PostMessageW(parent, SWIFTFIND_WM_ESCAPE, 0, 0);
+        if message == WM_KEYDOWN {
+            match wparam as u32 {
+                VK_ESCAPE => {
+                    unsafe {
+                        PostMessageW(parent, SWIFTFIND_WM_ESCAPE, 0, 0);
+                    }
+                    return 0;
+                }
+                VK_UP => {
+                    unsafe {
+                        PostMessageW(parent, SWIFTFIND_WM_MOVE_UP, 0, 0);
+                    }
+                    return 0;
+                }
+                VK_DOWN => {
+                    unsafe {
+                        PostMessageW(parent, SWIFTFIND_WM_MOVE_DOWN, 0, 0);
+                    }
+                    return 0;
+                }
+                VK_RETURN => {
+                    unsafe {
+                        PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
+                    }
+                    return 0;
+                }
+                _ => {}
             }
-            return 0;
         }
 
         let Some(state) = state_for(parent) else {
@@ -498,4 +583,4 @@ mod imp {
 }
 
 #[cfg(target_os = "windows")]
-pub use imp::NativeOverlayShell;
+pub use imp::{NativeOverlayShell, OverlayEvent};
