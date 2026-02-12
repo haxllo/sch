@@ -95,6 +95,8 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -13;
+    const INPUT_TEXT_SHIFT_X: i32 = 10;
+    const INPUT_TEXT_SHIFT_Y: i32 = 10;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
     const INPUT_TEXT_TOP_PAD: i32 = 17;
@@ -1489,6 +1491,10 @@ mod imp {
             right: width - INPUT_TEXT_RIGHT_INSET,
             bottom: height - INPUT_TEXT_BOTTOM_PAD,
         };
+        text_rect.left += INPUT_TEXT_SHIFT_X;
+        text_rect.right += INPUT_TEXT_SHIFT_X;
+        text_rect.top += INPUT_TEXT_SHIFT_Y;
+        text_rect.bottom += INPUT_TEXT_SHIFT_Y;
         if text_rect.right <= text_rect.left {
             text_rect.right = width;
         }
