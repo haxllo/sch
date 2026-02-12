@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,7 @@ pub struct Config {
     pub config_path: PathBuf,
     pub discovery_roots: Vec<PathBuf>,
     pub hotkey: String,
+    pub launch_at_startup: bool,
     pub hotkey_help: String,
     pub hotkey_recommended: Vec<String>,
 }
@@ -29,6 +31,7 @@ impl Default for Config {
             config_path,
             discovery_roots: default_discovery_roots(),
             hotkey: "Ctrl+Shift+Space".to_string(),
+            launch_at_startup: false,
             hotkey_help:
                 "Set `hotkey` as Modifier+Modifier+Key (example: Ctrl+Shift+Space), then restart SwiftFind."
                     .to_string(),
@@ -37,6 +40,7 @@ impl Default for Config {
                 "Ctrl+Alt+Space".to_string(),
                 "Alt+Shift+Space".to_string(),
                 "Ctrl+Shift+P".to_string(),
+                "Ctrl+Alt+P".to_string(),
             ],
         }
     }
@@ -142,8 +146,7 @@ pub fn save_to_path(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
     }
 
     let encoded = serde_json::to_string_pretty(cfg)?;
-    std::fs::write(path, encoded)?;
-    Ok(())
+    write_atomic(path, &encoded)
 }
 
 pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
@@ -191,6 +194,10 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str("  // Avoid common OS-reserved/conflicting shortcuts like Win+..., Alt+Tab, Ctrl+Esc.\n");
     text.push_str("  \"hotkey\": ");
     text.push_str(&json_string(&cfg.hotkey));
+    text.push_str(",\n");
+    text.push_str("  // Start SwiftFind automatically when you sign in (true/false)\n");
+    text.push_str("  \"launch_at_startup\": ");
+    text.push_str(if cfg.launch_at_startup { "true" } else { "false" });
     text.push_str(",\n\n");
 
     text.push_str("  // Optional tuning:\n");
@@ -227,11 +234,49 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
         return Err("hotkey is required".into());
     }
 
+    crate::settings::validate_hotkey(&cfg.hotkey)
+        .map_err(|error| format!("hotkey is invalid: {error}"))?;
+
     if cfg.version == 0 {
         return Err("version must be >= 1".into());
     }
 
     Ok(())
+}
+
+fn write_atomic(path: &Path, encoded: &str) -> Result<(), ConfigError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_path = parent.join(format!(".swiftfind-config-{ts}.tmp"));
+    let backup_path = parent.join(".swiftfind-config.backup");
+
+    std::fs::write(&temp_path, encoded)?;
+
+    if backup_path.exists() {
+        let _ = std::fs::remove_file(&backup_path);
+    }
+    if path.exists() {
+        std::fs::rename(path, &backup_path)?;
+    }
+
+    match std::fs::rename(&temp_path, path) {
+        Ok(()) => {
+            if backup_path.exists() {
+                let _ = std::fs::remove_file(&backup_path);
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if backup_path.exists() {
+                let _ = std::fs::rename(&backup_path, path);
+            }
+            let _ = std::fs::remove_file(&temp_path);
+            Err(ConfigError::Io(error))
+        }
+    }
 }
 
 fn default_discovery_roots() -> Vec<PathBuf> {

@@ -16,6 +16,7 @@ fn accepts_default_config() {
     assert_eq!(cfg.max_results, 20);
     assert_eq!(cfg.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
     assert_eq!(cfg.hotkey, "Ctrl+Shift+Space");
+    assert!(!cfg.launch_at_startup);
     assert!(!cfg.hotkey_help.trim().is_empty());
     assert!(!cfg.hotkey_recommended.is_empty());
     assert!(cfg.index_db_path.to_string_lossy().contains("swiftfind") || cfg.index_db_path.to_string_lossy().contains("SwiftFind"));
@@ -70,6 +71,7 @@ fn saves_and_reloads_config_file() {
     cfg.config_path = config_path.clone();
     cfg.max_results = 33;
     cfg.hotkey = "Ctrl+Space".to_string();
+    cfg.launch_at_startup = true;
     cfg.discovery_roots = vec![std::env::temp_dir().join("root-a")];
 
     swiftfind_core::config::save(&cfg).unwrap();
@@ -77,6 +79,7 @@ fn saves_and_reloads_config_file() {
 
     assert_eq!(loaded.max_results, 33);
     assert_eq!(loaded.hotkey, "Ctrl+Space");
+    assert!(loaded.launch_at_startup);
     assert_eq!(loaded.discovery_roots.len(), 1);
     assert_eq!(loaded.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
 
@@ -108,6 +111,7 @@ fn loads_partial_config_with_migration_safe_defaults() {
     assert_eq!(loaded.max_results, 25);
     assert_eq!(loaded.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
     assert_eq!(loaded.hotkey, "Ctrl+Shift+Space");
+    assert!(!loaded.launch_at_startup);
     assert_eq!(loaded.config_path, config_path);
     assert!(!loaded.index_db_path.as_os_str().is_empty());
     assert!(!loaded.hotkey_help.trim().is_empty());
