@@ -33,9 +33,11 @@ Expected:
 3. Type a query that should match indexed content (for example `code` or `report`).
 - Expected: result list updates with real indexed items.
 - Expected: results panel expands downward only (top edge remains fixed).
+- Expected: rows show clean title + path hierarchy (no raw tab separators).
 
 4. Use `ArrowDown` / `ArrowUp` to change selected result.
 - Expected: selected row changes as keys are pressed.
+- Expected: hover highlight can appear with mouse move, but wheel scroll does not randomly change keyboard selection.
 
 5. Press `Enter` on a valid result.
 - Expected: selected launch path is executed.

@@ -52,13 +52,32 @@ Behavior details:
 
 - Compact centered launcher bar (default compact height; no oversized blank state).
 - Panel colors:
-  - background `#1F2329`
-  - border `#353B45` (1px)
+  - background `#1C1C1C`
+  - border `#3E3E3E` (1px)
 - Rounded panel with subtle depth and improved typography hierarchy.
-- Result rows show `title` + trimmed path; selected row has a visible transition and border.
+- Result rows are structured two-line cards:
+  - primary title line (higher contrast, semibold)
+  - secondary path line (muted, ellipsized)
+- Per-item glyph marks item type (`app`, `file`, `folder`) with restrained icon boxes.
+- Selected row uses soft highlight + accent strip + subtle border; hover uses lighter non-selected tone.
 - Input focus is forced on open and text is selected for immediate re-query.
 - Results panel stays collapsed for empty query, and expands downward only after matching query text.
-- Overlay and results transitions are short and smooth (roughly 120-180ms range).
+- Overlay and results transitions are short and smooth:
+  - show/hide fade + scale (~150ms)
+  - results expand/collapse height + opacity (~150ms)
+  - selection transition (~90ms)
+
+## Results Section Rationale (Before/After)
+
+Before:
+- rows used compact single-line text and weak hierarchy; long paths reduced legibility.
+- selection state was visible but visually close to non-selected rows.
+
+After:
+- two-line row hierarchy improves scan speed and disambiguation for similarly named items.
+- type glyph gives quick context without visual noise.
+- path line remains readable while preserving compact density.
+- selection and hover are distinct but harmonious for keyboard + mouse workflows.
 
 ## Manual Validation Checklist
 
@@ -80,7 +99,8 @@ Run these on a real Windows host:
    - Window appears compact and centered (not oversized).
    - Empty query shows compact bar only (no visible results list).
    - Typing matching query expands results downward from a fixed top edge.
-   - Result row selection updates using keyboard and mouse hover.
+   - Result rows render as clean two-line title/path entries (no literal tab separators).
+   - Result row selection updates using keyboard and hover visuals.
    - Status line color changes for error states.
 
 ## Screenshot Notes (Before/After)
@@ -98,6 +118,7 @@ Recommended capture points:
 - `overlay-results.png`: populated results with one selected row.
 - `overlay-error.png`: launch/search error status visible.
 - `overlay-expand.gif` (or short video): compact bar expanding downward while typing.
+- `overlay-before-after-rows.png`: side-by-side comparison of old vs redesigned results rows.
 
 ## Troubleshooting Checklist
 
