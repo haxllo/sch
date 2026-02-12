@@ -8,7 +8,7 @@ mod imp {
     use windows_sys::Win32::Foundation::{GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush, DeleteObject, DrawTextW,
-        EndPaint, FillRect, FillRgn, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
+        EndPaint, FillRect, FillRgn, FrameRgn, FrameRect, InvalidateRect, PAINTSTRUCT, ScreenToClient, SelectObject, SetBkColor,
         SetBkMode, SetTextColor, SetWindowRgn, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER,
         DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_MEDIUM, FW_SEMIBOLD,
         FR_PRIVATE, OUT_DEFAULT_PRECIS, TRANSPARENT,
@@ -1449,7 +1449,17 @@ mod imp {
         unsafe {
             let hdc = BeginPaint(hwnd, &mut paint);
             FillRect(hdc, &paint.rcPaint, state.panel_brush as _);
-            FrameRect(hdc, &paint.rcPaint, state.border_brush as _);
+
+            let mut client_rect: RECT = std::mem::zeroed();
+            GetClientRect(hwnd, &mut client_rect);
+            let width = client_rect.right - client_rect.left;
+            let height = client_rect.bottom - client_rect.top;
+            if width > 0 && height > 0 {
+                let border_region =
+                    CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
+                FrameRgn(hdc, border_region, state.border_brush as _, 1, 1);
+                DeleteObject(border_region as _);
+            }
             EndPaint(hwnd, &paint);
         }
     }
