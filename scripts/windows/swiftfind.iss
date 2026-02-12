@@ -8,16 +8,14 @@
   #error StageDir must be passed to ISCC via /DStageDir=...
 #endif
 
-#define MyAppVersion "{#AppVersion}"
-
 [Setup]
 AppId={{E3A739E3-FAF7-4E18-BD8B-01744C9E7C27}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\SwiftFind
 DefaultGroupName=SwiftFind
 OutputDir=artifacts\windows
-OutputBaseFilename=swiftfind-{#MyAppVersion}-windows-x64-setup
+OutputBaseFilename=swiftfind-{#AppVersion}-windows-x64-setup
 Compression=lzma
 SolidCompression=yes
 ArchitecturesInstallIn64BitMode=x64compatible
