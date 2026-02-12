@@ -3,6 +3,7 @@ use rusqlite::Connection;
 use crate::action_executor::{launch_path, LaunchError};
 use crate::config::{validate, Config};
 use crate::contract::{CoreRequest, CoreResponse, LaunchResponse, SearchResponse};
+use crate::discovery::{DiscoveryProvider, ProviderError};
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
 
@@ -10,6 +11,7 @@ use crate::model::SearchItem;
 pub enum ServiceError {
     Config(String),
     Store(StoreError),
+    Provider(ProviderError),
     Launch(LaunchError),
     InvalidRequest(String),
     ItemNotFound(String),
@@ -20,6 +22,7 @@ impl std::fmt::Display for ServiceError {
         match self {
             Self::Config(error) => write!(f, "config error: {error}"),
             Self::Store(error) => write!(f, "store error: {error}"),
+            Self::Provider(error) => write!(f, "provider error: {error}"),
             Self::Launch(error) => write!(f, "launch error: {error}"),
             Self::InvalidRequest(error) => write!(f, "invalid request: {error}"),
             Self::ItemNotFound(id) => write!(f, "item not found: {id}"),
@@ -41,6 +44,12 @@ impl From<LaunchError> for ServiceError {
     }
 }
 
+impl From<ProviderError> for ServiceError {
+    fn from(value: ProviderError) -> Self {
+        Self::Provider(value)
+    }
+}
+
 pub enum LaunchTarget<'a> {
     Id(&'a str),
     Path(&'a str),
@@ -49,18 +58,32 @@ pub enum LaunchTarget<'a> {
 pub struct CoreService {
     config: Config,
     db: Connection,
+    providers: Vec<Box<dyn DiscoveryProvider>>,
 }
 
 impl CoreService {
     pub fn new(config: Config) -> Result<Self, ServiceError> {
         validate(&config).map_err(ServiceError::Config)?;
         let db = index_store::open_from_config(&config)?;
-        Ok(Self { config, db })
+        Ok(Self {
+            config,
+            db,
+            providers: Vec::new(),
+        })
     }
 
     pub fn with_connection(config: Config, db: Connection) -> Result<Self, ServiceError> {
         validate(&config).map_err(ServiceError::Config)?;
-        Ok(Self { config, db })
+        Ok(Self {
+            config,
+            db,
+            providers: Vec::new(),
+        })
+    }
+
+    pub fn with_providers(mut self, providers: Vec<Box<dyn DiscoveryProvider>>) -> Self {
+        self.providers = providers;
+        self
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchItem>, ServiceError> {
@@ -86,8 +109,22 @@ impl CoreService {
     }
 
     pub fn rebuild_index(&self) -> Result<usize, ServiceError> {
-        let count = index_store::list_items(&self.db)?.len();
-        Ok(count)
+        if self.providers.is_empty() {
+            return Ok(index_store::list_items(&self.db)?.len());
+        }
+
+        index_store::clear_items(&self.db)?;
+
+        let mut inserted = 0_usize;
+        for provider in &self.providers {
+            let discovered = provider.discover()?;
+            for item in discovered {
+                index_store::upsert_item(&self.db, &item)?;
+                inserted += 1;
+            }
+        }
+
+        Ok(inserted)
     }
 
     pub fn upsert_item(&self, item: &SearchItem) -> Result<(), ServiceError> {
