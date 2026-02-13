@@ -2530,7 +2530,7 @@ mod imp {
         accent.accent_state = ACCENT_ENABLE_BLUR_BEHIND;
         accent.accent_flags = 0;
         accent.gradient_color = 0;
-        unsafe { set_attr(hwnd, &mut data) } != 0
+        (unsafe { set_attr(hwnd, &mut data) }) != 0
     }
 
     fn resolve_set_window_composition_attribute() -> Option<SetWindowCompositionAttributeFn> {
