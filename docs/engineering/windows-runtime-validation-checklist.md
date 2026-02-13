@@ -69,6 +69,30 @@ Expected:
 - Run `swiftfind-core.exe --quit`, then `--status`.
 - Expected: reports stopped after quit.
 
+12. Clean install checks.
+- Install from packaged artifact (`setup.exe` or install script from zip).
+- Expected: install completes without requiring Rust/Cargo.
+- Expected: runtime can start and hotkey works on first launch.
+
+13. Upgrade-over-existing checks.
+- Install a newer build over an existing installed build.
+- Expected: install succeeds without manual uninstall.
+- Expected: runtime restarts cleanly and hotkey registration remains valid.
+- Expected: config file in `%APPDATA%\SwiftFind\config.json` is preserved.
+
+14. Uninstall + reinstall checks.
+- Uninstall from Windows Apps settings or installer uninstaller.
+- Expected: runtime process is no longer present in Task Manager.
+- Expected: hotkey no longer triggers launcher.
+- Reinstall latest setup.
+- Expected: launcher works again and startup registration can be applied.
+
+15. Rollback checks.
+- After installing a newer build, reinstall the previous known-good build.
+- Expected: older runtime starts successfully.
+- Expected: no stuck background process from replaced version.
+- Expected: core launcher flow (open, query, launch, close) works after rollback.
+
 Record pass/fail evidence:
 
 ```powershell

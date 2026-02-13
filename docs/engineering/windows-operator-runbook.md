@@ -274,6 +274,27 @@ cargo test -p swiftfind-core
 cargo test -p swiftfind-core --test perf_query_latency_test -- --exact warm_query_p95_under_15ms
 ```
 
+## Release Lifecycle Validation
+
+Run these on a Windows host before publishing a release.
+
+1. Clean install:
+   - install `swiftfind-<version>-windows-x64-setup.exe`.
+   - verify launcher starts and hotkey works without Rust/Cargo installed.
+
+2. Upgrade-over-existing:
+   - install a newer setup over an existing install.
+   - verify no manual cleanup needed and `%APPDATA%\SwiftFind\config.json` remains intact.
+
+3. Uninstall + reinstall:
+   - uninstall from Windows Apps settings (or uninstaller).
+   - verify `swiftfind-core.exe` is not running and hotkey no longer triggers.
+   - reinstall and verify normal runtime behavior returns.
+
+4. Rollback:
+   - reinstall previous known-good setup over the newer one.
+   - verify runtime starts and open/query/launch/close flow still works.
+
 ## Progress Update (2026-02-13)
 
 Completed from recent hardening pass:
