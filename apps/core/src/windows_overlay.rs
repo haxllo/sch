@@ -111,8 +111,8 @@ mod imp {
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
-    // Keep open/close animation only; results resize is immediate to avoid first-scroll blend artifacts.
-    const RESULTS_ANIM_MS: u32 = 0;
+    // Results panel expand/collapse animation (scroll behavior remains immediate).
+    const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const HELP_HOVER_POLL_MS: u32 = 33;
@@ -1822,16 +1822,6 @@ mod imp {
         } else {
             tm.tmHeight as i32
         }
-    }
-
-    fn blend_color(from: u32, to: u32, t: f32) -> u32 {
-        let t = t.clamp(0.0, 1.0);
-        let lerp =
-            |a: u32, b: u32| -> u32 { (a as f32 + (b as f32 - a as f32) * t).round() as u32 };
-        let r = lerp(from & 0xFF, to & 0xFF);
-        let g = lerp((from >> 8) & 0xFF, (to >> 8) & 0xFF);
-        let b = lerp((from >> 16) & 0xFF, (to >> 16) & 0xFF);
-        r | (g << 8) | (b << 16)
     }
 
     fn icon_glyph_for_kind(kind: &str) -> &'static str {
