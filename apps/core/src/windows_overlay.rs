@@ -50,7 +50,7 @@ mod imp {
         LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
         SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
         WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
-        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
+        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY,
         WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN,
         WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
@@ -113,7 +113,6 @@ mod imp {
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const RESULTS_ANIM_MS: u32 = 150;
     const ANIM_FRAME_MS: u64 = 8;
-    const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
@@ -1301,37 +1300,6 @@ mod imp {
                     invalidate_list_row(hwnd, next_hover);
                 }
             }
-            if message == WM_MOUSEWHEEL
-                && hwnd != state.help_hwnd
-                && hwnd != state.help_tip_hwnd
-            {
-                let count = unsafe { SendMessageW(state.list_hwnd, LB_GETCOUNT, 0, 0) };
-                if count > 0 {
-                    finish_active_window_animation(parent, state);
-                    state.row_anim_start = None;
-                    state.row_anim_exiting = false;
-                    let current_top =
-                        unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-                    let visible_rows = visible_row_capacity(state.list_hwnd);
-                    let max_top = (count as i32 - visible_rows).max(0);
-                    let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
-                    let mut notches = (wheel as i32) / 120;
-                    if notches == 0 && wheel != 0 {
-                        notches = if wheel > 0 { 1 } else { -1 };
-                    }
-                    if notches != 0 {
-                        let target_top =
-                            (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
-                        let previous_hover = state.hover_index;
-                        state.hover_index = -1;
-                        unsafe {
-                            SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
-                        }
-                        invalidate_list_row(state.list_hwnd, previous_hover);
-                    }
-                }
-                return 0;
-            }
             if message == WM_LBUTTONUP && hwnd == state.list_hwnd {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) as i32 };
                 if count > 0 {
@@ -2241,34 +2209,6 @@ mod imp {
         let height = (rect.bottom - rect.top).max(0);
         let rows = height / ROW_HEIGHT;
         rows.max(1)
-    }
-
-    fn finish_active_window_animation(hwnd: HWND, state: &mut OverlayShellState) {
-        let Some(anim) = state.window_anim.take() else {
-            return;
-        };
-
-        unsafe {
-            KillTimer(hwnd, TIMER_WINDOW_ANIM);
-        }
-        apply_window_state(
-            hwnd,
-            anim.to_left,
-            anim.to_top,
-            anim.to_width,
-            anim.to_height,
-            anim.to_alpha,
-        );
-
-        if anim.hide_on_complete {
-            unsafe {
-                ShowWindow(hwnd, SW_HIDE);
-                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
-            }
-            return;
-        }
-
-        layout_children(hwnd, state);
     }
 
     fn start_window_animation(
