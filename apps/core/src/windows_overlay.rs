@@ -1941,14 +1941,6 @@ mod imp {
                     return Some(icon);
                 }
             }
-            if is_app_shortcut {
-                // Avoid falling back to .lnk shell icons for app entries, because
-                // shell shortcut icon paths may re-introduce overlay arrows.
-                if let Some(icon) = shell_icon_with_attrs("swiftfind.exe", FILE_ATTRIBUTE_NORMAL) {
-                    return Some(icon);
-                }
-                return None;
-            }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
             }
@@ -1986,12 +1978,21 @@ mod imp {
         if icon_source.trim().is_empty() {
             return None;
         }
-
-        extract_icon_from_path(icon_source.trim(), info.iIcon)
+        let (icon_path, parsed_index) = split_icon_resource_spec(icon_source.trim());
+        let icon_index = if info.iIcon == 0 {
+            parsed_index.unwrap_or(0)
+        } else {
+            info.iIcon
+        };
+        extract_icon_from_path(icon_path, icon_index)
     }
 
     fn extract_icon_from_path(path: &str, icon_index: i32) -> Option<isize> {
-        let wide_source = to_wide(path);
+        let normalized = normalize_icon_source_path(path);
+        if normalized.is_empty() {
+            return None;
+        }
+        let wide_source = to_wide(&normalized);
         let mut large_icon = std::ptr::null_mut();
         let mut small_icon = std::ptr::null_mut();
         let extracted = unsafe {
@@ -2025,10 +2026,11 @@ mod imp {
             return None;
         }
         let exe = wide_buf_to_string(&exe_out);
-        if exe.trim().is_empty() {
+        let normalized = normalize_icon_source_path(exe.trim());
+        if normalized.is_empty() {
             return None;
         }
-        extract_icon_from_path(exe.trim(), 0)
+        extract_icon_from_path(&normalized, 0)
     }
 
     fn executable_icon_from_shortcut_hlink(shortcut_path: &str) -> Option<isize> {
@@ -2049,10 +2051,11 @@ mod imp {
         if hr < 0 {
             return None;
         }
-        if resolved_target.trim().is_empty() {
+        let normalized = normalize_icon_source_path(resolved_target.trim());
+        if normalized.is_empty() {
             return None;
         }
-        extract_icon_from_path(resolved_target.trim(), 0)
+        extract_icon_from_path(&normalized, 0)
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
@@ -3151,6 +3154,41 @@ mod imp {
             CoTaskMemFree(ptr as _);
             out
         }
+    }
+
+    fn split_icon_resource_spec(raw: &str) -> (&str, Option<i32>) {
+        let trimmed = raw.trim();
+        let Some(idx) = trimmed.rfind(',') else {
+            return (trimmed, None);
+        };
+        let (path_part, index_part) = trimmed.split_at(idx);
+        let parsed = index_part[1..].trim().parse::<i32>().ok();
+        if parsed.is_some() {
+            (path_part.trim(), parsed)
+        } else {
+            (trimmed, None)
+        }
+    }
+
+    fn normalize_icon_source_path(raw: &str) -> String {
+        let mut s = raw.trim().trim_matches('"').trim_start_matches('@').trim().to_string();
+        if s.is_empty() {
+            return String::new();
+        }
+
+        // Strip trailing arguments from command-like targets by clipping to known icon-bearing extensions.
+        let lower = s.to_ascii_lowercase();
+        for ext in [".exe", ".ico", ".dll"] {
+            if let Some(pos) = lower.find(ext) {
+                let end = pos + ext.len();
+                if end <= s.len() {
+                    s.truncate(end);
+                    return s;
+                }
+            }
+        }
+
+        s
     }
 
     #[cfg(test)]
