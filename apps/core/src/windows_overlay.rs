@@ -1587,11 +1587,7 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let base_fill = if hovered {
-                    COLOR_ROW_HOVER
-                } else {
-                    COLOR_SELECTION
-                };
+                let base_fill = COLOR_ROW_HOVER;
                 let fill_color = blend_color(COLOR_RESULTS_BG, base_fill, visibility);
                 let fill_brush = CreateSolidBrush(fill_color);
                 FillRgn(dis.hDC, region, fill_brush);
