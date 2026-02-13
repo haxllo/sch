@@ -31,8 +31,8 @@ mod imp {
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHFILEINFOW,
-        SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_SYSICONINDEX,
+        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHParseDisplayName, SHFILEINFOW,
+        SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SYSICONINDEX,
         SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -2064,6 +2064,11 @@ mod imp {
                 return Some(icon);
             }
         }
+        if is_appsfolder_target(resolved_target.trim()) {
+            if let Some(icon) = shell_icon_from_display_name(resolved_target.trim()) {
+                return Some(icon);
+            }
+        }
         let normalized = normalize_icon_source_path(resolved_target.trim());
         if normalized.is_empty() {
             return None;
@@ -2139,6 +2144,53 @@ mod imp {
             None
         } else {
             Some(icon as isize)
+        }
+    }
+
+    fn is_appsfolder_target(target: &str) -> bool {
+        let lowered = target.trim().to_ascii_lowercase();
+        lowered.starts_with("shell:appsfolder\\") || lowered.contains("appsfolder\\")
+    }
+
+    fn shell_icon_from_display_name(display_name: &str) -> Option<isize> {
+        let trimmed = display_name.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let wide = to_wide(trimmed);
+        let mut pidl = std::ptr::null_mut();
+        let hr = unsafe {
+            SHParseDisplayName(
+                wide.as_ptr(),
+                std::ptr::null_mut(),
+                &mut pidl,
+                0,
+                std::ptr::null_mut(),
+            )
+        };
+        if hr < 0 || pidl.is_null() {
+            return None;
+        }
+
+        let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let flags = SHGFI_PIDL | SHGFI_ICON | SHGFI_LARGEICON;
+        let result = unsafe {
+            SHGetFileInfoW(
+                pidl as *const u16,
+                0,
+                &mut sfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                flags,
+            )
+        };
+        unsafe {
+            CoTaskMemFree(pidl as _);
+        }
+        if result == 0 || sfi.hIcon.is_null() {
+            None
+        } else {
+            Some(sfi.hIcon as isize)
         }
     }
 

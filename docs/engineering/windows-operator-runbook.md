@@ -250,6 +250,7 @@ Recommended capture points:
    - Expected behavior after current icon pipeline:
      - app `.lnk` entries resolve target/icon metadata first
      - shortcut-file icon fallback is blocked for app shortcuts to avoid arrow overlays
+     - `shell:AppsFolder\\...` (UWP/AppX) targets now attempt PIDL/display-name icon resolution before generic fallback
    - If arrows still appear for specific apps:
      - capture the exact app names (for example: Chrome, Visual Studio)
      - restart runtime once (`swiftfind-core.exe --restart`) to refresh in-memory icon cache
