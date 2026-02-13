@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 mod imp {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{HashMap, HashSet, VecDeque};
     use std::ffi::c_void;
     use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
@@ -30,7 +30,7 @@ mod imp {
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -117,6 +117,7 @@ mod imp {
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
     const ICON_CACHE_IDLE_MS: u32 = 90_000;
+    const ICON_CACHE_MAX_ENTRIES: usize = 96;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -240,6 +241,7 @@ mod imp {
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
         icon_cache: HashMap<String, isize>,
+        icon_cache_lru: VecDeque<String>,
     }
 
     impl Default for OverlayShellState {
@@ -286,6 +288,7 @@ mod imp {
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
+                icon_cache_lru: VecDeque::new(),
             }
         }
     }
@@ -1882,12 +1885,13 @@ mod imp {
 
     fn icon_handle_for_row(state: &mut OverlayShellState, row: &OverlayRow) -> Option<isize> {
         let key = icon_cache_key(row);
-        if let Some(cached) = state.icon_cache.get(&key) {
-            return if *cached == 0 { None } else { Some(*cached) };
+        if let Some(cached) = state.icon_cache.get(&key).copied() {
+            touch_icon_cache_key(state, &key);
+            return if cached == 0 { None } else { Some(cached) };
         }
 
         let loaded = load_shell_icon_for_row(row).unwrap_or(0);
-        state.icon_cache.insert(key, loaded);
+        insert_icon_cache_entry(state, key, loaded);
         if loaded == 0 {
             None
         } else {
@@ -1934,7 +1938,7 @@ mod imp {
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path);
-        let flags = SHGFI_ICON | SHGFI_LARGEICON;
+        let flags = SHGFI_ICON | SHGFI_SMALLICON;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1954,7 +1958,7 @@ mod imp {
     fn shell_icon_with_attrs(path_hint: &str, attrs: u32) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path_hint);
-        let flags = SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES;
+        let flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1980,6 +1984,40 @@ mod imp {
             }
         }
         state.icon_cache.clear();
+        state.icon_cache_lru.clear();
+    }
+
+    fn touch_icon_cache_key(state: &mut OverlayShellState, key: &str) {
+        if let Some(index) = state.icon_cache_lru.iter().position(|k| k == key) {
+            state.icon_cache_lru.remove(index);
+        }
+        state.icon_cache_lru.push_back(key.to_string());
+    }
+
+    fn insert_icon_cache_entry(state: &mut OverlayShellState, key: String, handle: isize) {
+        if let Some(previous) = state.icon_cache.insert(key.clone(), handle) {
+            if previous != 0 {
+                unsafe {
+                    DestroyIcon(previous as _);
+                }
+            }
+        }
+        touch_icon_cache_key(state, &key);
+        while state.icon_cache.len() > ICON_CACHE_MAX_ENTRIES {
+            let Some(oldest_key) = state.icon_cache_lru.pop_front() else {
+                break;
+            };
+            if oldest_key == key {
+                continue;
+            }
+            if let Some(oldest_handle) = state.icon_cache.remove(&oldest_key) {
+                if oldest_handle != 0 {
+                    unsafe {
+                        DestroyIcon(oldest_handle as _);
+                    }
+                }
+            }
+        }
     }
 
     fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {
