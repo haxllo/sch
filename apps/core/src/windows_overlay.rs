@@ -41,7 +41,7 @@ mod imp {
         SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
         ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, HMENU, HWND_TOP, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
+        GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
         LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
         LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
@@ -651,7 +651,7 @@ mod imp {
             unsafe {
                 SetWindowPos(
                     self.hwnd,
-                    HWND_TOP,
+                    HWND_TOPMOST,
                     x,
                     y,
                     WINDOW_WIDTH,
@@ -2174,7 +2174,7 @@ mod imp {
         unsafe {
             SetWindowPos(
                 hwnd,
-                HWND_TOP,
+                HWND_TOPMOST,
                 left,
                 top,
                 width.max(1),
