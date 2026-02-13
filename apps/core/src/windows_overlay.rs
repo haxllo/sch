@@ -1206,11 +1206,14 @@ mod imp {
             }
             WM_MOUSEWHEEL => {
                 if let Some(state) = state_for(hwnd) {
-                    if state.results_visible && is_cursor_over_window(state.list_hwnd) {
-                        complete_window_animation_if_running(hwnd, state);
-                        scroll_list_by_wheel(state, wparam);
+                    complete_window_animation_if_running(hwnd, state);
+                    if !state.results_visible {
                         return 0;
                     }
+                    if is_cursor_over_window(state.list_hwnd) {
+                        scroll_list_by_wheel(state, wparam);
+                    }
+                    return 0;
                 }
                 unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
             }
@@ -1319,11 +1322,11 @@ mod imp {
                     sync_help_hover_with_cursor(parent, state);
                 }
             }
-            if message == WM_MOUSEWHEEL
-                && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
-                && state.results_visible
-            {
+            if message == WM_MOUSEWHEEL && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd) {
                 complete_window_animation_if_running(parent, state);
+                if !state.results_visible {
+                    return 0;
+                }
                 if hwnd == state.edit_hwnd && !is_cursor_over_window(state.list_hwnd) {
                     return 0;
                 }
