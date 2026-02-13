@@ -1190,7 +1190,7 @@ mod imp {
 
                     // On systems with "activate window on hover", WA_INACTIVE can fire
                     // without an intentional click-away. Keep overlay open in that case.
-                    if !is_any_mouse_button_pressed() {
+                    if !is_any_mouse_button_pressed_or_recently_pressed() {
                         if let Some(state) = state_for(hwnd) {
                             unsafe {
                                 SetForegroundWindow(hwnd);
@@ -1928,6 +1928,9 @@ mod imp {
                 if let Some(icon) = shortcut_target_icon(source) {
                     return Some(icon);
                 }
+                if let Some(icon) = extract_icon_from_path(source, 0) {
+                    return Some(icon);
+                }
             }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
@@ -1967,13 +1970,17 @@ mod imp {
             return None;
         }
 
-        let wide_source = to_wide(icon_source.trim());
+        extract_icon_from_path(icon_source.trim(), info.iIcon)
+    }
+
+    fn extract_icon_from_path(path: &str, icon_index: i32) -> Option<isize> {
+        let wide_source = to_wide(path);
         let mut large_icon = std::ptr::null_mut();
         let mut small_icon = std::ptr::null_mut();
         let extracted = unsafe {
             ExtractIconExW(
                 wide_source.as_ptr(),
-                info.iIcon,
+                icon_index,
                 &mut large_icon,
                 &mut small_icon,
                 1,
@@ -2339,12 +2346,17 @@ mod imp {
         schedule_icon_cache_idle_cleanup(hwnd);
     }
 
-    fn is_any_mouse_button_pressed() -> bool {
+    fn is_any_mouse_button_pressed_or_recently_pressed() -> bool {
         unsafe {
-            (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
-                || (GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000) != 0
-                || (GetAsyncKeyState(VK_MBUTTON as i32) as u16 & 0x8000) != 0
+            is_key_down_or_recent(VK_LBUTTON as i32)
+                || is_key_down_or_recent(VK_RBUTTON as i32)
+                || is_key_down_or_recent(VK_MBUTTON as i32)
         }
+    }
+
+    fn is_key_down_or_recent(vk: i32) -> bool {
+        let state = unsafe { GetAsyncKeyState(vk) as u16 };
+        (state & 0x8000) != 0 || (state & 0x0001) != 0
     }
 
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
