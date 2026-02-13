@@ -1333,6 +1333,13 @@ mod imp {
             if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
+                    if state.row_anim_start.is_some() {
+                        state.row_anim_start = None;
+                        state.row_anim_exiting = false;
+                        unsafe {
+                            KillTimer(parent, TIMER_ROW_ANIM);
+                        }
+                    }
                     let current_top = unsafe { SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
                     let visible_rows = visible_row_capacity(hwnd);
                     let max_top = (count as i32 - visible_rows).max(0);
