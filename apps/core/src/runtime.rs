@@ -256,6 +256,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut current_results,
                                 &mut selected_index,
                             );
+                            last_query.clear();
                         }
                     }
                 }
@@ -272,6 +273,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 }
                 OverlayEvent::ExternalQuit => {
                     overlay.hide_now();
+                    last_query.clear();
                     unsafe {
                         windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
                     }
@@ -351,6 +353,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut current_results,
                                 &mut selected_index,
                             );
+                            last_query.clear();
                         }
                         Err(error) => {
                             overlay.set_status_text(&format!("Launch error: {error}"));

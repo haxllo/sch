@@ -1,4 +1,5 @@
 use crate::model::{normalize_for_search, SearchItem};
+use std::cmp::Ordering;
 
 pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem> {
     if limit == 0 || items.is_empty() {
@@ -19,17 +20,26 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         })
         .collect();
 
-    scored.sort_by(|a, b| {
-        a.0.cmp(&b.0)
-            .then_with(|| b.1.cmp(&a.1))
-            .then_with(|| a.2.cmp(&b.2))
-    });
+    if scored.len() > limit {
+        scored.select_nth_unstable_by(limit, compare_scored);
+        scored.truncate(limit);
+    }
+    scored.sort_by(compare_scored);
 
     scored
         .into_iter()
         .take(limit)
         .map(|(_, _, _, item)| item.clone())
         .collect()
+}
+
+fn compare_scored(
+    a: &(u8, i64, usize, &SearchItem),
+    b: &(u8, i64, usize, &SearchItem),
+) -> Ordering {
+    a.0.cmp(&b.0)
+        .then_with(|| b.1.cmp(&a.1))
+        .then_with(|| a.2.cmp(&b.2))
 }
 
 fn score_item(item: &SearchItem, normalized_query: &str) -> Option<i64> {
