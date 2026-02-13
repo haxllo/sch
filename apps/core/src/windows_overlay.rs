@@ -112,7 +112,8 @@ mod imp {
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
-    const RESULTS_ANIM_MS: u32 = 150;
+    // Keep open/close animation only; results resize is immediate to avoid first-scroll blend artifacts.
+    const RESULTS_ANIM_MS: u32 = 0;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const ROW_ANIM_MS: u64 = 130;
@@ -479,6 +480,14 @@ mod imp {
 
         pub fn set_results(&self, rows: &[OverlayRow], selected_index: usize) {
             if let Some(state) = state_for(self.hwnd) {
+                if state
+                    .window_anim
+                    .as_ref()
+                    .map(|anim| !anim.hide_on_complete)
+                    .unwrap_or(false)
+                {
+                    complete_window_animation_if_running(self.hwnd, state);
+                }
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
                 state.wheel_delta_remainder = 0;
