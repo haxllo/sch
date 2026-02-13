@@ -68,7 +68,7 @@ mod imp {
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 72;
-    const PANEL_RADIUS: i32 = COMPACT_HEIGHT * 2;
+    const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -231,7 +231,6 @@ mod imp {
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
-        use_dwm_corners: bool,
         help_config_path: String,
         active_query: String,
         expanded_rows: i32,
@@ -287,7 +286,6 @@ mod imp {
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
-                use_dwm_corners: false,
                 help_config_path: String::new(),
                 active_query: String::new(),
                 expanded_rows: 0,
@@ -869,7 +867,7 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
-                    state.use_dwm_corners = try_enable_dwm_rounded_corners(hwnd);
+                    let _ = try_enable_dwm_rounded_corners(hwnd);
                     state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
@@ -2898,21 +2896,6 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
-                if state.use_dwm_corners {
-                    // With compositor-rounded corners, rect fills avoid aliased region edges.
-                    FillRect(hdc, &client_rect, state.border_brush as _);
-                    let mut inner = client_rect;
-                    inner.left += 1;
-                    inner.top += 1;
-                    inner.right -= 1;
-                    inner.bottom -= 1;
-                    if inner.right > inner.left && inner.bottom > inner.top {
-                        FillRect(hdc, &inner, state.panel_brush as _);
-                    }
-                    EndPaint(hwnd, &paint);
-                    return;
-                }
-
                 // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
                 // This avoids the angular look that FrameRgn can produce at tight corner radii.
                 let outer_region =
