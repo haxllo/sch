@@ -50,7 +50,7 @@ mod imp {
         LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
         SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
         WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
-        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_NCCREATE, WM_NCDESTROY,
+        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
         WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN,
         WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
@@ -1265,6 +1265,13 @@ mod imp {
                 } else if state.help_hovered {
                     sync_help_hover_with_cursor(parent, state);
                 }
+            }
+            if message == WM_MOUSEWHEEL && hwnd == state.edit_hwnd && state.results_visible {
+                // Keep native listbox wheel behavior while input retains keyboard focus.
+                unsafe {
+                    SendMessageW(state.list_hwnd, WM_MOUSEWHEEL, wparam, lparam);
+                }
+                return 0;
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
                 && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
