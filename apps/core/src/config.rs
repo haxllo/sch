@@ -14,6 +14,7 @@ pub struct Config {
     pub index_db_path: PathBuf,
     pub config_path: PathBuf,
     pub discovery_roots: Vec<PathBuf>,
+    pub discovery_exclude_roots: Vec<PathBuf>,
     pub hotkey: String,
     pub launch_at_startup: bool,
     pub hotkey_help: String,
@@ -30,6 +31,7 @@ impl Default for Config {
             index_db_path: app_dir.join("index.sqlite3"),
             config_path,
             discovery_roots: default_discovery_roots(),
+            discovery_exclude_roots: Vec::new(),
             hotkey: "Ctrl+Shift+Space".to_string(),
             launch_at_startup: false,
             hotkey_help:
@@ -218,7 +220,10 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str("  // Add/remove paths as needed.\n");
     text.push_str("  \"discovery_roots\": ");
     text.push_str(&roots_section);
-    text.push('\n');
+    text.push_str(",\n\n");
+    text.push_str("  // Optional: folders to exclude from local-file discovery.\n");
+    text.push_str("  // Any file/folder under these roots is ignored.\n");
+    text.push_str("  \"discovery_exclude_roots\": []\n");
     text.push_str("}\n");
 
     std::fs::write(path, text)?;
@@ -240,6 +245,22 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
 
     if cfg.hotkey.trim().is_empty() {
         return Err("hotkey is required".into());
+    }
+
+    if cfg
+        .discovery_roots
+        .iter()
+        .any(|root| root.as_os_str().is_empty())
+    {
+        return Err("discovery_roots contains an empty path".into());
+    }
+
+    if cfg
+        .discovery_exclude_roots
+        .iter()
+        .any(|root| root.as_os_str().is_empty())
+    {
+        return Err("discovery_exclude_roots contains an empty path".into());
     }
 
     crate::settings::validate_hotkey(&cfg.hotkey)

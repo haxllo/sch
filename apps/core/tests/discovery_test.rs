@@ -53,7 +53,7 @@ fn file_system_provider_discovers_files_in_roots() {
     std::fs::write(&report, b"report").unwrap();
     std::fs::write(&notes, b"notes").unwrap();
 
-    let provider = FileSystemDiscoveryProvider::new(vec![root.clone()], 4);
+    let provider = FileSystemDiscoveryProvider::new(vec![root.clone()], 4, vec![]);
     let items = provider.discover().unwrap();
 
     let titles: Vec<String> = items.iter().map(|i| i.title.clone()).collect();
@@ -139,5 +139,35 @@ fn runtime_providers_use_configured_roots() {
     assert!(!results.is_empty());
 
     std::fs::remove_file(&file_path).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn file_system_provider_excludes_configured_roots() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    let root = std::env::temp_dir().join(format!("swiftfind-exclude-roots-{unique}"));
+    let included = root.join("include");
+    let excluded = root.join("exclude");
+    std::fs::create_dir_all(&included).unwrap();
+    std::fs::create_dir_all(&excluded).unwrap();
+
+    let keep_file = included.join("Keep.txt");
+    let skip_file = excluded.join("Skip.txt");
+    std::fs::write(&keep_file, b"keep").unwrap();
+    std::fs::write(&skip_file, b"skip").unwrap();
+
+    let provider = FileSystemDiscoveryProvider::new(vec![root.clone()], 6, vec![excluded.clone()]);
+    let items = provider.discover().unwrap();
+
+    let paths: Vec<String> = items.iter().map(|i| i.path.clone()).collect();
+    assert!(paths.iter().any(|p| p.ends_with("Keep.txt")));
+    assert!(!paths.iter().any(|p| p.ends_with("Skip.txt")));
+
+    std::fs::remove_file(&keep_file).unwrap();
+    std::fs::remove_file(&skip_file).unwrap();
     std::fs::remove_dir_all(&root).unwrap();
 }

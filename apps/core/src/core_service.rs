@@ -116,6 +116,7 @@ impl CoreService {
             providers.push(Box::new(FileSystemDiscoveryProvider::new(
                 self.config.discovery_roots.clone(),
                 5,
+                self.config.discovery_exclude_roots.clone(),
             )));
         }
         self.providers = providers;

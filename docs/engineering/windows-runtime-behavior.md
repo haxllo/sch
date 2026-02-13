@@ -25,6 +25,7 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - config remains source of truth (`%APPDATA%\SwiftFind\config.json`)
    - save path uses safe temp-write + replace flow
    - startup behavior is controlled by config values
+   - local file discovery honors include/exclude roots (`discovery_roots`, `discovery_exclude_roots`)
 9. Runtime diagnostics:
    - runtime writes local logs to `%APPDATA%\SwiftFind\logs`
    - panic hook records crash context in log file

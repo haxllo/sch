@@ -99,3 +99,10 @@ Item status:
 - Remaining major items after this update:
   - include/exclude roots controls
   - final pre-beta security review run on release candidate
+
+## Phase 3 Status (Verified 2026-02-14, Update 3)
+
+Item status:
+- Include/exclude roots controls: completed in runtime/config (`discovery_roots`, `discovery_exclude_roots`).
+- Remaining major item:
+  - final pre-beta security checklist execution on release candidate.

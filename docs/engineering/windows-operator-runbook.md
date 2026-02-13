@@ -94,7 +94,7 @@ Notes:
 
 - You can keep inline comments in this file (`// ...`).
 - Most users only need to edit `hotkey`.
-- `launch_at_startup`, `max_results`, and `discovery_roots` are optional tuning.
+- `launch_at_startup`, `max_results`, `discovery_roots`, and `discovery_exclude_roots` are optional tuning.
 
 ## Settings Direction
 
@@ -104,6 +104,7 @@ Settings are intentionally file-driven in the current product direction.
 - hotkey changes
 - startup toggle (`launch_at_startup`)
 - result-count tuning (`max_results`)
+- include/exclude discovery roots (`discovery_roots`, `discovery_exclude_roots`)
 
 Recommended low-conflict hotkeys on Windows:
 

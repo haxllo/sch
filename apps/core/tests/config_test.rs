@@ -82,6 +82,7 @@ fn saves_and_reloads_config_file() {
     cfg.hotkey = "Ctrl+Space".to_string();
     cfg.launch_at_startup = true;
     cfg.discovery_roots = vec![std::env::temp_dir().join("root-a")];
+    cfg.discovery_exclude_roots = vec![std::env::temp_dir().join("root-a").join("exclude")];
 
     swiftfind_core::config::save(&cfg).unwrap();
     let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
@@ -90,6 +91,7 @@ fn saves_and_reloads_config_file() {
     assert_eq!(loaded.hotkey, "Ctrl+Space");
     assert!(loaded.launch_at_startup);
     assert_eq!(loaded.discovery_roots.len(), 1);
+    assert_eq!(loaded.discovery_exclude_roots.len(), 1);
     assert_eq!(
         loaded.version,
         swiftfind_core::config::CURRENT_CONFIG_VERSION
@@ -156,6 +158,7 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("\"hotkey\": \"Ctrl+Shift+Space\""));
     assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
+    assert!(raw.contains("\"discovery_exclude_roots\": []"));
 
     let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
     assert_eq!(loaded.hotkey, cfg.hotkey);

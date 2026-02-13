@@ -139,4 +139,12 @@ Execution notes (plan vs implementation order):
 
 Open parity items:
 - Optional deeper UWP/AppX icon path handling for remaining edge-case generic icons.
-- Auto-update and release-channel strategy for post-beta distribution.
+- Runtime-level auto-update mechanism remains deferred (operations/docs rollout strategy is in place).
+
+## Progress Update (2026-02-14, Update 2)
+
+Completed in current branch:
+- Include/exclude roots controls are implemented for filesystem discovery via:
+  - `discovery_roots`
+  - `discovery_exclude_roots`
+- Config template and runtime behavior are aligned with this include/exclude strategy.

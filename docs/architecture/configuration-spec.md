@@ -2,57 +2,53 @@
 
 ## Config File Location
 
-- Path: `%AppData%\\SwiftFind\\config.json`
-- Write strategy: atomic write with temp file + rename
+- Path: `%APPDATA%\\SwiftFind\\config.json`
+- Write strategy: atomic temp-write + replace
+- Format: JSON5-compatible (inline `//` comments are allowed)
 
-## Schema (MVP)
+## Runtime Schema (Current)
 
-```json
+```json5
 {
-  "hotkey": "Alt+Space",
-  "maxResults": 20,
-  "theme": "system",
-  "indexedPaths": [
-    "C:\\\\Users\\\\<user>\\\\Documents",
-    "D:\\\\Projects"
+  "hotkey": "Ctrl+Shift+Space",
+  "launch_at_startup": false,
+  "max_results": 20,
+  "discovery_roots": [
+    "C:\\Users\\<user>\\Documents",
+    "C:\\Users\\<user>\\Desktop"
   ],
-  "excludePatterns": [
-    "**\\\\node_modules\\\\**",
-    "**\\\\.git\\\\**",
-    "**\\\\bin\\\\**"
-  ],
-  "search": {
-    "enableFuzzy": true,
-    "typoTolerance": 2,
-    "usageWeight": 0.35,
-    "recencyWeight": 0.25
-  },
-  "actions": {
-    "confirmRunAsAdmin": true,
-    "openFolderShortcut": "Ctrl+Enter"
-  },
-  "privacy": {
-    "telemetryEnabled": false
-  }
+  "discovery_exclude_roots": [
+    "C:\\Users\\<user>\\Documents\\node_modules",
+    "C:\\Users\\<user>\\Documents\\.git"
+  ]
 }
 ```
 
+Additional generated fields may also exist in persisted config (for example `version`, `index_db_path`, `config_path`, and hotkey help metadata).
+
 ## Validation Rules
 
-- `hotkey` must be globally registerable and not empty
-- `maxResults` range: 5 to 100
-- `indexedPaths` must be absolute paths
-- `typoTolerance` range: 0 to 3
-- `usageWeight` and `recencyWeight` range: 0.0 to 1.0
+- `hotkey` must parse as Modifier+Key and pass runtime hotkey validation
+- `max_results` range: `5..100`
+- `index_db_path` and `config_path` must be present
+- `discovery_roots` entries must be non-empty paths
+- `discovery_exclude_roots` entries must be non-empty paths
 
-## Dynamic Reload
+## Discovery Include/Exclude Behavior
 
-- Core watches config file for changes
-- Valid updates apply without full process restart
-- Invalid config retains last known good state and emits error in settings UI
+- Local file discovery scans only `discovery_roots`.
+- Any file/folder path under `discovery_exclude_roots` is skipped.
+- Exclusion is path-root based (case-insensitive normalized path comparison).
+- Start-menu app discovery is independent of these filesystem roots.
 
-## Future Extensions
+## Reload/Apply Behavior
 
-- Per-source ranking weights
-- Per-path indexing profiles
-- Import and export settings bundles
+- Runtime reads config at startup.
+- Hotkey changes require runtime restart to re-register globally.
+- Discovery root changes apply on next index rebuild/runtime restart.
+
+## Settings Direction
+
+- Settings are file-driven in current product direction.
+- `?` in launcher opens `%APPDATA%\\SwiftFind\\config.json`.
+- No native settings window is required for this phase.

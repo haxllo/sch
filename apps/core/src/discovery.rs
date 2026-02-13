@@ -1,8 +1,5 @@
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
-
-#[cfg(target_os = "windows")]
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::model::SearchItem;
 
@@ -153,12 +150,17 @@ impl DiscoveryProvider for StartMenuAppDiscoveryProvider {
 
 pub struct FileSystemDiscoveryProvider {
     roots: Vec<PathBuf>,
+    excluded_roots: Vec<PathBuf>,
     max_depth: usize,
 }
 
 impl FileSystemDiscoveryProvider {
-    pub fn new(roots: Vec<PathBuf>, max_depth: usize) -> Self {
-        Self { roots, max_depth }
+    pub fn new(roots: Vec<PathBuf>, max_depth: usize, excluded_roots: Vec<PathBuf>) -> Self {
+        Self {
+            roots,
+            excluded_roots,
+            max_depth,
+        }
     }
 }
 
@@ -169,6 +171,7 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
 
     fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
         let mut out = Vec::new();
+        let excluded = normalized_exclusion_roots(&self.excluded_roots);
 
         for root in &self.roots {
             if !root.exists() {
@@ -181,6 +184,9 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
                 .filter_map(Result::ok)
             {
                 let path = entry.path();
+                if is_path_under_any_excluded_root(path, &excluded) {
+                    continue;
+                }
                 if path.is_dir() {
                     if path == root {
                         continue;
@@ -221,6 +227,36 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
         }
 
         Ok(out)
+    }
+}
+
+fn normalized_exclusion_roots(excluded_roots: &[PathBuf]) -> Vec<String> {
+    excluded_roots
+        .iter()
+        .filter_map(|root| normalize_path_for_compare(root).filter(|v| !v.is_empty()))
+        .collect()
+}
+
+fn is_path_under_any_excluded_root(path: &Path, excluded_roots: &[String]) -> bool {
+    let Some(path_norm) = normalize_path_for_compare(path) else {
+        return false;
+    };
+    excluded_roots.iter().any(|root| {
+        path_norm == *root
+            || (path_norm.starts_with(root) && path_norm[root.len()..].starts_with('\\'))
+    })
+}
+
+fn normalize_path_for_compare(path: &Path) -> Option<String> {
+    let mut value = path.to_string_lossy().replace('/', "\\");
+    while value.ends_with('\\') {
+        value.pop();
+    }
+    let value = value.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
     }
 }
 
