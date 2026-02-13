@@ -406,6 +406,17 @@ fn command_status() -> Result<(), RuntimeError> {
             "[swiftfind-core] status: {}",
             if running { "running" } else { "stopped" }
         ));
+        if let Some(snapshot) = load_status_diagnostics_snapshot() {
+            if let Some(line) = snapshot.startup_index_line {
+                log_info(&format!("[swiftfind-core] status last_indexing {line}"));
+            }
+            if let Some(line) = snapshot.last_provider_line {
+                log_info(&format!("[swiftfind-core] status last_provider {line}"));
+            }
+            if let Some(line) = snapshot.last_icon_cache_line {
+                log_info(&format!("[swiftfind-core] status last_icon_cache {line}"));
+            }
+        }
         return Ok(());
     }
 
@@ -414,6 +425,48 @@ fn command_status() -> Result<(), RuntimeError> {
         log_info("[swiftfind-core] status: unsupported on this platform");
         Ok(())
     }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct StatusDiagnosticsSnapshot {
+    startup_index_line: Option<String>,
+    last_provider_line: Option<String>,
+    last_icon_cache_line: Option<String>,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn load_status_diagnostics_snapshot() -> Option<StatusDiagnosticsSnapshot> {
+    let log_path = crate::logging::logs_dir().join("swiftfind.log");
+    let content = std::fs::read_to_string(&log_path).ok()?;
+    parse_status_diagnostics_snapshot(&content)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_status_diagnostics_snapshot(content: &str) -> Option<StatusDiagnosticsSnapshot> {
+    let startup_index_line = latest_line_with_token(content, "startup indexed_items=");
+    let last_provider_line = latest_line_with_token(content, "index_provider name=");
+    let last_icon_cache_line = latest_line_with_token(content, "overlay_icon_cache reason=");
+
+    if startup_index_line.is_none() && last_provider_line.is_none() && last_icon_cache_line.is_none()
+    {
+        return None;
+    }
+
+    Some(StatusDiagnosticsSnapshot {
+        startup_index_line,
+        last_provider_line,
+        last_icon_cache_line,
+    })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn latest_line_with_token(content: &str, token: &str) -> Option<String> {
+    content
+        .lines()
+        .rev()
+        .find(|line| line.contains(token))
+        .map(str::to_string)
 }
 
 fn command_quit() -> Result<(), RuntimeError> {
@@ -731,8 +784,9 @@ fn log_warn(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        launch_overlay_selection, next_selection_index, parse_cli_args, prepend_runtime_actions,
-        search_overlay_results, RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
+        launch_overlay_selection, next_selection_index, parse_cli_args,
+        parse_status_diagnostics_snapshot, prepend_runtime_actions, search_overlay_results,
+        RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
     };
     use crate::config::Config;
     use crate::core_service::CoreService;
@@ -896,5 +950,43 @@ mod tests {
         let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
         prepend_runtime_actions("code", 5, &mut results);
         assert_ne!(results[0].id, ACTION_OPEN_LOGS_ID);
+    }
+
+    #[test]
+    fn parses_status_diagnostics_snapshot_from_log_content() {
+        let content = "\
+[1] [INFO] [swiftfind-core] startup indexed_items=310 discovered=320 upserted=16 removed=4
+[2] [INFO] [swiftfind-core] index_provider name=start-menu-apps discovered=120 upserted=4 removed=1 elapsed_ms=42
+[3] [INFO] [swiftfind-core] overlay_icon_cache reason=cache_clear hits=12 misses=8 load_failures=1 evictions=0 cleared_entries=9
+";
+
+        let snapshot = parse_status_diagnostics_snapshot(content).expect("snapshot should parse");
+        assert!(
+            snapshot
+                .startup_index_line
+                .as_deref()
+                .unwrap_or_default()
+                .contains("startup indexed_items=310")
+        );
+        assert!(
+            snapshot
+                .last_provider_line
+                .as_deref()
+                .unwrap_or_default()
+                .contains("index_provider name=start-menu-apps")
+        );
+        assert!(
+            snapshot
+                .last_icon_cache_line
+                .as_deref()
+                .unwrap_or_default()
+                .contains("overlay_icon_cache reason=cache_clear")
+        );
+    }
+
+    #[test]
+    fn returns_none_for_status_snapshot_without_diagnostics_tokens() {
+        let content = "[1] [INFO] [swiftfind-core] status: running\n";
+        assert!(parse_status_diagnostics_snapshot(content).is_none());
     }
 }
