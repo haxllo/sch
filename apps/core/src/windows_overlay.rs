@@ -75,7 +75,7 @@ mod imp {
     const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
     const ROW_ICON_SIZE: i32 = 22;
-    const ROW_ICON_DRAW_SIZE: i32 = 18;
+    const ROW_ICON_DRAW_SIZE: i32 = 16;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
@@ -1607,17 +1607,6 @@ mod imp {
                     + ROW_ICON_SIZE
                     + offset_y,
             };
-            let icon_backplate = CreateRoundRectRgn(
-                icon_rect.left,
-                icon_rect.top,
-                icon_rect.right + 1,
-                icon_rect.bottom + 1,
-                8,
-                8,
-            );
-            FillRgn(dis.hDC, icon_backplate, state.icon_brush as _);
-            DeleteObject(icon_backplate as _);
-
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, visibility);
