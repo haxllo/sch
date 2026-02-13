@@ -11,7 +11,8 @@ mod imp {
     };
     use windows_sys::Win32::Graphics::Dwm::{
         DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BLURBEHIND, DWMSBT_TRANSIENTWINDOW,
-        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_BB_ENABLE,
+        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_BB_ENABLE,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
@@ -2424,6 +2425,15 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             );
         }
+        let corner_pref = DWMWCP_ROUND;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &corner_pref as *const _ as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
         // Windows 11+: prefer transient backdrop for palette-style surfaces.
         let backdrop_type = DWMSBT_TRANSIENTWINDOW;
         let hr_backdrop = unsafe {
@@ -2967,6 +2977,21 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
+                if state.backdrop_mode == BackdropMode::SystemBackdrop {
+                    // Let DWM anti-alias the rounded corners; paint border via inset rectangles.
+                    FillRect(hdc, &client_rect, state.border_brush as _);
+                    let mut inner = client_rect;
+                    inner.left += 1;
+                    inner.top += 1;
+                    inner.right -= 1;
+                    inner.bottom -= 1;
+                    if inner.right > inner.left && inner.bottom > inner.top {
+                        FillRect(hdc, &inner, state.panel_brush as _);
+                    }
+                    EndPaint(hwnd, &paint);
+                    return;
+                }
+
                 // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
                 // This avoids the angular look that FrameRgn can produce at tight corner radii.
                 let outer_region =
@@ -2996,6 +3021,14 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
+        if backdrop_mode_for_hwnd(hwnd) == BackdropMode::SystemBackdrop {
+            // Prefer compositor-rounded corners on Windows 11 system backdrops.
+            unsafe {
+                SetWindowRgn(hwnd, std::ptr::null_mut(), 1);
+            }
+            return;
+        }
+
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
