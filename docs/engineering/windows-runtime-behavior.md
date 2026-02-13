@@ -80,3 +80,16 @@ Operator steps and troubleshooting are documented in:
 
 Screenshot capture checklist is documented in:
 - `docs/engineering/windows-operator-runbook.md` (`Screenshot Notes (Before/After)`)
+
+## Progress Update (2026-02-13)
+
+Completed behavior updates:
+- Result deduplication is applied before overlay rendering to reduce duplicate app/file entries.
+- Selection/hover stability improvements reduce first-keystroke list jump behavior.
+- Click-outside close behavior was hardened through activation-path fixes.
+- Shortcut icon resolution pipeline now prioritizes resolved icon/target paths and avoids shortcut-overlay artifacts where possible.
+- Overlay quality improvements shipped with black-shade visual system and refined list interactions.
+
+Known intentional state:
+- `?` currently keeps file-based hotkey edit flow while Settings UI polish is pending.
+- Runtime remains performance-first; no always-on secondary UI process was added.

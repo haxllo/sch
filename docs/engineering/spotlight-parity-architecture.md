@@ -124,3 +124,19 @@ The Spotlight-parity initiative is accepted when:
 - result relevance improves measurably on app/file mixed queries
 - stale result launch failures are reduced and self-heal quickly
 
+## Progress Update (2026-02-13)
+
+Completed in current branch:
+- Deterministic merged ranking behavior with source-priority ordering is active in runtime tests.
+- Overlay UX contract is largely met: compact idle, downward expansion, lightweight animations, keyboard and click launch.
+- Stale launch-path handling and runtime self-healing behaviors are in place.
+- Icon cache and diagnostics logging are active, with bounded cache trim behavior.
+- Multiple Windows-native icon resolution fallbacks were added for higher real-world match quality.
+
+Execution notes (plan vs implementation order):
+- Delivery order intentionally deviated from the original sequence to address high-impact UX and reliability issues first.
+- The implemented changes align with the architecture goals (thin UI, local-first, stable runtime) even where sequencing changed.
+
+Open parity items:
+- Final polish pass for Settings UI aesthetics before re-enabling as primary `?` action.
+- Optional deeper UWP/AppX icon path handling for remaining edge-case generic icons.

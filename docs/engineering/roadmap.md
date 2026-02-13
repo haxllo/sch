@@ -47,3 +47,21 @@ Deliverables:
 
 Exit criteria:
 - Public beta candidate approved
+
+## Progress Update (2026-02-13)
+
+Completed now:
+- Phase 0 exit criteria met.
+- Phase 1 exit criteria met.
+- Major Phase 2 quality work shipped in runtime and overlay UX.
+- Installer packaging path shipped (zip artifact + setup executable workflow), moving Phase 3 forward early.
+
+Delivered beyond original sequence:
+- Native overlay redesign and interaction hardening was prioritized ahead of full Settings UI polish.
+- Icon pipeline hardening for Windows shortcuts was prioritized to improve result quality on real user machines.
+- Runtime close/focus behavior and result-list stability fixes were prioritized based on live user validation.
+
+Current interpretation:
+- Phase 2 is functionally complete for launcher quality and stability.
+- Settings UI remains intentionally deferred for visual polish before re-enabling from `?`.
+- Phase 3 is now focused on release polish, distribution discipline, and long-tail reliability.

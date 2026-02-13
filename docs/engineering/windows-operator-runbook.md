@@ -273,3 +273,21 @@ pnpm vitest --run
 cargo test -p swiftfind-core
 cargo test -p swiftfind-core --test perf_query_latency_test -- --exact warm_query_p95_under_15ms
 ```
+
+## Progress Update (2026-02-13)
+
+Completed from recent hardening pass:
+1. Duplicate overlay entries reduced:
+   - runtime now deduplicates app-title duplicates and normalized-path duplicates before drawing rows.
+2. First-query list jump reduced:
+   - overlay suppresses first synthetic hover event after list refresh to keep row 1 stable.
+3. Click-outside close stabilized:
+   - deactivate path closes overlay reliably when focus moves away (excluding help-tip ownership cases).
+4. Shortcut icon quality improved:
+   - icon-source normalization includes environment-variable expansion for more valid icon locations.
+   - app-shortcut fallback path avoids direct `.lnk` self-icon usage where it causes overlay artifacts.
+
+Operator note:
+- Existing validation steps remain valid.
+- Add one explicit check after update:
+  - type first letter of a query and confirm first row remains visible and selectable without auto-jump.
