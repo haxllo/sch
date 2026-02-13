@@ -255,7 +255,14 @@ fn incremental_rebuild_prunes_missing_provider_items() {
 
     let first = service.rebuild_index_with_report().unwrap();
     assert_eq!(first.indexed_total, 2);
+    assert_eq!(first.discovered_total, 2);
+    assert_eq!(first.upserted_total, 2);
     assert_eq!(first.removed_total, 0);
+    assert_eq!(first.providers.len(), 1);
+    assert_eq!(first.providers[0].provider, "filesystem");
+    assert_eq!(first.providers[0].discovered, 2);
+    assert_eq!(first.providers[0].upserted, 2);
+    assert_eq!(first.providers[0].removed, 0);
 
     *provider_items.lock().unwrap() = vec![
         SearchItem::new(
@@ -274,7 +281,14 @@ fn incremental_rebuild_prunes_missing_provider_items() {
 
     let second = service.rebuild_index_with_report().unwrap();
     assert_eq!(second.indexed_total, 2);
+    assert_eq!(second.discovered_total, 2);
+    assert_eq!(second.upserted_total, 1);
     assert_eq!(second.removed_total, 1);
+    assert_eq!(second.providers.len(), 1);
+    assert_eq!(second.providers[0].provider, "filesystem");
+    assert_eq!(second.providers[0].discovered, 2);
+    assert_eq!(second.providers[0].upserted, 1);
+    assert_eq!(second.providers[0].removed, 1);
 
     let stale_launch = service.launch(LaunchTarget::Id("file:initial"));
     match stale_launch {
