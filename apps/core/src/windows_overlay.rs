@@ -68,7 +68,7 @@ mod imp {
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 72;
-    const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
+    const PANEL_RADIUS: i32 = COMPACT_HEIGHT * 2;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2942,13 +2942,6 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
-        if state_for(hwnd).map(|s| s.use_dwm_corners).unwrap_or(false) {
-            unsafe {
-                SetWindowRgn(hwnd, std::ptr::null_mut(), 1);
-            }
-            return;
-        }
-
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
