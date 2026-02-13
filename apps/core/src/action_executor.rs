@@ -38,20 +38,25 @@ pub fn launch_path(path: &str) -> Result<(), LaunchError> {
 
 #[cfg(target_os = "windows")]
 fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
-    let target = candidate.to_string_lossy().into_owned();
-    let status = std::process::Command::new("cmd")
-        .arg("/C")
-        .arg("start")
-        .arg("")
-        .arg(&target)
-        .status()
-        .map_err(|error| {
-            LaunchError::LaunchFailed(format!("failed to spawn cmd/start for '{target}': {error}"))
-        })?;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    if !status.success() {
+    let target = candidate.to_string_lossy().into_owned();
+    let wide_target = to_wide(&target);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            std::ptr::null(),
+            wide_target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    } as isize;
+
+    if result <= 32 {
         return Err(LaunchError::LaunchFailed(format!(
-            "cmd/start returned non-zero status for '{target}': {status}"
+            "ShellExecuteW failed for '{target}' with code {result}"
         )));
     }
 
@@ -61,4 +66,9 @@ fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
 #[cfg(not(target_os = "windows"))]
 fn launch_existing_path(_candidate: &Path) -> Result<(), LaunchError> {
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
