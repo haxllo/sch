@@ -30,7 +30,7 @@ mod imp {
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_LARGEICON, SHGFI_SYSICONINDEX,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SYSICONINDEX,
         SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -75,8 +75,8 @@ mod imp {
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
-    const ROW_ICON_SIZE: i32 = 26;
-    const ROW_ICON_DRAW_SIZE: i32 = 22;
+    const ROW_ICON_SIZE: i32 = 28;
+    const ROW_ICON_DRAW_SIZE: i32 = 24;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
@@ -1928,7 +1928,9 @@ mod imp {
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path);
-        let flags = SHGFI_SYSICONINDEX | SHGFI_LARGEICON;
+        // Prefer direct shell icon extraction for concrete files/apps.
+        // This tends to pick a better source icon than generic image-list lookup.
+        let flags = SHGFI_ICON | SHGFI_LARGEICON;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1938,15 +1940,10 @@ mod imp {
                 flags,
             )
         };
-        if result == 0 || sfi.iIcon < 0 {
+        if result == 0 || sfi.hIcon.is_null() {
             None
         } else {
-            let icon = unsafe { ImageList_GetIcon(result as _, sfi.iIcon, 0) };
-            if icon.is_null() {
-                None
-            } else {
-                Some(icon as isize)
-            }
+            Some(sfi.hIcon as isize)
         }
     }
 
