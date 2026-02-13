@@ -12,7 +12,7 @@ mod imp {
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
-        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, ScreenToClient,
+        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC,
         SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
         DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
         DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_SEMIBOLD, HDC, OPAQUE,
@@ -2159,7 +2159,7 @@ mod imp {
         }
 
         let wide = to_wide(trimmed);
-        let mut pidl = std::ptr::null_mut();
+        let mut pidl: *mut windows_sys::Win32::UI::Shell::Common::ITEMIDLIST = std::ptr::null_mut();
         let hr = unsafe {
             SHParseDisplayName(
                 wide.as_ptr(),
