@@ -691,7 +691,7 @@ mod imp {
         }
 
         fn expand_results(&self, result_count: usize) {
-            let mut rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
+            let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
             let animate = RESULTS_ANIM_MS;
             let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
             // Keep enough vertical space for list rows plus footer hint area.
