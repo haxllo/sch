@@ -1934,12 +1934,15 @@ mod imp {
                 if let Some(icon) = shortcut_target_icon(source) {
                     return Some(icon);
                 }
-                if let Some(icon) = extract_icon_from_path(source, 0) {
-                    return Some(icon);
-                }
                 if let Some(icon) = executable_icon_from_shortcut(source) {
                     return Some(icon);
                 }
+                // Do not extract icon directly from `.lnk` for app entries:
+                // this is the primary source of shortcut-arrow overlays.
+                if let Some(icon) = shell_icon_with_attrs("swiftfind.exe", FILE_ATTRIBUTE_NORMAL) {
+                    return Some(icon);
+                }
+                return None;
             }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
@@ -2046,10 +2049,16 @@ mod imp {
         };
 
         let resolved_target = pwstr_to_string_and_free(target);
-        pwstr_to_string_and_free(location);
+        let resolved_location = pwstr_to_string_and_free(location);
 
         if hr < 0 {
             return None;
+        }
+        if !resolved_location.trim().is_empty() {
+            let (icon_path, parsed_index) = split_icon_resource_spec(resolved_location.trim());
+            if let Some(icon) = extract_icon_from_path(icon_path, parsed_index.unwrap_or(0)) {
+                return Some(icon);
+            }
         }
         let normalized = normalize_icon_source_path(resolved_target.trim());
         if normalized.is_empty() {
