@@ -90,3 +90,12 @@ Item status:
 - Spotlight-parity hardening: in progress (ranking/UX/shortcut icon quality improved).
 - Include/exclude roots controls: not started.
 - Offline-first policy: completed by default architecture (local index/ranking path).
+
+## Phase 3 Status (Verified 2026-02-14, Update 2)
+
+Item status:
+- Security release checklist: completed (documented gate at `docs/engineering/windows-security-release-checklist.md`).
+- Security review execution: pending per-release operator run using the checklist.
+- Remaining major items after this update:
+  - include/exclude roots controls
+  - final pre-beta security review run on release candidate

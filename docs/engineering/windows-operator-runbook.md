@@ -297,6 +297,7 @@ Run these on a Windows host before publishing a release.
 
 Release-channel/update policy reference:
 - `docs/engineering/windows-update-rollout-strategy.md`
+- `docs/engineering/windows-security-release-checklist.md`
 
 ## Progress Update (2026-02-13)
 
