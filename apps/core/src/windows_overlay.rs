@@ -21,6 +21,7 @@ mod imp {
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
+    use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
@@ -1937,6 +1938,9 @@ mod imp {
                 if let Some(icon) = executable_icon_from_shortcut(source) {
                     return Some(icon);
                 }
+                if let Some(icon) = shortcut_system_icon_without_overlay(source) {
+                    return Some(icon);
+                }
                 // Do not extract icon directly from `.lnk` for app entries:
                 // this is the primary source of shortcut-arrow overlays.
                 if let Some(icon) = shell_icon_with_attrs("swiftfind.exe", FILE_ATTRIBUTE_NORMAL) {
@@ -2111,6 +2115,30 @@ mod imp {
             } else {
                 Some(icon as isize)
             }
+        }
+    }
+
+    fn shortcut_system_icon_without_overlay(shortcut_path: &str) -> Option<isize> {
+        let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let wide = to_wide(shortcut_path);
+        let flags = SHGFI_SYSICONINDEX | SHGFI_LARGEICON;
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide.as_ptr(),
+                0,
+                &mut sfi,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                flags,
+            )
+        };
+        if result == 0 || sfi.iIcon < 0 {
+            return None;
+        }
+        let icon = unsafe { ImageList_GetIcon(result as _, sfi.iIcon, 0) };
+        if icon.is_null() {
+            None
+        } else {
+            Some(icon as isize)
         }
     }
 
@@ -3184,6 +3212,7 @@ mod imp {
         if s.is_empty() {
             return String::new();
         }
+        s = expand_environment_variables(&s);
 
         // Strip trailing arguments from command-like targets by clipping to known icon-bearing extensions.
         let lower = s.to_ascii_lowercase();
@@ -3198,6 +3227,23 @@ mod imp {
         }
 
         s
+    }
+
+    fn expand_environment_variables(raw: &str) -> String {
+        if !raw.contains('%') {
+            return raw.to_string();
+        }
+        let input = to_wide(raw);
+        let required = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), std::ptr::null_mut(), 0) };
+        if required <= 1 {
+            return raw.to_string();
+        }
+        let mut out = vec![0u16; required as usize];
+        let written = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), out.as_mut_ptr(), required) };
+        if written <= 1 {
+            return raw.to_string();
+        }
+        wide_buf_to_string(&out)
     }
 
     #[cfg(test)]
