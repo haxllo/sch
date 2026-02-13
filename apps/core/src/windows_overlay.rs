@@ -74,8 +74,8 @@ mod imp {
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
-    const ROW_ICON_SIZE: i32 = 22;
-    const ROW_ICON_DRAW_SIZE: i32 = 16;
+    const ROW_ICON_SIZE: i32 = 24;
+    const ROW_ICON_DRAW_SIZE: i32 = 20;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
