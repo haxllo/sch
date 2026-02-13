@@ -23,14 +23,15 @@ mod imp {
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Controls::{
-        DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
+        DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, SetFocus, VK_DOWN, VK_ESCAPE, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_SMALLICON, SHGFI_SYSICONINDEX,
+        SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -1927,7 +1928,7 @@ mod imp {
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path);
-        let flags = SHGFI_ICON | SHGFI_SMALLICON;
+        let flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1937,17 +1938,22 @@ mod imp {
                 flags,
             )
         };
-        if result == 0 || sfi.hIcon.is_null() {
+        if result == 0 || sfi.iIcon < 0 {
             None
         } else {
-            Some(sfi.hIcon as isize)
+            let icon = unsafe { ImageList_GetIcon(result as _, sfi.iIcon, 0) };
+            if icon.is_null() {
+                None
+            } else {
+                Some(icon as isize)
+            }
         }
     }
 
     fn shell_icon_with_attrs(path_hint: &str, attrs: u32) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path_hint);
-        let flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+        let flags = SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1957,10 +1963,15 @@ mod imp {
                 flags,
             )
         };
-        if result == 0 || sfi.hIcon.is_null() {
+        if result == 0 || sfi.iIcon < 0 {
             None
         } else {
-            Some(sfi.hIcon as isize)
+            let icon = unsafe { ImageList_GetIcon(result as _, sfi.iIcon, 0) };
+            if icon.is_null() {
+                None
+            } else {
+                Some(icon as isize)
+            }
         }
     }
 
