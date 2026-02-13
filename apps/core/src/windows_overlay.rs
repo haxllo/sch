@@ -22,6 +22,7 @@ mod imp {
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
         DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
@@ -30,8 +31,9 @@ mod imp {
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        ExtractIconExW, FindExecutableW, SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON,
-        SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
+        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHFILEINFOW,
+        SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_SYSICONINDEX,
+        SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -1925,6 +1927,9 @@ mod imp {
 
         if !source.is_empty() {
             if kind == "app" && source.to_ascii_lowercase().ends_with(".lnk") {
+                if let Some(icon) = executable_icon_from_shortcut_hlink(source) {
+                    return Some(icon);
+                }
                 if let Some(icon) = shortcut_target_icon(source) {
                     return Some(icon);
                 }
@@ -2015,6 +2020,30 @@ mod imp {
             return None;
         }
         extract_icon_from_path(exe.trim(), 0)
+    }
+
+    fn executable_icon_from_shortcut_hlink(shortcut_path: &str) -> Option<isize> {
+        let wide_shortcut = to_wide(shortcut_path);
+        let mut target: windows_sys::core::PWSTR = std::ptr::null_mut();
+        let mut location: windows_sys::core::PWSTR = std::ptr::null_mut();
+        let hr = unsafe {
+            HlinkResolveShortcutToString(
+                wide_shortcut.as_ptr(),
+                &mut target,
+                &mut location,
+            )
+        };
+
+        let resolved_target = pwstr_to_string_and_free(target);
+        pwstr_to_string_and_free(location);
+
+        if hr < 0 {
+            return None;
+        }
+        if resolved_target.trim().is_empty() {
+            return None;
+        }
+        extract_icon_from_path(resolved_target.trim(), 0)
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
@@ -3096,6 +3125,23 @@ mod imp {
     fn wide_buf_to_string(buf: &[u16]) -> String {
         let end = buf.iter().position(|ch| *ch == 0).unwrap_or(buf.len());
         String::from_utf16_lossy(&buf[..end])
+    }
+
+    fn pwstr_to_string_and_free(ptr: windows_sys::core::PWSTR) -> String {
+        if ptr.is_null() {
+            return String::new();
+        }
+
+        let mut len = 0usize;
+        unsafe {
+            while *ptr.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(ptr, len);
+            let out = String::from_utf16_lossy(slice);
+            CoTaskMemFree(ptr as _);
+            out
+        }
     }
 
     #[cfg(test)]
