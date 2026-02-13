@@ -1166,6 +1166,13 @@ mod imp {
                             return 0;
                         }
                     }
+
+                    // Ignore transient/internal focus churn while the overlay still owns focus.
+                    let foreground = unsafe { GetForegroundWindow() };
+                    if foreground == hwnd || unsafe { IsChild(hwnd, foreground) } != 0 {
+                        return 0;
+                    }
+
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_ESCAPE, 0, 0);
                     }
@@ -1314,12 +1321,9 @@ mod imp {
                 return 1;
             }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
-                let mut cursor = POINT { x: 0, y: 0 };
-                unsafe {
-                    GetCursorPos(&mut cursor);
-                    ScreenToClient(hwnd, &mut cursor);
-                }
-                let packed = ((cursor.y as u32) << 16) | (cursor.x as u32 & 0xFFFF);
+                let x = (lparam as u32 & 0xFFFF) as i16 as i32;
+                let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32;
+                let packed = ((y as u32) << 16) | (x as u32 & 0xFFFF);
                 let hit = unsafe { SendMessageW(hwnd, LB_ITEMFROMPOINT, 0, packed as isize) };
                 let row = (hit & 0xFFFF) as i32;
                 let outside = ((hit >> 16) & 0xFFFF) != 0;
@@ -1333,6 +1337,11 @@ mod imp {
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
                     state.hover_index = next_hover;
+                    if next_hover >= 0 {
+                        unsafe {
+                            SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
+                        }
+                    }
                     invalidate_list_row(hwnd, previous_hover);
                     invalidate_list_row(hwnd, next_hover);
                 }
@@ -1564,10 +1573,10 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let base_fill = if selected_flag {
-                    COLOR_SELECTION
-                } else {
+                let base_fill = if hovered {
                     COLOR_ROW_HOVER
+                } else {
+                    COLOR_SELECTION
                 };
                 let fill_color = blend_color(COLOR_RESULTS_BG, base_fill, visibility);
                 let fill_brush = CreateSolidBrush(fill_color);
