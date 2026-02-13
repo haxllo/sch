@@ -1920,13 +1920,14 @@ mod imp {
     fn load_shell_icon_for_row(row: &OverlayRow) -> Option<isize> {
         let kind = row.kind.to_ascii_lowercase();
         let source = row.icon_path.trim();
+        let is_app_shortcut = kind == "app" && source.to_ascii_lowercase().ends_with(".lnk");
 
         if kind == "folder" {
             return shell_icon_with_attrs("folder", FILE_ATTRIBUTE_DIRECTORY);
         }
 
         if !source.is_empty() {
-            if kind == "app" && source.to_ascii_lowercase().ends_with(".lnk") {
+            if is_app_shortcut {
                 if let Some(icon) = executable_icon_from_shortcut_hlink(source) {
                     return Some(icon);
                 }
@@ -1939,6 +1940,14 @@ mod imp {
                 if let Some(icon) = executable_icon_from_shortcut(source) {
                     return Some(icon);
                 }
+            }
+            if is_app_shortcut {
+                // Avoid falling back to .lnk shell icons for app entries, because
+                // shell shortcut icon paths may re-introduce overlay arrows.
+                if let Some(icon) = shell_icon_with_attrs("swiftfind.exe", FILE_ATTRIBUTE_NORMAL) {
+                    return Some(icon);
+                }
+                return None;
             }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
