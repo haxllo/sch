@@ -138,5 +138,5 @@ Execution notes (plan vs implementation order):
 - The implemented changes align with the architecture goals (thin UI, local-first, stable runtime) even where sequencing changed.
 
 Open parity items:
-- Final polish pass for Settings UI aesthetics before re-enabling as primary `?` action.
 - Optional deeper UWP/AppX icon path handling for remaining edge-case generic icons.
+- Auto-update and release-channel strategy for post-beta distribution.

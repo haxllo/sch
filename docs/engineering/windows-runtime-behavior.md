@@ -60,7 +60,7 @@ Known limitations in this milestone:
 - Animations are intentionally lightweight to prioritize runtime stability.
 - Runtime must remain active in its process; stopping `swiftfind-core.exe` unregisters hotkey and closes launcher.
 - Hotkey registration changes still require process restart to apply globally.
-- Native settings UI is temporarily disabled from `?` pending design polish pass.
+- Native settings UI is not planned in the near term; `?` keeps config-file edit flow.
 
 ## Spotlight-Parity Direction
 
@@ -91,5 +91,5 @@ Completed behavior updates:
 - Overlay quality improvements shipped with black-shade visual system and refined list interactions.
 
 Known intentional state:
-- `?` currently keeps file-based hotkey edit flow while Settings UI polish is pending.
+- `?` keeps file-based hotkey edit flow as the intended settings approach.
 - Runtime remains performance-first; no always-on secondary UI process was added.

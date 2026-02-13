@@ -96,14 +96,14 @@ Notes:
 - Most users only need to edit `hotkey`.
 - `launch_at_startup`, `max_results`, and `discovery_roots` are optional tuning.
 
-## Settings UI Roadmap
+## Settings Direction
 
-Native settings UI exists but is temporarily disabled from `?` until design polish is complete.
-Future pass will re-enable it with:
+Settings are intentionally file-driven in the current product direction.
+`?` opens `%APPDATA%\SwiftFind\config.json`, and this remains the supported path for:
 
-- command-palette-consistent visual style
-- compact layout and clearer validation feedback
-- zero impact to idle runtime behavior
+- hotkey changes
+- startup toggle (`launch_at_startup`)
+- result-count tuning (`max_results`)
 
 Recommended low-conflict hotkeys on Windows:
 

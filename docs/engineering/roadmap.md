@@ -26,7 +26,7 @@ Exit criteria:
 ## Phase 2: Quality and Settings (Week 6 to 7)
 
 Deliverables:
-- Settings UI and runtime reload
+- Config-file settings workflow and runtime reload commands
 - Usage-based ranking improvements
 - Incremental indexing path (changed-items first, bounded rebuilds)
 - Provider federation diagnostics (timings, counts, stale-prune visibility)
@@ -57,11 +57,23 @@ Completed now:
 - Installer packaging path shipped (zip artifact + setup executable workflow), moving Phase 3 forward early.
 
 Delivered beyond original sequence:
-- Native overlay redesign and interaction hardening was prioritized ahead of full Settings UI polish.
+- Native overlay redesign and interaction hardening was prioritized ahead of broader post-beta feature additions.
 - Icon pipeline hardening for Windows shortcuts was prioritized to improve result quality on real user machines.
 - Runtime close/focus behavior and result-list stability fixes were prioritized based on live user validation.
 
 Current interpretation:
 - Phase 2 is functionally complete for launcher quality and stability.
-- Settings UI remains intentionally deferred for visual polish before re-enabling from `?`.
+- No native Settings window is planned in the near term; config-file workflow remains the supported settings path.
 - Phase 3 is now focused on release polish, distribution discipline, and long-tail reliability.
+
+## Phase 3 Status (Verified 2026-02-13)
+
+Item status:
+- Installer path: completed (zip artifact + Inno Setup `setup.exe` packaging flow).
+- Auto-update path: not started.
+- Crash diagnostics: completed (panic hook + runtime diagnostics logs).
+- Security review: pending final pre-beta review pass.
+- Release documentation: completed baseline (packaging/readiness/runbook docs present).
+- Spotlight-parity hardening: in progress (ranking/UX/shortcut icon quality improved).
+- Include/exclude roots controls: not started.
+- Offline-first policy: completed by default architecture (local index/ranking path).
