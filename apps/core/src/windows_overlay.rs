@@ -113,6 +113,7 @@ mod imp {
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const RESULTS_ANIM_MS: u32 = 150;
     const ANIM_FRAME_MS: u64 = 8;
+    const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
@@ -1266,18 +1267,11 @@ mod imp {
                     sync_help_hover_with_cursor(parent, state);
                 }
             }
-            if message == WM_MOUSEWHEEL && hwnd == state.edit_hwnd && state.results_visible {
-                // Keep native listbox wheel behavior while input retains keyboard focus.
-                let mut list_rect: RECT = unsafe { std::mem::zeroed() };
-                unsafe {
-                    GetWindowRect(state.list_hwnd, &mut list_rect);
-                }
-                let cx = (list_rect.left + list_rect.right) / 2;
-                let cy = (list_rect.top + list_rect.bottom) / 2;
-                let list_lparam = (((cy as u32) << 16) | (cx as u32 & 0xFFFF)) as LPARAM;
-                unsafe {
-                    SendMessageW(state.list_hwnd, WM_MOUSEWHEEL, wparam, list_lparam);
-                }
+            if message == WM_MOUSEWHEEL
+                && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
+                && state.results_visible
+            {
+                scroll_list_by_wheel(state.list_hwnd, wparam);
                 return 0;
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
@@ -1621,6 +1615,30 @@ mod imp {
             1.0 - eased
         } else {
             eased
+        }
+    }
+
+    fn scroll_list_by_wheel(list_hwnd: HWND, wparam: WPARAM) {
+        let count = unsafe { SendMessageW(list_hwnd, LB_GETCOUNT, 0, 0) as i32 };
+        if count <= 0 {
+            return;
+        }
+
+        let current_top = unsafe { SendMessageW(list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+        let visible_rows = visible_row_capacity(list_hwnd);
+        let max_top = (count - visible_rows).max(0);
+        let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
+        let mut notches = (wheel as i32) / 120;
+        if notches == 0 && wheel != 0 {
+            notches = if wheel > 0 { 1 } else { -1 };
+        }
+        if notches == 0 {
+            return;
+        }
+
+        let target_top = (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
+        unsafe {
+            SendMessageW(list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
         }
     }
 
