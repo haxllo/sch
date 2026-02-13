@@ -47,12 +47,13 @@ mod imp {
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
         LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
-        LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
+        LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
+        SWP_NOACTIVATE,
         SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
         WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
         WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
-        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD, WS_CLIPCHILDREN,
-        WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
+        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
+        WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
 
     const CLASS_NAME: &str = "SwiftFindOverlayWindowClass";
@@ -610,11 +611,29 @@ mod imp {
                     return Ok(());
                 }
 
+                if msg.message == SWIFTFIND_WM_QUERY_CHANGED {
+                    // Coalesce bursts of EN_CHANGE notifications into one query update.
+                    let mut drain: MSG = unsafe { std::mem::zeroed() };
+                    loop {
+                        let removed = unsafe {
+                            PeekMessageW(
+                                &mut drain,
+                                std::ptr::null_mut(),
+                                SWIFTFIND_WM_QUERY_CHANGED,
+                                SWIFTFIND_WM_QUERY_CHANGED,
+                                PM_REMOVE,
+                            )
+                        };
+                        if removed == 0 {
+                            break;
+                        }
+                    }
+                    on_event(OverlayEvent::QueryChanged(self.query_text()));
+                    continue;
+                }
+
                 match msg.message {
                     WM_HOTKEY => on_event(OverlayEvent::Hotkey(msg.wParam as i32)),
-                    SWIFTFIND_WM_QUERY_CHANGED => {
-                        on_event(OverlayEvent::QueryChanged(self.query_text()))
-                    }
                     SWIFTFIND_WM_MOVE_UP => on_event(OverlayEvent::MoveSelection(-1)),
                     SWIFTFIND_WM_MOVE_DOWN => on_event(OverlayEvent::MoveSelection(1)),
                     SWIFTFIND_WM_SUBMIT => on_event(OverlayEvent::Submit),
@@ -1176,6 +1195,16 @@ mod imp {
                 draw_panel_background(hwnd);
                 0
             }
+            WM_MOUSEWHEEL => {
+                if let Some(state) = state_for(hwnd) {
+                    if state.results_visible && is_cursor_over_window(state.list_hwnd) {
+                        complete_window_animation_if_running(hwnd, state);
+                        scroll_list_by_wheel(state, wparam);
+                        return 0;
+                    }
+                }
+                unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+            }
             WM_TIMER => {
                 if wparam == TIMER_WINDOW_ANIM {
                     if let Some(state) = state_for(hwnd) {
@@ -1317,11 +1346,6 @@ mod imp {
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
                     state.hover_index = next_hover;
-                    if next_hover >= 0 {
-                        unsafe {
-                            SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
-                        }
-                    }
                     invalidate_list_row(hwnd, previous_hover);
                     invalidate_list_row(hwnd, next_hover);
                 }

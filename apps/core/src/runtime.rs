@@ -313,7 +313,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             } else {
                                 let rows = overlay_rows(&current_results);
                                 overlay.set_results(&rows, selected_index);
-                                overlay.set_status_text("");
                             }
                         }
                         Err(error) => {
