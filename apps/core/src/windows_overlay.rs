@@ -9,11 +9,6 @@ mod imp {
     use windows_sys::Win32::Foundation::{
         GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
     };
-    use windows_sys::Win32::Graphics::Dwm::{
-        DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BLURBEHIND, DWMSBT_TRANSIENTWINDOW,
-        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
-        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_BB_ENABLE,
-    };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
@@ -27,7 +22,7 @@ mod imp {
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
-    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
         DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
@@ -69,8 +64,8 @@ mod imp {
 
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
-    const COMPACT_HEIGHT: i32 = 80;
-    const PANEL_RADIUS: i32 = 24;
+    const COMPACT_HEIGHT: i32 = 72;
+    const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -117,9 +112,6 @@ mod imp {
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const OVERLAY_ALPHA_OPAQUE: u8 = 255;
-    const OVERLAY_ALPHA_SYSTEM_BACKDROP: u8 = 226;
-    const OVERLAY_ALPHA_BLUR_BEHIND: u8 = 232;
-    const OVERLAY_ALPHA_ACCENT_BLUR: u8 = 255;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
@@ -177,11 +169,6 @@ mod imp {
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
     const FOOTER_HINT_TEXT: &str = "Enter open • Esc close";
-    const WCA_ACCENT_POLICY: u32 = 19;
-    const ACCENT_ENABLE_BLUR_BEHIND: u32 = 3;
-    const ACCENT_ENABLE_ACRYLIC_BLUR_BEHIND: u32 = 4;
-    const ACCENT_BORDER_ALL: u32 = 0x20 | 0x40 | 0x80 | 0x100;
-    const ACCENT_TINT_DARK: u32 = 0xD8272727;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -204,15 +191,6 @@ mod imp {
 
     pub struct NativeOverlayShell {
         hwnd: HWND,
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-    enum BackdropMode {
-        #[default]
-        None,
-        AccentBlur,
-        SystemBackdrop,
-        BlurBehind,
     }
 
     struct OverlayShellState {
@@ -250,7 +228,6 @@ mod imp {
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
-        backdrop_mode: BackdropMode,
         help_config_path: String,
         active_query: String,
         expanded_rows: i32,
@@ -306,7 +283,6 @@ mod imp {
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
-                backdrop_mode: BackdropMode::None,
                 help_config_path: String::new(),
                 active_query: String::new(),
                 expanded_rows: 0,
@@ -336,24 +312,6 @@ mod imp {
         to_alpha: u8,
         hide_on_complete: bool,
     }
-
-    #[repr(C)]
-    struct AccentPolicy {
-        accent_state: u32,
-        accent_flags: u32,
-        gradient_color: u32,
-        animation_id: u32,
-    }
-
-    #[repr(C)]
-    struct WindowCompositionAttribData {
-        attrib: u32,
-        pv_data: *mut c_void,
-        cb_data: usize,
-    }
-
-    type SetWindowCompositionAttributeFn =
-        unsafe extern "system" fn(HWND, *mut WindowCompositionAttribData) -> i32;
 
     impl NativeOverlayShell {
         pub fn create() -> Result<Self, String> {
@@ -766,7 +724,6 @@ mod imp {
                 GetWindowRect(self.hwnd, &mut rect);
             }
             let current_height = rect.bottom - rect.top;
-            let target_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
 
             if current_height == target_height {
                 return;
@@ -779,7 +736,7 @@ mod imp {
                     rect.top,
                     rect.right - rect.left,
                     target_height,
-                    target_alpha,
+                    OVERLAY_ALPHA_OPAQUE,
                 );
                 return;
             }
@@ -794,8 +751,8 @@ mod imp {
                 rect.top,
                 rect.right - rect.left,
                 target_height,
-                target_alpha,
-                target_alpha,
+                OVERLAY_ALPHA_OPAQUE,
+                OVERLAY_ALPHA_OPAQUE,
                 duration_ms,
                 false,
             );
@@ -822,7 +779,6 @@ mod imp {
             let start_height = ((final_height as f32) * 0.96_f32) as i32;
             let start_left = final_left + (final_width - start_width) / 2;
             let start_top = final_top + (final_height - start_height) / 2;
-            let target_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
 
             apply_window_state(
                 self.hwnd,
@@ -846,7 +802,7 @@ mod imp {
                 final_width,
                 final_height,
                 0,
-                target_alpha,
+                OVERLAY_ALPHA_OPAQUE,
                 OVERLAY_ANIM_MS,
                 false,
             );
@@ -870,7 +826,6 @@ mod imp {
             let end_height = ((final_height as f32) * 0.96_f32) as i32;
             let end_left = final_left + (final_width - end_width) / 2;
             let end_top = final_top + (final_height - end_height) / 2;
-            let source_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
             start_window_animation(
                 self.hwnd,
                 final_left,
@@ -881,7 +836,7 @@ mod imp {
                 end_top,
                 end_width,
                 end_height,
-                source_alpha,
+                OVERLAY_ALPHA_OPAQUE,
                 0,
                 OVERLAY_HIDE_ANIM_MS,
                 true,
@@ -909,7 +864,6 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
-                    state.backdrop_mode = apply_window_backdrop(hwnd);
                     state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
@@ -2440,124 +2394,6 @@ mod imp {
         schedule_icon_cache_idle_cleanup(hwnd);
     }
 
-    fn apply_window_backdrop(hwnd: HWND) -> BackdropMode {
-        // Keep dark-themed non-client rendering aligned with the launcher palette.
-        let dark_mode_enabled: i32 = 1;
-        unsafe {
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
-                &dark_mode_enabled as *const _ as *const c_void,
-                std::mem::size_of::<i32>() as u32,
-            );
-        }
-        let corner_pref = DWMWCP_ROUND;
-        unsafe {
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-                &corner_pref as *const _ as *const c_void,
-                std::mem::size_of::<i32>() as u32,
-            );
-        }
-        if try_enable_accent_blur(hwnd) {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=accent_blur");
-            return BackdropMode::AccentBlur;
-        }
-        let blur_ready = try_enable_blur_behind(hwnd);
-        // Windows 11+: prefer transient backdrop for palette-style surfaces.
-        let backdrop_type = DWMSBT_TRANSIENTWINDOW;
-        let hr_backdrop = unsafe {
-            DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_SYSTEMBACKDROP_TYPE as u32,
-                &backdrop_type as *const _ as *const c_void,
-                std::mem::size_of::<i32>() as u32,
-            )
-        };
-        if hr_backdrop >= 0 {
-            if blur_ready {
-                crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop+blur");
-            } else {
-                crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop");
-            }
-            return BackdropMode::SystemBackdrop;
-        }
-
-        if blur_ready {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=blur_behind");
-            BackdropMode::BlurBehind
-        } else {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=none");
-            BackdropMode::None
-        }
-    }
-
-    fn try_enable_blur_behind(hwnd: HWND) -> bool {
-        // Windows 10/older fallback: composition blur behind.
-        let blur = DWM_BLURBEHIND {
-            dwFlags: DWM_BB_ENABLE,
-            fEnable: 1,
-            hRgnBlur: std::ptr::null_mut(),
-            fTransitionOnMaximized: 0,
-        };
-        unsafe { DwmEnableBlurBehindWindow(hwnd, &blur) >= 0 }
-    }
-
-    fn try_enable_accent_blur(hwnd: HWND) -> bool {
-        static PROC: OnceLock<Option<SetWindowCompositionAttributeFn>> = OnceLock::new();
-        let set_attr = match PROC.get_or_init(resolve_set_window_composition_attribute) {
-            Some(f) => *f,
-            None => return false,
-        };
-
-        let mut accent = AccentPolicy {
-            accent_state: ACCENT_ENABLE_ACRYLIC_BLUR_BEHIND,
-            accent_flags: ACCENT_BORDER_ALL,
-            gradient_color: ACCENT_TINT_DARK,
-            animation_id: 0,
-        };
-        let mut data = WindowCompositionAttribData {
-            attrib: WCA_ACCENT_POLICY,
-            pv_data: (&mut accent as *mut AccentPolicy).cast::<c_void>(),
-            cb_data: std::mem::size_of::<AccentPolicy>(),
-        };
-        let ok_acrylic = unsafe { set_attr(hwnd, &mut data) } != 0;
-        if ok_acrylic {
-            return true;
-        }
-
-        accent.accent_state = ACCENT_ENABLE_BLUR_BEHIND;
-        accent.accent_flags = 0;
-        accent.gradient_color = 0;
-        (unsafe { set_attr(hwnd, &mut data) }) != 0
-    }
-
-    fn resolve_set_window_composition_attribute() -> Option<SetWindowCompositionAttributeFn> {
-        let user32 = unsafe { GetModuleHandleW(to_wide("user32.dll").as_ptr()) };
-        if user32.is_null() {
-            return None;
-        }
-        let proc = unsafe { GetProcAddress(user32, b"SetWindowCompositionAttribute\0".as_ptr()) };
-        let raw = proc?;
-        Some(unsafe { std::mem::transmute(raw) })
-    }
-
-    fn backdrop_mode_for_hwnd(hwnd: HWND) -> BackdropMode {
-        state_for(hwnd)
-            .map(|state| state.backdrop_mode)
-            .unwrap_or(BackdropMode::None)
-    }
-
-    fn overlay_visible_alpha(mode: BackdropMode) -> u8 {
-        match mode {
-            BackdropMode::None => OVERLAY_ALPHA_OPAQUE,
-            BackdropMode::AccentBlur => OVERLAY_ALPHA_ACCENT_BLUR,
-            BackdropMode::SystemBackdrop => OVERLAY_ALPHA_SYSTEM_BACKDROP,
-            BackdropMode::BlurBehind => OVERLAY_ALPHA_BLUR_BEHIND,
-        }
-    }
-
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
@@ -3056,24 +2892,6 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
-                if matches!(
-                    state.backdrop_mode,
-                    BackdropMode::SystemBackdrop | BackdropMode::AccentBlur
-                ) {
-                    // Let DWM anti-alias the rounded corners; paint border via inset rectangles.
-                    FillRect(hdc, &client_rect, state.border_brush as _);
-                    let mut inner = client_rect;
-                    inner.left += 1;
-                    inner.top += 1;
-                    inner.right -= 1;
-                    inner.bottom -= 1;
-                    if inner.right > inner.left && inner.bottom > inner.top {
-                        FillRect(hdc, &inner, state.panel_brush as _);
-                    }
-                    EndPaint(hwnd, &paint);
-                    return;
-                }
-
                 // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
                 // This avoids the angular look that FrameRgn can produce at tight corner radii.
                 let outer_region =
@@ -3103,17 +2921,6 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
-        if matches!(
-            backdrop_mode_for_hwnd(hwnd),
-            BackdropMode::SystemBackdrop | BackdropMode::AccentBlur
-        ) {
-            // Prefer compositor-rounded corners for composited backdrop modes.
-            unsafe {
-                SetWindowRgn(hwnd, std::ptr::null_mut(), 1);
-            }
-            return;
-        }
-
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
