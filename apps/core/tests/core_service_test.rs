@@ -1,6 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use swiftfind_core::core_service::{CoreService, LaunchTarget, ServiceError};
+use swiftfind_core::discovery::{DiscoveryProvider, ProviderError};
+use swiftfind_core::model::SearchItem;
+use std::sync::{Arc, Mutex};
 
 fn test_config() -> swiftfind_core::config::Config {
     swiftfind_core::config::Config::default()
@@ -190,4 +193,139 @@ fn service_launch_missing_path_prunes_item() {
         Err(ServiceError::ItemNotFound(id)) => assert_eq!(id, "stale-launch"),
         other => panic!("unexpected second launch result: {other:?}"),
     }
+}
+
+struct MutableProvider {
+    name: &'static str,
+    items: Arc<Mutex<Vec<SearchItem>>>,
+}
+
+impl MutableProvider {
+    fn new(name: &'static str, items: Arc<Mutex<Vec<SearchItem>>>) -> Self {
+        Self { name, items }
+    }
+}
+
+impl DiscoveryProvider for MutableProvider {
+    fn provider_name(&self) -> &'static str {
+        self.name
+    }
+
+    fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
+        Ok(self.items.lock().expect("provider lock poisoned").clone())
+    }
+}
+
+#[test]
+fn incremental_rebuild_prunes_missing_provider_items() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let initial_path = std::env::temp_dir().join(format!("swiftfind-inc-initial-{unique}.tmp"));
+    let stable_path = std::env::temp_dir().join(format!("swiftfind-inc-stable-{unique}.tmp"));
+    let replacement_path = std::env::temp_dir().join(format!("swiftfind-inc-next-{unique}.tmp"));
+    std::fs::write(&initial_path, b"a").unwrap();
+    std::fs::write(&stable_path, b"b").unwrap();
+    std::fs::write(&replacement_path, b"c").unwrap();
+
+    let provider_items = Arc::new(Mutex::new(vec![
+        SearchItem::new(
+            "file:initial",
+            "file",
+            "Initial",
+            initial_path.to_string_lossy().as_ref(),
+        ),
+        SearchItem::new(
+            "file:stable",
+            "file",
+            "Stable",
+            stable_path.to_string_lossy().as_ref(),
+        ),
+    ]));
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db)
+        .unwrap()
+        .with_providers(vec![Box::new(MutableProvider::new(
+            "filesystem",
+            provider_items.clone(),
+        ))]);
+
+    let first = service.rebuild_index_with_report().unwrap();
+    assert_eq!(first.indexed_total, 2);
+    assert_eq!(first.removed_total, 0);
+
+    *provider_items.lock().unwrap() = vec![
+        SearchItem::new(
+            "file:stable",
+            "file",
+            "Stable",
+            stable_path.to_string_lossy().as_ref(),
+        ),
+        SearchItem::new(
+            "file:next",
+            "file",
+            "Next",
+            replacement_path.to_string_lossy().as_ref(),
+        ),
+    ];
+
+    let second = service.rebuild_index_with_report().unwrap();
+    assert_eq!(second.indexed_total, 2);
+    assert_eq!(second.removed_total, 1);
+
+    let stale_launch = service.launch(LaunchTarget::Id("file:initial"));
+    match stale_launch {
+        Err(ServiceError::ItemNotFound(id)) => assert_eq!(id, "file:initial"),
+        other => panic!("expected pruned item to be removed, got: {other:?}"),
+    }
+
+    std::fs::remove_file(initial_path).unwrap();
+    std::fs::remove_file(stable_path).unwrap();
+    std::fs::remove_file(replacement_path).unwrap();
+}
+
+#[test]
+fn service_search_order_is_deterministic_for_mixed_ties() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let app_path = std::env::temp_dir().join(format!("swiftfind-order-app-{unique}.exe"));
+    let file_path = std::env::temp_dir().join(format!("swiftfind-order-file-{unique}.txt"));
+    std::fs::write(&app_path, b"app").unwrap();
+    std::fs::write(&file_path, b"file").unwrap();
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db).unwrap();
+
+    service
+        .upsert_item(&SearchItem::new(
+            "other",
+            "doc",
+            "Code Manual",
+            "https://example.com/manual",
+        ))
+        .unwrap();
+    service
+        .upsert_item(&SearchItem::new("file", "file", "Code Notes", file_path.to_string_lossy().as_ref()))
+        .unwrap();
+    service
+        .upsert_item(&SearchItem::new("app", "app", "Code", app_path.to_string_lossy().as_ref()))
+        .unwrap();
+
+    let first = service.search("code", 10).unwrap();
+    let second = service.search("code", 10).unwrap();
+
+    let first_ids: Vec<&str> = first.iter().map(|item| item.id.as_str()).collect();
+    let second_ids: Vec<&str> = second.iter().map(|item| item.id.as_str()).collect();
+
+    assert_eq!(first_ids, vec!["app", "file", "other"]);
+    assert_eq!(first_ids, second_ids);
+
+    std::fs::remove_file(app_path).unwrap();
+    std::fs::remove_file(file_path).unwrap();
 }
