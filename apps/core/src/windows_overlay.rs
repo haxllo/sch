@@ -40,7 +40,7 @@ mod imp {
         DrawIconEx, FindWindowW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
         GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
         GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
-        PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
+        PeekMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
         SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
         ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
