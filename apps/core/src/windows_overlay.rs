@@ -113,7 +113,7 @@ mod imp {
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const RESULTS_ANIM_MS: u32 = 150;
     const ANIM_FRAME_MS: u64 = 8;
-    const WHEEL_LINES_PER_NOTCH: i32 = 1;
+    const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
