@@ -692,17 +692,12 @@ mod imp {
 
         fn expand_results(&self, result_count: usize) {
             let mut rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
-            let mut animate = RESULTS_ANIM_MS;
+            let animate = RESULTS_ANIM_MS;
             let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
             // Keep enough vertical space for list rows plus footer hint area.
             // This must mirror layout_children() bottom reserve in footer mode.
             let footer_reserve = PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP;
             if let Some(state) = state_for(self.hwnd) {
-                if state.results_visible {
-                    // While typing, keep panel height monotonic to avoid shrink/re-expand jitter.
-                    rows = rows.max(state.expanded_rows);
-                    animate = 0;
-                }
                 state.expanded_rows = rows;
                 state.results_visible = true;
                 unsafe {
