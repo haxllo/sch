@@ -575,12 +575,28 @@ fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
             return seen_app_titles.insert(key);
         }
 
-        let key = item.path.trim().replace('/', "\\").to_ascii_lowercase();
+        let key = normalize_path_key(&item.path);
         if key.is_empty() {
             return true;
         }
         seen_other_paths.insert(key)
     });
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn normalize_path_key(path: &str) -> String {
+    let trimmed = path.trim();
+    let mut normalized = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch == '/' {
+            normalized.push('\\');
+        } else if ch.is_ascii_uppercase() {
+            normalized.push(ch.to_ascii_lowercase());
+        } else {
+            normalized.push(ch);
+        }
+    }
+    normalized
 }
 
 #[cfg(target_os = "windows")]
@@ -605,20 +621,28 @@ fn abbreviate_path(path: &str) -> String {
     }
 
     let normalized = trimmed.replace('/', "\\");
-    let parts: Vec<&str> = normalized
-        .split('\\')
-        .filter(|segment| !segment.is_empty())
-        .collect();
-    if parts.is_empty() {
+    let mut total_parts = 0usize;
+    let mut tail: Vec<&str> = Vec::with_capacity(3);
+    for segment in normalized.rsplit('\\') {
+        if segment.is_empty() {
+            continue;
+        }
+        total_parts += 1;
+        if tail.len() < 3 {
+            tail.push(segment);
+        }
+    }
+
+    if tail.is_empty() {
         return normalized;
     }
 
-    let tail_count = parts.len().min(3);
-    let tail = parts[parts.len() - tail_count..].join("\\");
-    if parts.len() > tail_count {
-        format!("...\\{tail}")
+    tail.reverse();
+    let joined_tail = tail.join("\\");
+    if total_parts > 3 {
+        format!("...\\{joined_tail}")
     } else {
-        tail
+        joined_tail
     }
 }
 
