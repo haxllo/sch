@@ -26,7 +26,8 @@ mod imp {
         DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
+        GetAsyncKeyState, SetFocus, VK_DOWN, VK_ESCAPE, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
+        VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
         SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES,
@@ -1173,6 +1174,12 @@ mod imp {
                         return 0;
                     }
 
+                    // On systems with "activate window on hover", WA_INACTIVE can fire
+                    // without an intentional click-away. Keep overlay open in that case.
+                    if !is_any_mouse_button_pressed() {
+                        return 0;
+                    }
+
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_ESCAPE, 0, 0);
                     }
@@ -2194,6 +2201,14 @@ mod imp {
             ShowWindow(hwnd, SW_HIDE);
         }
         schedule_icon_cache_idle_cleanup(hwnd);
+    }
+
+    fn is_any_mouse_button_pressed() -> bool {
+        unsafe {
+            (GetAsyncKeyState(VK_LBUTTON as i32) as u16 & 0x8000) != 0
+                || (GetAsyncKeyState(VK_RBUTTON as i32) as u16 & 0x8000) != 0
+                || (GetAsyncKeyState(VK_MBUTTON as i32) as u16 & 0x8000) != 0
+        }
     }
 
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
