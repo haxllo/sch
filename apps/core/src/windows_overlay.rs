@@ -30,8 +30,8 @@ mod imp {
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_SYSICONINDEX,
-        SHGFI_USEFILEATTRIBUTES,
+        ExtractIconExW, SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION,
+        SHGFI_LARGEICON, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -75,8 +75,8 @@ mod imp {
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
     const ROW_INSET_X: i32 = 10;
-    const ROW_ICON_SIZE: i32 = 28;
-    const ROW_ICON_DRAW_SIZE: i32 = 24;
+    const ROW_ICON_SIZE: i32 = 34;
+    const ROW_ICON_DRAW_SIZE: i32 = 32;
     const ROW_ICON_GAP: i32 = 10;
     const ROW_TEXT_TOP_PAD: i32 = 7;
     const ROW_TEXT_BOTTOM_PAD: i32 = 6;
@@ -1924,6 +1924,11 @@ mod imp {
         }
 
         if !source.is_empty() {
+            if kind == "app" && source.to_ascii_lowercase().ends_with(".lnk") {
+                if let Some(icon) = shortcut_target_icon(source) {
+                    return Some(icon);
+                }
+            }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
             }
@@ -1939,6 +1944,53 @@ mod imp {
         }
 
         shell_icon_with_attrs("swiftfind.file", FILE_ATTRIBUTE_NORMAL)
+    }
+
+    fn shortcut_target_icon(shortcut_path: &str) -> Option<isize> {
+        let mut info: SHFILEINFOW = unsafe { std::mem::zeroed() };
+        let wide_shortcut = to_wide(shortcut_path);
+        let result = unsafe {
+            SHGetFileInfoW(
+                wide_shortcut.as_ptr(),
+                0,
+                &mut info,
+                std::mem::size_of::<SHFILEINFOW>() as u32,
+                SHGFI_ICONLOCATION,
+            )
+        };
+        if result == 0 {
+            return None;
+        }
+
+        let icon_source = wide_buf_to_string(&info.szDisplayName);
+        if icon_source.trim().is_empty() {
+            return None;
+        }
+
+        let wide_source = to_wide(icon_source.trim());
+        let mut large_icon = std::ptr::null_mut();
+        let mut small_icon = std::ptr::null_mut();
+        let extracted = unsafe {
+            ExtractIconExW(
+                wide_source.as_ptr(),
+                info.iIcon,
+                &mut large_icon,
+                &mut small_icon,
+                1,
+            )
+        };
+
+        if !small_icon.is_null() {
+            unsafe {
+                DestroyIcon(small_icon);
+            }
+        }
+
+        if extracted == 0 || large_icon.is_null() {
+            None
+        } else {
+            Some(large_icon as isize)
+        }
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
@@ -3010,6 +3062,11 @@ mod imp {
 
     fn to_wide_no_nul(value: &str) -> Vec<u16> {
         value.encode_utf16().collect()
+    }
+
+    fn wide_buf_to_string(buf: &[u16]) -> String {
+        let end = buf.iter().position(|ch| *ch == 0).unwrap_or(buf.len());
+        String::from_utf16_lossy(&buf[..end])
     }
 
     #[cfg(test)]
