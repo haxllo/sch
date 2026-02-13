@@ -481,11 +481,6 @@ mod imp {
                 if rows.is_empty() {
                     schedule_icon_cache_idle_cleanup(self.hwnd);
                     if state.results_visible && !state.rows.is_empty() {
-                        state.row_anim_exiting = true;
-                        state.row_anim_start = Some(Instant::now());
-                        unsafe {
-                            SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
-                        }
                         self.collapse_results();
                         return;
                     }
@@ -506,25 +501,15 @@ mod imp {
                             SetWindowTextW(state.status_hwnd, wide.as_ptr());
                         }
                     }
-                    unsafe {
-                        KillTimer(self.hwnd, TIMER_ROW_ANIM);
-                    }
                     return;
                 }
 
                 cancel_icon_cache_idle_cleanup(self.hwnd);
-                if !had_rows {
-                    state.row_anim_exiting = false;
-                    state.row_anim_start = Some(Instant::now());
-                    unsafe {
-                        SetTimer(self.hwnd, TIMER_ROW_ANIM, ANIM_FRAME_MS as u32, None);
-                    }
-                } else {
-                    state.row_anim_start = None;
-                    state.row_anim_exiting = false;
-                    unsafe {
-                        KillTimer(self.hwnd, TIMER_ROW_ANIM);
-                    }
+                let _ = had_rows;
+                state.row_anim_start = None;
+                state.row_anim_exiting = false;
+                unsafe {
+                    KillTimer(self.hwnd, TIMER_ROW_ANIM);
                 }
 
                 state.rows.clear();
@@ -677,7 +662,6 @@ mod imp {
                 state.hover_index = -1;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
-                    KillTimer(self.hwnd, TIMER_ROW_ANIM);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
@@ -1189,19 +1173,6 @@ mod imp {
                         }
                     }
                 }
-                if wparam == TIMER_ROW_ANIM {
-                    if let Some(state) = state_for(hwnd) {
-                        let running = row_animation_tick(state);
-                        unsafe {
-                            InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
-                        }
-                        if !running {
-                            unsafe {
-                                KillTimer(hwnd, TIMER_ROW_ANIM);
-                            }
-                        }
-                    }
-                }
                 if wparam == TIMER_HELP_HOVER {
                     if let Some(state) = state_for(hwnd) {
                         sync_help_hover_with_cursor(hwnd, state);
@@ -1337,13 +1308,8 @@ mod imp {
                 let count = unsafe { SendMessageW(state.list_hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
                     finish_active_window_animation(parent, state);
-                    if state.row_anim_start.is_some() {
-                        state.row_anim_start = None;
-                        state.row_anim_exiting = false;
-                        unsafe {
-                            KillTimer(parent, TIMER_ROW_ANIM);
-                        }
-                    }
+                    state.row_anim_start = None;
+                    state.row_anim_exiting = false;
                     let current_top =
                         unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
                     let visible_rows = visible_row_capacity(state.list_hwnd);
@@ -2275,22 +2241,6 @@ mod imp {
         let height = (rect.bottom - rect.top).max(0);
         let rows = height / ROW_HEIGHT;
         rows.max(1)
-    }
-
-    fn row_animation_tick(state: &mut OverlayShellState) -> bool {
-        let Some(start) = state.row_anim_start else {
-            return false;
-        };
-
-        let row_count = state.rows.len() as u64;
-        let total_ms = ROW_ANIM_MS + row_count.min(MAX_VISIBLE_ROWS as u64) * ROW_STAGGER_MS;
-        let elapsed = start.elapsed().as_millis() as u64;
-        if elapsed >= total_ms {
-            state.row_anim_start = None;
-            state.row_anim_exiting = false;
-            return false;
-        }
-        true
     }
 
     fn finish_active_window_animation(hwnd: HWND, state: &mut OverlayShellState) {
