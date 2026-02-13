@@ -200,6 +200,8 @@ Run these on a real Windows host:
    - Empty query shows compact bar only (no visible results list).
    - Typing matching query expands results downward from a fixed top edge.
    - Result rows render as clean two-line title/path entries (no literal tab separators).
+   - Icons are crisp (no obvious blur) for app, file, and folder rows at your current display scale.
+   - Icons render without a decorative icon backplate/border.
    - Result rows have no hard border selection box; emphasis is subtle/hover-style.
    - Status line color changes for error states.
 
