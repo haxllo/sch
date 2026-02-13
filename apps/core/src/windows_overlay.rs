@@ -232,6 +232,7 @@ mod imp {
         active_query: String,
 
         hover_index: i32,
+        wheel_delta_remainder: i32,
         row_anim_start: Option<Instant>,
         row_anim_exiting: bool,
 
@@ -286,6 +287,7 @@ mod imp {
                 help_config_path: String::new(),
                 active_query: String::new(),
                 hover_index: -1,
+                wheel_delta_remainder: 0,
                 row_anim_start: None,
                 row_anim_exiting: false,
                 window_anim: None,
@@ -476,6 +478,7 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
+                state.wheel_delta_remainder = 0;
                 let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
@@ -1272,7 +1275,10 @@ mod imp {
                 && state.results_visible
             {
                 complete_window_animation_if_running(parent, state);
-                scroll_list_by_wheel(state.list_hwnd, wparam);
+                if hwnd == state.edit_hwnd && !is_cursor_over_window(state.list_hwnd) {
+                    return 0;
+                }
+                scroll_list_by_wheel(state, wparam);
                 return 0;
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
@@ -1619,7 +1625,8 @@ mod imp {
         }
     }
 
-    fn scroll_list_by_wheel(list_hwnd: HWND, wparam: WPARAM) {
+    fn scroll_list_by_wheel(state: &mut OverlayShellState, wparam: WPARAM) {
+        let list_hwnd = state.list_hwnd;
         let count = unsafe { SendMessageW(list_hwnd, LB_GETCOUNT, 0, 0) as i32 };
         if count <= 0 {
             return;
@@ -1628,19 +1635,31 @@ mod imp {
         let current_top = unsafe { SendMessageW(list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
         let visible_rows = visible_row_capacity(list_hwnd);
         let max_top = (count - visible_rows).max(0);
-        let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
-        let mut notches = (wheel as i32) / 120;
-        if notches == 0 && wheel != 0 {
-            notches = if wheel > 0 { 1 } else { -1 };
-        }
+        let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16 as i32;
+        state.wheel_delta_remainder += wheel;
+        let notches = state.wheel_delta_remainder / 120;
         if notches == 0 {
             return;
         }
+        state.wheel_delta_remainder -= notches * 120;
 
         let target_top = (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
         unsafe {
             SendMessageW(list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
         }
+    }
+
+    fn is_cursor_over_window(hwnd: HWND) -> bool {
+        let mut cursor: POINT = unsafe { std::mem::zeroed() };
+        let mut rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetCursorPos(&mut cursor);
+            GetWindowRect(hwnd, &mut rect);
+        }
+        cursor.x >= rect.left
+            && cursor.x < rect.right
+            && cursor.y >= rect.top
+            && cursor.y < rect.bottom
     }
 
     fn complete_window_animation_if_running(hwnd: HWND, state: &mut OverlayShellState) {
