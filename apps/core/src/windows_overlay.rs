@@ -27,7 +27,7 @@ mod imp {
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
-    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
         DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
@@ -119,6 +119,7 @@ mod imp {
     const OVERLAY_ALPHA_OPAQUE: u8 = 255;
     const OVERLAY_ALPHA_SYSTEM_BACKDROP: u8 = 226;
     const OVERLAY_ALPHA_BLUR_BEHIND: u8 = 232;
+    const OVERLAY_ALPHA_ACCENT_BLUR: u8 = 255;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
@@ -176,6 +177,11 @@ mod imp {
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
     const FOOTER_HINT_TEXT: &str = "Enter open • Esc close";
+    const WCA_ACCENT_POLICY: u32 = 19;
+    const ACCENT_ENABLE_BLUR_BEHIND: u32 = 3;
+    const ACCENT_ENABLE_ACRYLIC_BLUR_BEHIND: u32 = 4;
+    const ACCENT_BORDER_ALL: u32 = 0x20 | 0x40 | 0x80 | 0x100;
+    const ACCENT_TINT_DARK: u32 = 0xD8272727;
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -204,6 +210,7 @@ mod imp {
     enum BackdropMode {
         #[default]
         None,
+        AccentBlur,
         SystemBackdrop,
         BlurBehind,
     }
@@ -329,6 +336,24 @@ mod imp {
         to_alpha: u8,
         hide_on_complete: bool,
     }
+
+    #[repr(C)]
+    struct AccentPolicy {
+        accent_state: u32,
+        accent_flags: u32,
+        gradient_color: u32,
+        animation_id: u32,
+    }
+
+    #[repr(C)]
+    struct WindowCompositionAttribData {
+        attrib: u32,
+        pv_data: *mut c_void,
+        cb_data: usize,
+    }
+
+    type SetWindowCompositionAttributeFn =
+        unsafe extern "system" fn(HWND, *mut WindowCompositionAttribData) -> i32;
 
     impl NativeOverlayShell {
         pub fn create() -> Result<Self, String> {
@@ -2435,6 +2460,10 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             );
         }
+        if try_enable_accent_blur(hwnd) {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=accent_blur");
+            return BackdropMode::AccentBlur;
+        }
         let blur_ready = try_enable_blur_behind(hwnd);
         // Windows 11+: prefer transient backdrop for palette-style surfaces.
         let backdrop_type = DWMSBT_TRANSIENTWINDOW;
@@ -2475,6 +2504,45 @@ mod imp {
         unsafe { DwmEnableBlurBehindWindow(hwnd, &blur) >= 0 }
     }
 
+    fn try_enable_accent_blur(hwnd: HWND) -> bool {
+        static PROC: OnceLock<Option<SetWindowCompositionAttributeFn>> = OnceLock::new();
+        let set_attr = match PROC.get_or_init(resolve_set_window_composition_attribute) {
+            Some(f) => *f,
+            None => return false,
+        };
+
+        let mut accent = AccentPolicy {
+            accent_state: ACCENT_ENABLE_ACRYLIC_BLUR_BEHIND,
+            accent_flags: ACCENT_BORDER_ALL,
+            gradient_color: ACCENT_TINT_DARK,
+            animation_id: 0,
+        };
+        let mut data = WindowCompositionAttribData {
+            attrib: WCA_ACCENT_POLICY,
+            pv_data: (&mut accent as *mut AccentPolicy).cast::<c_void>(),
+            cb_data: std::mem::size_of::<AccentPolicy>(),
+        };
+        let ok_acrylic = unsafe { set_attr(hwnd, &mut data) } != 0;
+        if ok_acrylic {
+            return true;
+        }
+
+        accent.accent_state = ACCENT_ENABLE_BLUR_BEHIND;
+        accent.accent_flags = 0;
+        accent.gradient_color = 0;
+        unsafe { set_attr(hwnd, &mut data) } != 0
+    }
+
+    fn resolve_set_window_composition_attribute() -> Option<SetWindowCompositionAttributeFn> {
+        let user32 = unsafe { GetModuleHandleW(to_wide("user32.dll").as_ptr()) };
+        if user32.is_null() {
+            return None;
+        }
+        let proc = unsafe { GetProcAddress(user32, b"SetWindowCompositionAttribute\0".as_ptr()) };
+        let raw = proc?;
+        Some(unsafe { std::mem::transmute(raw) })
+    }
+
     fn backdrop_mode_for_hwnd(hwnd: HWND) -> BackdropMode {
         state_for(hwnd)
             .map(|state| state.backdrop_mode)
@@ -2484,6 +2552,7 @@ mod imp {
     fn overlay_visible_alpha(mode: BackdropMode) -> u8 {
         match mode {
             BackdropMode::None => OVERLAY_ALPHA_OPAQUE,
+            BackdropMode::AccentBlur => OVERLAY_ALPHA_ACCENT_BLUR,
             BackdropMode::SystemBackdrop => OVERLAY_ALPHA_SYSTEM_BACKDROP,
             BackdropMode::BlurBehind => OVERLAY_ALPHA_BLUR_BEHIND,
         }
@@ -2987,7 +3056,10 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
-                if state.backdrop_mode == BackdropMode::SystemBackdrop {
+                if matches!(
+                    state.backdrop_mode,
+                    BackdropMode::SystemBackdrop | BackdropMode::AccentBlur
+                ) {
                     // Let DWM anti-alias the rounded corners; paint border via inset rectangles.
                     FillRect(hdc, &client_rect, state.border_brush as _);
                     let mut inner = client_rect;
@@ -3031,8 +3103,11 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
-        if backdrop_mode_for_hwnd(hwnd) == BackdropMode::SystemBackdrop {
-            // Prefer compositor-rounded corners on Windows 11 system backdrops.
+        if matches!(
+            backdrop_mode_for_hwnd(hwnd),
+            BackdropMode::SystemBackdrop | BackdropMode::AccentBlur
+        ) {
+            // Prefer compositor-rounded corners for composited backdrop modes.
             unsafe {
                 SetWindowRgn(hwnd, std::ptr::null_mut(), 1);
             }
