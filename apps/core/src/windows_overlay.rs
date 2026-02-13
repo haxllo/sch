@@ -15,7 +15,7 @@ mod imp {
         GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, ScreenToClient,
         SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
         DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_MEDIUM, FW_SEMIBOLD, HDC, OPAQUE,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_SEMIBOLD, HDC, OPAQUE,
         OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
@@ -138,10 +138,10 @@ mod imp {
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
 
     // Visual tokens.
-    const COLOR_PANEL_BG: u32 = 0x00101010;
-    const COLOR_PANEL_BORDER: u32 = 0x002A2A2A;
+    const COLOR_PANEL_BG: u32 = 0x00272727;
+    const COLOR_PANEL_BORDER: u32 = 0x00424242;
     const COLOR_INPUT_BG: u32 = COLOR_PANEL_BG;
-    const COLOR_RESULTS_BG: u32 = 0x00101010;
+    const COLOR_RESULTS_BG: u32 = 0x00272727;
     const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
     const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
@@ -149,7 +149,7 @@ mod imp {
     const COLOR_TEXT_HINT: u32 = 0x00BEBEBE;
     const COLOR_SELECTION: u32 = 0x00262626;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
-    const COLOR_ROW_HOVER: u32 = 0x001A1A1A;
+    const COLOR_ROW_HOVER: u32 = 0x00313131;
     const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
     const COLOR_SELECTION_ACCENT: u32 = 0x00343434;
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
