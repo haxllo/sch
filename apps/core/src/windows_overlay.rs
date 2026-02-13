@@ -30,8 +30,8 @@ mod imp {
         VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        ExtractIconExW, SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION,
-        SHGFI_LARGEICON, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
+        ExtractIconExW, FindExecutableW, SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON,
+        SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -1931,6 +1931,9 @@ mod imp {
                 if let Some(icon) = extract_icon_from_path(source, 0) {
                     return Some(icon);
                 }
+                if let Some(icon) = executable_icon_from_shortcut(source) {
+                    return Some(icon);
+                }
             }
             if let Some(icon) = shell_icon_for_existing_path(source) {
                 return Some(icon);
@@ -1998,6 +2001,20 @@ mod imp {
         } else {
             Some(large_icon as isize)
         }
+    }
+
+    fn executable_icon_from_shortcut(shortcut_path: &str) -> Option<isize> {
+        let wide_shortcut = to_wide(shortcut_path);
+        let mut exe_out = vec![0u16; 260];
+        let result = unsafe { FindExecutableW(wide_shortcut.as_ptr(), std::ptr::null(), exe_out.as_mut_ptr()) };
+        if (result as isize) <= 32 {
+            return None;
+        }
+        let exe = wide_buf_to_string(&exe_out);
+        if exe.trim().is_empty() {
+            return None;
+        }
+        extract_icon_from_path(exe.trim(), 0)
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
