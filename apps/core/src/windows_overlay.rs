@@ -29,7 +29,7 @@ mod imp {
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_SMALLICON, SHGFI_USEFILEATTRIBUTES,
+        SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_LARGEICON, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
@@ -123,6 +123,11 @@ mod imp {
     const FONT_META_HEIGHT: i32 = -13;
     const FONT_STATUS_HEIGHT: i32 = -11;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
+    const FONT_WEIGHT_INPUT: i32 = 400;
+    const FONT_WEIGHT_TITLE: i32 = FW_SEMIBOLD as i32;
+    const FONT_WEIGHT_META: i32 = 400;
+    const FONT_WEIGHT_STATUS: i32 = 400;
+    const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
@@ -875,11 +880,11 @@ mod imp {
                     state.help_tip_border_brush =
                         unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
 
-                    state.input_font = create_font(FONT_INPUT_HEIGHT, FW_MEDIUM as i32);
-                    state.title_font = create_font(FONT_TITLE_HEIGHT, FW_SEMIBOLD as i32);
-                    state.meta_font = create_font(FONT_META_HEIGHT, FW_MEDIUM as i32);
-                    state.status_font = create_font(FONT_STATUS_HEIGHT, FW_MEDIUM as i32);
-                    state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FW_MEDIUM as i32);
+                    state.input_font = create_font(FONT_INPUT_HEIGHT, FONT_WEIGHT_INPUT);
+                    state.title_font = create_font(FONT_TITLE_HEIGHT, FONT_WEIGHT_TITLE);
+                    state.meta_font = create_font(FONT_META_HEIGHT, FONT_WEIGHT_META);
+                    state.status_font = create_font(FONT_STATUS_HEIGHT, FONT_WEIGHT_STATUS);
+                    state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FONT_WEIGHT_HELP_TIP);
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -1910,7 +1915,7 @@ mod imp {
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path);
-        let flags = SHGFI_ICON | SHGFI_SMALLICON;
+        let flags = SHGFI_ICON | SHGFI_LARGEICON;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -1930,7 +1935,7 @@ mod imp {
     fn shell_icon_with_attrs(path_hint: &str, attrs: u32) -> Option<isize> {
         let mut sfi: SHFILEINFOW = unsafe { std::mem::zeroed() };
         let wide = to_wide(path_hint);
-        let flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES;
+        let flags = SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES;
         let result = unsafe {
             SHGetFileInfoW(
                 wide.as_ptr(),
@@ -2786,20 +2791,24 @@ mod imp {
         static FONT_FAMILY_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
         FONT_FAMILY_WIDE
             .get_or_init(|| {
-                let family = std::env::var("SWIFTFIND_FONT_FAMILY")
-                    .ok()
-                    .map(|v| v.trim().to_string())
-                    .filter(|v| !v.is_empty())
-                    .unwrap_or_else(|| {
-                        if register_private_geist_fonts() {
-                            GEIST_FONT_FAMILY.to_string()
-                        } else {
-                            DEFAULT_FONT_FAMILY.to_string()
-                        }
-                    });
+                let family = resolve_font_family(
+                    std::env::var("SWIFTFIND_FONT_FAMILY").ok().as_deref(),
+                    register_private_geist_fonts(),
+                );
                 to_wide(&family)
             })
             .as_slice()
+    }
+
+    fn resolve_font_family(font_env: Option<&str>, geist_loaded: bool) -> String {
+        if let Some(value) = font_env.map(|v| v.trim()).filter(|v| !v.is_empty()) {
+            return value.to_string();
+        }
+        if geist_loaded {
+            GEIST_FONT_FAMILY.to_string()
+        } else {
+            DEFAULT_FONT_FAMILY.to_string()
+        }
     }
 
     fn register_private_geist_fonts() -> bool {
@@ -2893,6 +2902,29 @@ mod imp {
 
     fn to_wide_no_nul(value: &str) -> Vec<u16> {
         value.encode_utf16().collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{resolve_font_family, DEFAULT_FONT_FAMILY, GEIST_FONT_FAMILY};
+
+        #[test]
+        fn uses_explicit_font_env_when_provided() {
+            let resolved = resolve_font_family(Some("Segoe UI"), true);
+            assert_eq!(resolved, "Segoe UI");
+        }
+
+        #[test]
+        fn uses_geist_when_loaded_without_env_override() {
+            let resolved = resolve_font_family(None, true);
+            assert_eq!(resolved, GEIST_FONT_FAMILY);
+        }
+
+        #[test]
+        fn falls_back_to_default_when_geist_not_loaded() {
+            let resolved = resolve_font_family(None, false);
+            assert_eq!(resolved, DEFAULT_FONT_FAMILY);
+        }
     }
 
     pub fn is_instance_window_present() -> bool {

@@ -177,6 +177,13 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
     #[cfg(target_os = "windows")]
     {
+        // Opt into per-monitor DPI awareness to avoid bitmap-scaled blur on high-DPI systems.
+        unsafe {
+            let _ = windows_sys::Win32::UI::HiDpi::SetProcessDpiAwarenessContext(
+                windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+            );
+        }
+
         if let Ok(exe) = std::env::current_exe() {
             if let Err(error) = crate::startup::set_enabled(config.launch_at_startup, &exe) {
                 log_warn(&format!("[swiftfind-core] startup sync warning: {error}"));
