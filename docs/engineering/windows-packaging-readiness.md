@@ -72,6 +72,8 @@ If any of these fail, packaging fails.
 - This milestone prepares a deterministic zip payload and manifest.
 - Inno Setup consumes the staging directory directly via `scripts/windows/swiftfind.iss`.
 - Keep staging layout stable to avoid installer script churn.
+- Inno `[UninstallRun]` entries include `RunOnceId` values to prevent duplicate execution/warnings.
+- Uninstall path performs graceful quit, startup key cleanup, and hard-stop fallback for leftover runtime process.
 
 ## Inno Setup Requirements
 
