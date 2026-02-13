@@ -9,6 +9,10 @@ mod imp {
     use windows_sys::Win32::Foundation::{
         GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
     };
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BLURBEHIND, DWMSBT_TRANSIENTWINDOW,
+        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_BB_ENABLE,
+    };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
@@ -111,6 +115,8 @@ mod imp {
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
+    const OVERLAY_ALPHA_OPAQUE: u8 = 255;
+    const OVERLAY_ALPHA_VIBRANCY: u8 = 244;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
@@ -192,6 +198,14 @@ mod imp {
         hwnd: HWND,
     }
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+    enum BackdropMode {
+        #[default]
+        None,
+        SystemBackdrop,
+        BlurBehind,
+    }
+
     struct OverlayShellState {
         edit_hwnd: HWND,
         list_hwnd: HWND,
@@ -227,6 +241,7 @@ mod imp {
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
+        backdrop_mode: BackdropMode,
         help_config_path: String,
         active_query: String,
         expanded_rows: i32,
@@ -282,6 +297,7 @@ mod imp {
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
+                backdrop_mode: BackdropMode::None,
                 help_config_path: String::new(),
                 active_query: String::new(),
                 expanded_rows: 0,
@@ -670,7 +686,7 @@ mod imp {
 
         fn hide_immediate(&self) {
             unsafe {
-                SetLayeredWindowAttributes(self.hwnd, 0, 255, LWA_ALPHA);
+                SetLayeredWindowAttributes(self.hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 ShowWindow(self.hwnd, SW_HIDE);
             }
         }
@@ -723,6 +739,7 @@ mod imp {
                 GetWindowRect(self.hwnd, &mut rect);
             }
             let current_height = rect.bottom - rect.top;
+            let target_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
 
             if current_height == target_height {
                 return;
@@ -735,7 +752,7 @@ mod imp {
                     rect.top,
                     rect.right - rect.left,
                     target_height,
-                    255,
+                    target_alpha,
                 );
                 return;
             }
@@ -750,8 +767,8 @@ mod imp {
                 rect.top,
                 rect.right - rect.left,
                 target_height,
-                255,
-                255,
+                target_alpha,
+                target_alpha,
                 duration_ms,
                 false,
             );
@@ -778,6 +795,7 @@ mod imp {
             let start_height = ((final_height as f32) * 0.96_f32) as i32;
             let start_left = final_left + (final_width - start_width) / 2;
             let start_top = final_top + (final_height - start_height) / 2;
+            let target_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
 
             apply_window_state(
                 self.hwnd,
@@ -801,7 +819,7 @@ mod imp {
                 final_width,
                 final_height,
                 0,
-                255,
+                target_alpha,
                 OVERLAY_ANIM_MS,
                 false,
             );
@@ -825,6 +843,7 @@ mod imp {
             let end_height = ((final_height as f32) * 0.96_f32) as i32;
             let end_left = final_left + (final_width - end_width) / 2;
             let end_top = final_top + (final_height - end_height) / 2;
+            let source_alpha = overlay_visible_alpha(backdrop_mode_for_hwnd(self.hwnd));
             start_window_animation(
                 self.hwnd,
                 final_left,
@@ -835,7 +854,7 @@ mod imp {
                 end_top,
                 end_width,
                 end_height,
-                255,
+                source_alpha,
                 0,
                 OVERLAY_HIDE_ANIM_MS,
                 true,
@@ -863,6 +882,7 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
+                    state.backdrop_mode = apply_window_backdrop(hwnd);
                     state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
@@ -1682,7 +1702,7 @@ mod imp {
         if anim.hide_on_complete {
             unsafe {
                 ShowWindow(hwnd, SW_HIDE);
-                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             }
             return;
         }
@@ -2343,7 +2363,7 @@ mod imp {
             if hide_on_complete {
                 unsafe {
                     ShowWindow(hwnd, SW_HIDE);
-                    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+                    SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 }
             } else if !state.results_visible {
                 unsafe {
@@ -2385,10 +2405,67 @@ mod imp {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
-            SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+            SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
         schedule_icon_cache_idle_cleanup(hwnd);
+    }
+
+    fn apply_window_backdrop(hwnd: HWND) -> BackdropMode {
+        // Keep dark-themed non-client rendering aligned with the launcher palette.
+        let dark_mode_enabled: i32 = 1;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+                &dark_mode_enabled as *const _ as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+
+        // Windows 11+: prefer transient backdrop for palette-style surfaces.
+        let backdrop_type = DWMSBT_TRANSIENTWINDOW;
+        let hr_backdrop = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_SYSTEMBACKDROP_TYPE as u32,
+                &backdrop_type as *const _ as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+        if hr_backdrop >= 0 {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop");
+            return BackdropMode::SystemBackdrop;
+        }
+
+        // Windows 10/older fallback: composition blur behind.
+        let blur = DWM_BLURBEHIND {
+            dwFlags: DWM_BB_ENABLE,
+            fEnable: 1,
+            hRgnBlur: std::ptr::null_mut(),
+            fTransitionOnMaximized: 0,
+        };
+        let hr_blur = unsafe { DwmEnableBlurBehindWindow(hwnd, &blur) };
+        if hr_blur >= 0 {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=blur_behind");
+            BackdropMode::BlurBehind
+        } else {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=none");
+            BackdropMode::None
+        }
+    }
+
+    fn backdrop_mode_for_hwnd(hwnd: HWND) -> BackdropMode {
+        state_for(hwnd)
+            .map(|state| state.backdrop_mode)
+            .unwrap_or(BackdropMode::None)
+    }
+
+    fn overlay_visible_alpha(mode: BackdropMode) -> u8 {
+        match mode {
+            BackdropMode::None => OVERLAY_ALPHA_OPAQUE,
+            BackdropMode::SystemBackdrop | BackdropMode::BlurBehind => OVERLAY_ALPHA_VIBRANCY,
+        }
     }
 
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {
