@@ -9,6 +9,9 @@ mod imp {
     use windows_sys::Win32::Foundation::{
         GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
     };
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
@@ -228,6 +231,7 @@ mod imp {
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
+        use_dwm_corners: bool,
         help_config_path: String,
         active_query: String,
         expanded_rows: i32,
@@ -283,6 +287,7 @@ mod imp {
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
+                use_dwm_corners: false,
                 help_config_path: String::new(),
                 active_query: String::new(),
                 expanded_rows: 0,
@@ -864,6 +869,7 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
+                    state.use_dwm_corners = try_enable_dwm_rounded_corners(hwnd);
                     state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
@@ -2892,6 +2898,21 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
+                if state.use_dwm_corners {
+                    // With compositor-rounded corners, rect fills avoid aliased region edges.
+                    FillRect(hdc, &client_rect, state.border_brush as _);
+                    let mut inner = client_rect;
+                    inner.left += 1;
+                    inner.top += 1;
+                    inner.right -= 1;
+                    inner.bottom -= 1;
+                    if inner.right > inner.left && inner.bottom > inner.top {
+                        FillRect(hdc, &inner, state.panel_brush as _);
+                    }
+                    EndPaint(hwnd, &paint);
+                    return;
+                }
+
                 // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
                 // This avoids the angular look that FrameRgn can produce at tight corner radii.
                 let outer_region =
@@ -2921,6 +2942,13 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
+        if state_for(hwnd).map(|s| s.use_dwm_corners).unwrap_or(false) {
+            unsafe {
+                SetWindowRgn(hwnd, std::ptr::null_mut(), 1);
+            }
+            return;
+        }
+
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
@@ -2935,6 +2963,24 @@ mod imp {
             let region =
                 CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
             SetWindowRgn(hwnd, region, 1);
+        }
+    }
+
+    fn try_enable_dwm_rounded_corners(hwnd: HWND) -> bool {
+        let corner_pref = DWMWCP_ROUND;
+        let hr = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &corner_pref as *const _ as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            )
+        };
+        if hr >= 0 {
+            crate::logging::info("[swiftfind-core] overlay_corners mode=dwm_round");
+            true
+        } else {
+            false
         }
     }
 
