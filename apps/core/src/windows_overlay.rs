@@ -1271,6 +1271,7 @@ mod imp {
                 && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
                 && state.results_visible
             {
+                complete_window_animation_if_running(parent, state);
                 scroll_list_by_wheel(state.list_hwnd, wparam);
                 return 0;
             }
@@ -1640,6 +1641,35 @@ mod imp {
         unsafe {
             SendMessageW(list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
         }
+    }
+
+    fn complete_window_animation_if_running(hwnd: HWND, state: &mut OverlayShellState) {
+        let Some(anim) = state.window_anim.take() else {
+            return;
+        };
+
+        unsafe {
+            KillTimer(hwnd, TIMER_WINDOW_ANIM);
+        }
+
+        apply_window_state(
+            hwnd,
+            anim.to_left,
+            anim.to_top,
+            anim.to_width,
+            anim.to_height,
+            anim.to_alpha,
+        );
+
+        if anim.hide_on_complete {
+            unsafe {
+                ShowWindow(hwnd, SW_HIDE);
+                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+            }
+            return;
+        }
+
+        layout_children(hwnd, state);
     }
 
     fn draw_highlighted_title(
