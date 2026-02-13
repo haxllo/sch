@@ -106,7 +106,6 @@ mod imp {
     const EM_SETRECTNP: u32 = 0x00B4;
 
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
-    const TIMER_ROW_ANIM: usize = 0xBEF2;
     const TIMER_HELP_HOVER: usize = 0xBEF3;
     const TIMER_ICON_CACHE_IDLE: usize = 0xBEF4;
 
@@ -116,8 +115,6 @@ mod imp {
     const RESULTS_ANIM_MS: u32 = 0;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
-    const ROW_ANIM_MS: u64 = 130;
-    const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
     const ICON_CACHE_IDLE_MS: u32 = 90_000;
     const ICON_CACHE_MAX_ENTRIES: usize = 96;
@@ -236,8 +233,6 @@ mod imp {
 
         hover_index: i32,
         wheel_delta_remainder: i32,
-        row_anim_start: Option<Instant>,
-        row_anim_exiting: bool,
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
@@ -292,8 +287,6 @@ mod imp {
                 expanded_rows: 0,
                 hover_index: -1,
                 wheel_delta_remainder: 0,
-                row_anim_start: None,
-                row_anim_exiting: false,
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
@@ -509,8 +502,6 @@ mod imp {
                     self.collapse_results();
                     state.hover_index = -1;
                     state.expanded_rows = 0;
-                    state.row_anim_start = None;
-                    state.row_anim_exiting = false;
                     if !state.status_is_error {
                         let wide = to_wide("");
                         unsafe {
@@ -522,11 +513,6 @@ mod imp {
 
                 cancel_icon_cache_idle_cleanup(self.hwnd);
                 let _ = had_rows;
-                state.row_anim_start = None;
-                state.row_anim_exiting = false;
-                unsafe {
-                    KillTimer(self.hwnd, TIMER_ROW_ANIM);
-                }
 
                 state.rows.clear();
                 state.rows.extend_from_slice(rows);
@@ -700,8 +686,6 @@ mod imp {
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
-                state.row_anim_start = None;
-                state.row_anim_exiting = false;
                 state.rows.clear();
             }
         }
@@ -1540,12 +1524,7 @@ mod imp {
                 icon_path: String::new(),
             });
 
-        let visibility = row_animation_visibility(state, item_index);
-        let offset_y = if state.row_anim_exiting {
-            -(((1.0 - visibility) * 4.0).round() as i32)
-        } else {
-            ((1.0 - visibility) * 6.0).round() as i32
-        };
+        let offset_y = 0;
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
@@ -1566,9 +1545,7 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let base_fill = COLOR_ROW_HOVER;
-                let fill_color = blend_color(COLOR_RESULTS_BG, base_fill, visibility);
-                let fill_brush = CreateSolidBrush(fill_color);
+                let fill_brush = CreateSolidBrush(COLOR_ROW_HOVER);
                 FillRgn(dis.hDC, region, fill_brush);
                 DeleteObject(fill_brush as _);
                 DeleteObject(region as _);
@@ -1585,9 +1562,9 @@ mod imp {
             };
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
-            let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, visibility);
-            let secondary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, visibility);
-            let highlight_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_HIGHLIGHT, visibility);
+            let primary_text = COLOR_TEXT_PRIMARY;
+            let secondary_text = COLOR_TEXT_SECONDARY;
+            let highlight_text = COLOR_TEXT_HIGHLIGHT;
             SetTextColor(dis.hDC, primary_text);
 
             let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
@@ -1649,26 +1626,6 @@ mod imp {
             }
 
             SelectObject(dis.hDC, old_font);
-        }
-    }
-
-    fn row_animation_visibility(state: &OverlayShellState, item_index: i32) -> f32 {
-        let Some(start) = state.row_anim_start else {
-            return 1.0;
-        };
-
-        let stagger = (item_index.max(0) as u64) * ROW_STAGGER_MS;
-        let elapsed = start.elapsed().as_millis() as u64;
-        if elapsed <= stagger {
-            return if state.row_anim_exiting { 1.0 } else { 0.0 };
-        }
-
-        let t = ((elapsed - stagger) as f32 / ROW_ANIM_MS as f32).clamp(0.0, 1.0);
-        let eased = ease_out(t);
-        if state.row_anim_exiting {
-            1.0 - eased
-        } else {
-            eased
         }
     }
 
@@ -2410,8 +2367,6 @@ mod imp {
                 }
                 state.rows.clear();
                 state.hover_index = -1;
-                state.row_anim_start = None;
-                state.row_anim_exiting = false;
             }
             return false;
         }
@@ -2444,7 +2399,6 @@ mod imp {
         }
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
-            KillTimer(hwnd, TIMER_ROW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
             SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
