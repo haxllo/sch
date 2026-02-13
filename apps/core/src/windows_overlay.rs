@@ -1268,8 +1268,15 @@ mod imp {
             }
             if message == WM_MOUSEWHEEL && hwnd == state.edit_hwnd && state.results_visible {
                 // Keep native listbox wheel behavior while input retains keyboard focus.
+                let mut list_rect: RECT = unsafe { std::mem::zeroed() };
                 unsafe {
-                    SendMessageW(state.list_hwnd, WM_MOUSEWHEEL, wparam, lparam);
+                    GetWindowRect(state.list_hwnd, &mut list_rect);
+                }
+                let cx = (list_rect.left + list_rect.right) / 2;
+                let cy = (list_rect.top + list_rect.bottom) / 2;
+                let list_lparam = (((cy as u32) << 16) | (cx as u32 & 0xFFFF)) as LPARAM;
+                unsafe {
+                    SendMessageW(state.list_hwnd, WM_MOUSEWHEEL, wparam, list_lparam);
                 }
                 return 0;
             }
