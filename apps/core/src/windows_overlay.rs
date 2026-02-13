@@ -10,7 +10,8 @@ mod imp {
         GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
     };
     use windows_sys::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
@@ -45,7 +46,7 @@ mod imp {
         GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
         PeekMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
         SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_DROPSHADOW, CS_HREDRAW, CS_VREDRAW,
+        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
@@ -322,7 +323,9 @@ mod imp {
             let class_name = class_name_wide();
 
             let mut class: WNDCLASSW = unsafe { std::mem::zeroed() };
-            class.style = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW;
+            // Use only custom rounded region + custom stroke; class drop shadow can add
+            // a rectangular outer contour that fights the panel shape.
+            class.style = CS_HREDRAW | CS_VREDRAW;
             class.lpfnWndProc = Some(overlay_wnd_proc);
             class.hInstance = instance;
             class.hCursor = unsafe { LoadCursorW(std::ptr::null_mut(), IDC_ARROW) };
@@ -2944,7 +2947,7 @@ mod imp {
 
     fn try_enable_dwm_rounded_corners(hwnd: HWND) -> bool {
         let corner_pref = DWMWCP_ROUND;
-        let hr = unsafe {
+        let hr_corner = unsafe {
             DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_WINDOW_CORNER_PREFERENCE as u32,
@@ -2952,7 +2955,17 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             )
         };
-        if hr >= 0 {
+        // Avoid an extra rectangular non-client border over our custom rounded stroke.
+        let border_none: u32 = DWMWA_COLOR_NONE;
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_BORDER_COLOR as u32,
+                &border_none as *const _ as *const c_void,
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+        if hr_corner >= 0 {
             crate::logging::info("[swiftfind-core] overlay_corners mode=dwm_round");
             true
         } else {
