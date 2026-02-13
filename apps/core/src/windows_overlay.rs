@@ -28,8 +28,7 @@ mod imp {
         DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        GetAsyncKeyState, SetFocus, VK_DOWN, VK_ESCAPE, VK_LBUTTON, VK_MBUTTON, VK_RBUTTON,
-        VK_RETURN, VK_UP,
+        SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
         ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHFILEINFOW,
@@ -235,6 +234,7 @@ mod imp {
         active_query: String,
 
         hover_index: i32,
+        suppress_next_list_hover: bool,
 
         scroll_from_top: i32,
         scroll_to_top: i32,
@@ -293,6 +293,7 @@ mod imp {
                 help_config_path: String::new(),
                 active_query: String::new(),
                 hover_index: -1,
+                suppress_next_list_hover: false,
                 scroll_from_top: 0,
                 scroll_to_top: 0,
                 scroll_anim_start: None,
@@ -486,6 +487,7 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
+                state.suppress_next_list_hover = true;
                 let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
@@ -564,6 +566,14 @@ mod imp {
                 }
                 layout_children(self.hwnd, state);
                 self.set_selected_index_internal(selected_index, false);
+                if selected_index == 0 {
+                    unsafe {
+                        SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
+                    }
+                    state.scroll_anim_start = None;
+                    state.scroll_from_top = 0;
+                    state.scroll_to_top = 0;
+                }
             }
         }
 
@@ -1190,20 +1200,6 @@ mod imp {
                     if foreground == hwnd || unsafe { IsChild(hwnd, foreground) } != 0 {
                         return 0;
                     }
-
-                    // On systems with "activate window on hover", WA_INACTIVE can fire
-                    // without an intentional click-away. Keep overlay open in that case.
-                    if !is_any_mouse_button_pressed_or_recently_pressed() {
-                        if let Some(state) = state_for(hwnd) {
-                            unsafe {
-                                SetForegroundWindow(hwnd);
-                                SetFocus(state.edit_hwnd);
-                            }
-                            hide_input_caret(state.edit_hwnd);
-                        }
-                        return 0;
-                    }
-
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_ESCAPE, 0, 0);
                     }
@@ -1352,6 +1348,10 @@ mod imp {
                 return 1;
             }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
+                if state.suppress_next_list_hover {
+                    state.suppress_next_list_hover = false;
+                    return 0;
+                }
                 let x = (lparam as u32 & 0xFFFF) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32;
                 let packed = ((y as u32) << 16) | (x as u32 & 0xFFFF);
@@ -2439,19 +2439,6 @@ mod imp {
             ShowWindow(hwnd, SW_HIDE);
         }
         schedule_icon_cache_idle_cleanup(hwnd);
-    }
-
-    fn is_any_mouse_button_pressed_or_recently_pressed() -> bool {
-        unsafe {
-            is_key_down_or_recent(VK_LBUTTON as i32)
-                || is_key_down_or_recent(VK_RBUTTON as i32)
-                || is_key_down_or_recent(VK_MBUTTON as i32)
-        }
-    }
-
-    fn is_key_down_or_recent(vk: i32) -> bool {
-        let state = unsafe { GetAsyncKeyState(vk) as u16 };
-        (state & 0x8000) != 0 || (state & 0x0001) != 0
     }
 
     fn layout_children(hwnd: HWND, state: &mut OverlayShellState) {

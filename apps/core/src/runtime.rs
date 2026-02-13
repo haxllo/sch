@@ -293,6 +293,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     match search_overlay_results(&service, trimmed, max_results) {
                         Ok(mut results) => {
                             prepend_runtime_actions(trimmed, max_results, &mut results);
+                            dedupe_overlay_results(&mut results);
                             current_results = results;
                             selected_index = 0;
                             if current_results.is_empty() {
@@ -550,6 +551,28 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
         .collect()
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
+    let mut seen_app_titles = std::collections::HashSet::new();
+    let mut seen_other_paths = std::collections::HashSet::new();
+
+    results.retain(|item| {
+        if item.kind.eq_ignore_ascii_case("app") {
+            let key = item.title.trim().to_ascii_lowercase();
+            if key.is_empty() {
+                return true;
+            }
+            return seen_app_titles.insert(key);
+        }
+
+        let key = item.path.trim().replace('/', "\\").to_ascii_lowercase();
+        if key.is_empty() {
+            return true;
+        }
+        seen_other_paths.insert(key)
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn overlay_subtitle(item: &crate::model::SearchItem) -> String {
     if item.kind.eq_ignore_ascii_case("app") {
@@ -784,7 +807,7 @@ fn log_warn(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        launch_overlay_selection, next_selection_index, parse_cli_args,
+        dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, prepend_runtime_actions, search_overlay_results,
         RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
     };
@@ -950,6 +973,32 @@ mod tests {
         let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
         prepend_runtime_actions("code", 5, &mut results);
         assert_ne!(results[0].id, ACTION_OPEN_LOGS_ID);
+    }
+
+    #[test]
+    fn dedupes_duplicate_app_titles_for_overlay() {
+        let mut results = vec![
+            SearchItem::new("a1", "app", "Steam", "C:\\One\\Steam.lnk"),
+            SearchItem::new("a2", "app", "Steam", "C:\\Two\\Steam.lnk"),
+            SearchItem::new("a3", "app", "Calculator", "C:\\Calc.lnk"),
+        ];
+        dedupe_overlay_results(&mut results);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].title, "Steam");
+        assert_eq!(results[1].title, "Calculator");
+    }
+
+    #[test]
+    fn dedupes_non_app_entries_by_normalized_path() {
+        let mut results = vec![
+            SearchItem::new("f1", "file", "Doc A", "C:/Users/Admin/Docs/test.txt"),
+            SearchItem::new("f2", "file", "Doc B", "C:\\Users\\Admin\\Docs\\test.txt"),
+            SearchItem::new("f3", "file", "Doc C", "C:\\Users\\Admin\\Docs\\other.txt"),
+        ];
+        dedupe_overlay_results(&mut results);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, "f1");
+        assert_eq!(results[1].id, "f3");
     }
 
     #[test]
