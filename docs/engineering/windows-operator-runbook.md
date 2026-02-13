@@ -34,6 +34,8 @@ Expected startup logs include:
 - config path
 - index db path
 - indexed item count
+- indexing totals (`discovered`, `upserted`, `removed`)
+- per-provider indexing diagnostics (`name`, `discovered`, `upserted`, `removed`, `elapsed_ms`)
 
 ## Process Visibility
 
@@ -143,6 +145,8 @@ Behavior details:
 - Current file: `swiftfind.log`
 - Rotation: old logs are archived when current file reaches size threshold.
 - Panic/crash details are written to logs via runtime panic hook.
+- Overlay icon cache writes diagnostics on cache-clear events:
+  - `overlay_icon_cache reason=... hits=... misses=... load_failures=... evictions=... cleared_entries=...`
 
 ## UI Characteristics (Final)
 
