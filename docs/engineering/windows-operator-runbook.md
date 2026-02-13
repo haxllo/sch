@@ -244,6 +244,18 @@ Recommended capture points:
 4. Launch fails:
    - Read launcher status text (`Launch error: ...`).
    - Confirm selected item path still exists.
+
+5. App icons show shortcut arrow overlays:
+   - Expected behavior after current icon pipeline:
+     - app `.lnk` entries resolve target/icon metadata first
+     - shortcut-file icon fallback is blocked for app shortcuts to avoid arrow overlays
+   - If arrows still appear for specific apps:
+     - capture the exact app names (for example: Chrome, Visual Studio)
+     - restart runtime once (`swiftfind-core.exe --restart`) to refresh in-memory icon cache
+     - re-test with the same query
+   - If still reproducible, treat as app-specific shortcut metadata edge case and record:
+     - shortcut path
+     - whether target executable icon differs from shortcut icon
    - Verify the path is launchable from Explorer/Run dialog.
 5. Process not visible:
    - Ensure `cargo run -p swiftfind-core` is still running.
