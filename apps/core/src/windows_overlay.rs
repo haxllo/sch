@@ -1333,6 +1333,7 @@ mod imp {
             if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
+                    finish_active_window_animation(parent, state);
                     if state.row_anim_start.is_some() {
                         state.row_anim_start = None;
                         state.row_anim_exiting = false;
@@ -2286,6 +2287,34 @@ mod imp {
             return false;
         }
         true
+    }
+
+    fn finish_active_window_animation(hwnd: HWND, state: &mut OverlayShellState) {
+        let Some(anim) = state.window_anim.take() else {
+            return;
+        };
+
+        unsafe {
+            KillTimer(hwnd, TIMER_WINDOW_ANIM);
+        }
+        apply_window_state(
+            hwnd,
+            anim.to_left,
+            anim.to_top,
+            anim.to_width,
+            anim.to_height,
+            anim.to_alpha,
+        );
+
+        if anim.hide_on_complete {
+            unsafe {
+                ShowWindow(hwnd, SW_HIDE);
+                SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
+            }
+            return;
+        }
+
+        layout_children(hwnd, state);
     }
 
     fn start_window_animation(
