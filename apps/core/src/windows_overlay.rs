@@ -117,7 +117,8 @@ mod imp {
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const OVERLAY_ALPHA_OPAQUE: u8 = 255;
-    const OVERLAY_ALPHA_VIBRANCY: u8 = 248;
+    const OVERLAY_ALPHA_SYSTEM_BACKDROP: u8 = 226;
+    const OVERLAY_ALPHA_BLUR_BEHIND: u8 = 232;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
@@ -2434,6 +2435,7 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             );
         }
+        let blur_ready = try_enable_blur_behind(hwnd);
         // Windows 11+: prefer transient backdrop for palette-style surfaces.
         let backdrop_type = DWMSBT_TRANSIENTWINDOW;
         let hr_backdrop = unsafe {
@@ -2445,10 +2447,24 @@ mod imp {
             )
         };
         if hr_backdrop >= 0 {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop");
+            if blur_ready {
+                crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop+blur");
+            } else {
+                crate::logging::info("[swiftfind-core] overlay_backdrop mode=system_backdrop");
+            }
             return BackdropMode::SystemBackdrop;
         }
 
+        if blur_ready {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=blur_behind");
+            BackdropMode::BlurBehind
+        } else {
+            crate::logging::info("[swiftfind-core] overlay_backdrop mode=none");
+            BackdropMode::None
+        }
+    }
+
+    fn try_enable_blur_behind(hwnd: HWND) -> bool {
         // Windows 10/older fallback: composition blur behind.
         let blur = DWM_BLURBEHIND {
             dwFlags: DWM_BB_ENABLE,
@@ -2456,14 +2472,7 @@ mod imp {
             hRgnBlur: std::ptr::null_mut(),
             fTransitionOnMaximized: 0,
         };
-        let hr_blur = unsafe { DwmEnableBlurBehindWindow(hwnd, &blur) };
-        if hr_blur >= 0 {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=blur_behind");
-            BackdropMode::BlurBehind
-        } else {
-            crate::logging::info("[swiftfind-core] overlay_backdrop mode=none");
-            BackdropMode::None
-        }
+        unsafe { DwmEnableBlurBehindWindow(hwnd, &blur) >= 0 }
     }
 
     fn backdrop_mode_for_hwnd(hwnd: HWND) -> BackdropMode {
@@ -2475,7 +2484,8 @@ mod imp {
     fn overlay_visible_alpha(mode: BackdropMode) -> u8 {
         match mode {
             BackdropMode::None => OVERLAY_ALPHA_OPAQUE,
-            BackdropMode::SystemBackdrop | BackdropMode::BlurBehind => OVERLAY_ALPHA_VIBRANCY,
+            BackdropMode::SystemBackdrop => OVERLAY_ALPHA_SYSTEM_BACKDROP,
+            BackdropMode::BlurBehind => OVERLAY_ALPHA_BLUR_BEHIND,
         }
     }
 
