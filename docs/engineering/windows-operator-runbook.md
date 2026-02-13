@@ -152,14 +152,14 @@ Behavior details:
 
 - Compact centered launcher bar (default compact height; no oversized blank state).
 - Panel colors:
-  - background `#101010`
-  - border `#2A2A2A` (1px)
+  - background `#272727`
+  - border `#424242` (1px)
 - Rounded panel with subtle depth and improved typography hierarchy.
 - Input placeholder shown directly in the input box (`Type to search`).
 - Result rows are structured two-line cards:
   - primary title line (higher contrast, semibold)
   - secondary path line (muted, ellipsized)
-- Per-item glyph marks item type (`app`, `file`, `folder`) with restrained icon boxes.
+- Per-item native icon rendering is used for app/file/folder rows (glyph fallback only when icon load fails).
 - Active row uses soft hover-style emphasis without a hard selection border.
 - Input focus is forced on open and text is selected for immediate re-query.
 - Results panel stays collapsed for empty query, and expands downward only after matching query text.
@@ -257,12 +257,12 @@ Recommended capture points:
      - shortcut path
      - whether target executable icon differs from shortcut icon
    - Verify the path is launchable from Explorer/Run dialog.
-5. Process not visible:
+6. Process not visible:
    - Ensure `cargo run -p swiftfind-core` is still running.
    - Verify `swiftfind-core.exe` in Task Manager Details tab.
-6. JS tests flaky on Windows:
+7. JS tests flaky on Windows:
    - Use `pnpm vitest --run` with repo `vitest.config.ts` (single-fork mode configured).
-7. Config open/edit issues:
+8. Config open/edit issues:
    - Ensure `%APPDATA%\SwiftFind\config.json` is writable.
    - Check if the config file is locked by another process/editor.
 
