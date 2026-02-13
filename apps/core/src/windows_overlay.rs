@@ -1330,8 +1330,11 @@ mod imp {
                     invalidate_list_row(hwnd, next_hover);
                 }
             }
-            if message == WM_MOUSEWHEEL && hwnd == state.list_hwnd {
-                let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) };
+            if message == WM_MOUSEWHEEL
+                && hwnd != state.help_hwnd
+                && hwnd != state.help_tip_hwnd
+            {
+                let count = unsafe { SendMessageW(state.list_hwnd, LB_GETCOUNT, 0, 0) };
                 if count > 0 {
                     finish_active_window_animation(parent, state);
                     if state.row_anim_start.is_some() {
@@ -1341,8 +1344,9 @@ mod imp {
                             KillTimer(parent, TIMER_ROW_ANIM);
                         }
                     }
-                    let current_top = unsafe { SendMessageW(hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-                    let visible_rows = visible_row_capacity(hwnd);
+                    let current_top =
+                        unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+                    let visible_rows = visible_row_capacity(state.list_hwnd);
                     let max_top = (count as i32 - visible_rows).max(0);
                     let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16;
                     let mut notches = (wheel as i32) / 120;
@@ -1355,9 +1359,9 @@ mod imp {
                         let previous_hover = state.hover_index;
                         state.hover_index = -1;
                         unsafe {
-                            SendMessageW(hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+                            SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
                         }
-                        invalidate_list_row(hwnd, previous_hover);
+                        invalidate_list_row(state.list_hwnd, previous_hover);
                     }
                 }
                 return 0;
