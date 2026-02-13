@@ -181,12 +181,10 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
             for entry in walkdir::WalkDir::new(root)
                 .max_depth(self.max_depth)
                 .into_iter()
+                .filter_entry(|entry| !is_path_under_any_excluded_root(entry.path(), &excluded))
                 .filter_map(Result::ok)
             {
                 let path = entry.path();
-                if is_path_under_any_excluded_root(path, &excluded) {
-                    continue;
-                }
                 if path.is_dir() {
                     if path == root {
                         continue;

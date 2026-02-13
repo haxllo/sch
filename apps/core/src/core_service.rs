@@ -10,7 +10,10 @@ use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::time::Instant;
+use std::sync::{Mutex, RwLock};
+use std::time::{Duration, Instant};
+
+const STALE_PRUNE_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -64,6 +67,8 @@ pub struct CoreService {
     config: Config,
     db: Connection,
     providers: Vec<Box<dyn DiscoveryProvider>>,
+    cached_items: RwLock<Vec<SearchItem>>,
+    last_stale_prune: Mutex<Option<Instant>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,19 +93,22 @@ impl CoreService {
     pub fn new(config: Config) -> Result<Self, ServiceError> {
         validate(&config).map_err(ServiceError::Config)?;
         let db = index_store::open_from_config(&config)?;
-        Ok(Self {
-            config,
-            db,
-            providers: Vec::new(),
-        })
+        Self::with_loaded_cache(config, db)
     }
 
     pub fn with_connection(config: Config, db: Connection) -> Result<Self, ServiceError> {
         validate(&config).map_err(ServiceError::Config)?;
+        Self::with_loaded_cache(config, db)
+    }
+
+    fn with_loaded_cache(config: Config, db: Connection) -> Result<Self, ServiceError> {
+        let cached = index_store::list_items(&db)?;
         Ok(Self {
             config,
             db,
             providers: Vec::new(),
+            cached_items: RwLock::new(cached),
+            last_stale_prune: Mutex::new(None),
         })
     }
 
@@ -124,21 +132,7 @@ impl CoreService {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchItem>, ServiceError> {
-        let all = index_store::list_items(&self.db)?;
-        let mut valid = Vec::with_capacity(all.len());
-        let mut stale_ids = Vec::new();
-
-        for item in all {
-            if is_stale_index_entry(&item) {
-                stale_ids.push(item.id.clone());
-            } else {
-                valid.push(item);
-            }
-        }
-
-        for stale_id in stale_ids {
-            index_store::delete_item(&self.db, &stale_id)?;
-        }
+        self.prune_stale_items_if_due()?;
 
         let effective_limit = if limit == 0 {
             self.config.max_results as usize
@@ -146,7 +140,8 @@ impl CoreService {
             limit.min(self.config.max_results as usize)
         };
 
-        Ok(crate::search::search(&valid, query, effective_limit))
+        let snapshot = self.read_cached_items();
+        Ok(crate::search::search(&snapshot, query, effective_limit))
     }
 
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
@@ -159,6 +154,7 @@ impl CoreService {
                     Ok(()) => Ok(()),
                     Err(error @ LaunchError::MissingPath(_)) => {
                         index_store::delete_item(&self.db, &item.id)?;
+                        self.remove_cached_item_by_id(&item.id);
                         Err(ServiceError::from(error))
                     }
                     Err(error) => Err(ServiceError::from(error)),
@@ -174,8 +170,9 @@ impl CoreService {
 
     pub fn rebuild_index_with_report(&self) -> Result<IndexRefreshReport, ServiceError> {
         if self.providers.is_empty() {
+            self.refresh_cache_from_store()?;
             return Ok(IndexRefreshReport {
-                indexed_total: index_store::list_items(&self.db)?.len(),
+                indexed_total: self.read_cached_items().len(),
                 discovered_total: 0,
                 upserted_total: 0,
                 removed_total: 0,
@@ -241,7 +238,8 @@ impl CoreService {
             });
         }
 
-        let indexed_total = index_store::list_items(&self.db)?.len();
+        self.refresh_cache_from_store()?;
+        let indexed_total = self.read_cached_items().len();
         Ok(IndexRefreshReport {
             indexed_total,
             discovered_total,
@@ -258,6 +256,7 @@ impl CoreService {
 
     pub fn upsert_item(&self, item: &SearchItem) -> Result<(), ServiceError> {
         index_store::upsert_item(&self.db, item)?;
+        self.upsert_cached_item(item.clone());
         Ok(())
     }
 
@@ -289,6 +288,107 @@ impl CoreService {
                 ))
             }
         }
+    }
+}
+
+impl CoreService {
+    fn read_cached_items(&self) -> Vec<SearchItem> {
+        match self.cached_items.read() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    fn refresh_cache_from_store(&self) -> Result<(), ServiceError> {
+        let latest = index_store::list_items(&self.db)?;
+        match self.cached_items.write() {
+            Ok(mut guard) => {
+                *guard = latest;
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                *guard = latest;
+            }
+        }
+        Ok(())
+    }
+
+    fn upsert_cached_item(&self, item: SearchItem) {
+        match self.cached_items.write() {
+            Ok(mut guard) => upsert_cached_item_inner(&mut guard, item),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                upsert_cached_item_inner(&mut guard, item);
+            }
+        }
+    }
+
+    fn remove_cached_item_by_id(&self, id: &str) {
+        match self.cached_items.write() {
+            Ok(mut guard) => guard.retain(|entry| entry.id != id),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.retain(|entry| entry.id != id);
+            }
+        }
+    }
+
+    fn prune_stale_items_if_due(&self) -> Result<(), ServiceError> {
+        let should_prune = {
+            let mut last = match self.last_stale_prune.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let now = Instant::now();
+            match *last {
+                Some(prev) if now.duration_since(prev) < STALE_PRUNE_INTERVAL => false,
+                _ => {
+                    *last = Some(now);
+                    true
+                }
+            }
+        };
+
+        if !should_prune {
+            return Ok(());
+        }
+
+        let snapshot = self.read_cached_items();
+        let stale_ids: Vec<String> = snapshot
+            .iter()
+            .filter(|item| is_stale_index_entry(item))
+            .map(|item| item.id.clone())
+            .collect();
+
+        if stale_ids.is_empty() {
+            return Ok(());
+        }
+
+        for stale_id in &stale_ids {
+            index_store::delete_item(&self.db, stale_id)?;
+        }
+
+        match self.cached_items.write() {
+            Ok(mut guard) => {
+                let stale_lookup: HashSet<&str> = stale_ids.iter().map(String::as_str).collect();
+                guard.retain(|entry| !stale_lookup.contains(entry.id.as_str()));
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                let stale_lookup: HashSet<&str> = stale_ids.iter().map(String::as_str).collect();
+                guard.retain(|entry| !stale_lookup.contains(entry.id.as_str()));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+fn upsert_cached_item_inner(cached: &mut Vec<SearchItem>, item: SearchItem) {
+    if let Some(existing) = cached.iter_mut().find(|entry| entry.id == item.id) {
+        *existing = item;
+    } else {
+        cached.push(item);
     }
 }
 
