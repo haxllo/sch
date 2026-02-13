@@ -1,5 +1,8 @@
 # Engineering Roadmap
 
+Canonical execution/status tracker:
+- `docs/engineering/master-phase-task-tracker.md`
+
 ## Phase 0: Foundation (Week 1 to 2)
 
 Deliverables:
@@ -47,6 +50,19 @@ Deliverables:
 
 Exit criteria:
 - Public beta candidate approved
+
+## Phase 4: Stable Release and Post-Launch (Week 9+)
+
+Deliverables:
+- Stable `v1.0.0` release execution and publication
+- Release-candidate final Windows manual/security evidence capture
+- Initial post-release triage loop (issues, crash/log review, hotfix readiness)
+- Backlog prioritization for deferred items (auto-update mechanism, optional UWP/AppX icon edge polish)
+
+Exit criteria:
+- Stable release is published and installable by non-technical users
+- No critical launch/hotkey/install/uninstall regressions reported in first feedback window
+- Patch release process is validated and ready
 
 ## Progress Update (2026-02-13)
 

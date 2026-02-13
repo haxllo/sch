@@ -30,6 +30,7 @@ Architecture:
 Engineering:
 - `docs/engineering/testing-and-quality.md`: testing strategy and release gates
 - `docs/engineering/roadmap.md`: milestones from MVP to extensibility
+- `docs/engineering/master-phase-task-tracker.md`: single source of truth for phase/task completion status
 - `docs/engineering/risk-register.md`: key technical and delivery risks
 - `docs/engineering/windows-security-release-checklist.md`: Windows-specific security and release blocking checklist
 
