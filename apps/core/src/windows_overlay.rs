@@ -69,7 +69,7 @@ mod imp {
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 80;
-    const PANEL_RADIUS: i32 = 28;
+    const PANEL_RADIUS: i32 = 24;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2962,17 +2962,34 @@ mod imp {
         let mut paint: PAINTSTRUCT = unsafe { std::mem::zeroed() };
         unsafe {
             let hdc = BeginPaint(hwnd, &mut paint);
-            FillRect(hdc, &paint.rcPaint, state.panel_brush as _);
-
             let mut client_rect: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut client_rect);
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
-                let border_region =
+                // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
+                // This avoids the angular look that FrameRgn can produce at tight corner radii.
+                let outer_region =
                     CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
-                FrameRgn(hdc, border_region, state.border_brush as _, 1, 1);
-                DeleteObject(border_region as _);
+                FillRgn(hdc, outer_region, state.border_brush as _);
+
+                if width > 2 && height > 2 {
+                    let inner_radius = (PANEL_RADIUS - 2).max(2);
+                    let inner_region = CreateRoundRectRgn(
+                        1,
+                        1,
+                        width,
+                        height,
+                        inner_radius,
+                        inner_radius,
+                    );
+                    FillRgn(hdc, inner_region, state.panel_brush as _);
+                    DeleteObject(inner_region as _);
+                } else {
+                    FillRgn(hdc, outer_region, state.panel_brush as _);
+                }
+
+                DeleteObject(outer_region as _);
             }
             EndPaint(hwnd, &paint);
         }
