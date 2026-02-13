@@ -148,3 +148,13 @@ Completed in current branch:
   - `discovery_roots`
   - `discovery_exclude_roots`
 - Config template and runtime behavior are aligned with this include/exclude strategy.
+
+## Progress Update (2026-02-14, Update 3)
+
+Closeout alignment:
+- Phase 3 hardening track is complete for stable release preparation.
+- Spotlight-parity critical path items for this phase are satisfied (ranking stability, UX contract, stale-path handling, include/exclude roots, icon fallback hardening).
+
+Remaining non-blocking parity backlog:
+- optional incremental improvements for rare UWP/AppX icon edge cases
+- runtime auto-update mechanism remains deferred by design

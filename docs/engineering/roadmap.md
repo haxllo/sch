@@ -106,3 +106,18 @@ Item status:
 - Include/exclude roots controls: completed in runtime/config (`discovery_roots`, `discovery_exclude_roots`).
 - Remaining major item:
   - final pre-beta security checklist execution on release candidate.
+
+## Phase 3 Closeout (2026-02-14)
+
+Phase 3 is closed for stable release preparation.
+
+Closeout summary:
+- installer lifecycle hardening completed (install/upgrade/uninstall/rollback paths documented and validated in process)
+- release-channel/update rollout policy completed (`stable`/`beta` with manual setup-based update model)
+- security release checklist completed and wired into operator docs
+- include/exclude roots controls completed in runtime/config
+- deeper AppsFolder/UWP icon fallback completed for edge generic-icon reduction
+
+Post-Phase-3 backlog (non-blocking for `v1.0.0`):
+- runtime auto-update mechanism (still intentionally deferred)
+- optional further UWP/AppX icon quality improvements for rare edge entries
