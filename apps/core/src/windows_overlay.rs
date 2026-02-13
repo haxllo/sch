@@ -104,7 +104,6 @@ mod imp {
     const EM_GETRECT: u32 = 0x00B2;
     const EM_SETRECTNP: u32 = 0x00B4;
 
-    const TIMER_SCROLL_ANIM: usize = 0xBEF0;
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
     const TIMER_ROW_ANIM: usize = 0xBEF2;
     const TIMER_HELP_HOVER: usize = 0xBEF3;
@@ -113,9 +112,8 @@ mod imp {
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const RESULTS_ANIM_MS: u32 = 150;
-    const SCROLL_ANIM_MS: u64 = 120;
     const ANIM_FRAME_MS: u64 = 8;
-    const WHEEL_LINES_PER_NOTCH: i32 = 3;
+    const WHEEL_LINES_PER_NOTCH: i32 = 1;
     const ROW_ANIM_MS: u64 = 130;
     const ROW_STAGGER_MS: u64 = 16;
     const HELP_HOVER_POLL_MS: u32 = 33;
@@ -234,11 +232,6 @@ mod imp {
         active_query: String,
 
         hover_index: i32,
-        suppress_next_list_hover: bool,
-
-        scroll_from_top: i32,
-        scroll_to_top: i32,
-        scroll_anim_start: Option<Instant>,
         row_anim_start: Option<Instant>,
         row_anim_exiting: bool,
 
@@ -293,10 +286,6 @@ mod imp {
                 help_config_path: String::new(),
                 active_query: String::new(),
                 hover_index: -1,
-                suppress_next_list_hover: false,
-                scroll_from_top: 0,
-                scroll_to_top: 0,
-                scroll_anim_start: None,
                 row_anim_start: None,
                 row_anim_exiting: false,
                 window_anim: None,
@@ -487,7 +476,6 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
-                state.suppress_next_list_hover = true;
                 let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
@@ -509,9 +497,6 @@ mod imp {
                     }
 
                     self.collapse_results();
-                    state.scroll_anim_start = None;
-                    state.scroll_from_top = 0;
-                    state.scroll_to_top = 0;
                     state.hover_index = -1;
                     state.row_anim_start = None;
                     state.row_anim_exiting = false;
@@ -570,9 +555,6 @@ mod imp {
                     unsafe {
                         SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     }
-                    state.scroll_anim_start = None;
-                    state.scroll_from_top = 0;
-                    state.scroll_to_top = 0;
                 }
             }
         }
@@ -595,22 +577,11 @@ mod imp {
             unsafe {
                 SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
             }
-            if animate_scroll {
-                begin_scroll_animation(self.hwnd, state, clamped as i32, count as i32);
-            } else {
-                let current_top =
-                    unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-                let target_top = target_top_index_for_selection(
-                    state.list_hwnd,
-                    clamped as i32,
-                    count as i32,
-                    current_top,
-                );
-                state.scroll_anim_start = None;
-                state.scroll_from_top = target_top;
-                state.scroll_to_top = target_top;
+            let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
+            let target_top =
+                target_top_index_for_selection(state.list_hwnd, clamped as i32, count as i32, current_top);
+            if animate_scroll || target_top != current_top {
                 unsafe {
-                    KillTimer(self.hwnd, TIMER_SCROLL_ANIM);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
                 }
             }
@@ -703,13 +674,9 @@ mod imp {
             self.animate_results_height(COMPACT_HEIGHT, 0);
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
-                state.scroll_anim_start = None;
-                state.scroll_from_top = 0;
-                state.scroll_to_top = 0;
                 state.hover_index = -1;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
-                    KillTimer(self.hwnd, TIMER_SCROLL_ANIM);
                     KillTimer(self.hwnd, TIMER_ROW_ANIM);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
@@ -1212,16 +1179,6 @@ mod imp {
                 0
             }
             WM_TIMER => {
-                if wparam == TIMER_SCROLL_ANIM {
-                    if let Some(state) = state_for(hwnd) {
-                        let running = scroll_animation_tick(state);
-                        if !running {
-                            unsafe {
-                                KillTimer(hwnd, TIMER_SCROLL_ANIM);
-                            }
-                        }
-                    }
-                }
                 if wparam == TIMER_WINDOW_ANIM {
                     if let Some(state) = state_for(hwnd) {
                         let running = window_animation_tick(hwnd, state);
@@ -1348,10 +1305,6 @@ mod imp {
                 return 1;
             }
             if message == WM_MOUSEMOVE && hwnd == state.list_hwnd {
-                if state.suppress_next_list_hover {
-                    state.suppress_next_list_hover = false;
-                    return 0;
-                }
                 let x = (lparam as u32 & 0xFFFF) as i16 as i32;
                 let y = ((lparam as u32 >> 16) & 0xFFFF) as i16 as i32;
                 let packed = ((y as u32) << 16) | (x as u32 & 0xFFFF);
@@ -1391,11 +1344,12 @@ mod imp {
                     if notches != 0 {
                         let target_top =
                             (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
-                        state.scroll_anim_start = None;
+                        let previous_hover = state.hover_index;
+                        state.hover_index = -1;
                         unsafe {
-                            KillTimer(parent, TIMER_SCROLL_ANIM);
                             SendMessageW(hwnd, LB_SETTOPINDEX, target_top as usize, 0);
                         }
+                        invalidate_list_row(hwnd, previous_hover);
                     }
                 }
                 return 0;
@@ -2282,39 +2236,6 @@ mod imp {
         }
     }
 
-    fn begin_scroll_animation(
-        overlay_hwnd: HWND,
-        state: &mut OverlayShellState,
-        selected_index: i32,
-        count: i32,
-    ) {
-        if count <= 0 {
-            return;
-        }
-
-        let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-        let target_top =
-            target_top_index_for_selection(state.list_hwnd, selected_index, count, current_top);
-        begin_scroll_animation_to_top(overlay_hwnd, state, target_top);
-    }
-
-    fn begin_scroll_animation_to_top(
-        overlay_hwnd: HWND,
-        state: &mut OverlayShellState,
-        target_top: i32,
-    ) {
-        let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-        state.scroll_anim_start = None;
-        state.scroll_from_top = target_top;
-        state.scroll_to_top = target_top;
-        unsafe {
-            KillTimer(overlay_hwnd, TIMER_SCROLL_ANIM);
-            if target_top != current_top {
-                SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
-            }
-        }
-    }
-
     fn target_top_index_for_selection(
         list_hwnd: HWND,
         selected_index: i32,
@@ -2342,26 +2263,6 @@ mod imp {
         let height = (rect.bottom - rect.top).max(0);
         let rows = height / ROW_HEIGHT;
         rows.max(1)
-    }
-
-    fn scroll_animation_tick(state: &mut OverlayShellState) -> bool {
-        let Some(start) = state.scroll_anim_start else {
-            return false;
-        };
-
-        let elapsed = start.elapsed().as_millis() as u64;
-        let t = (elapsed as f32 / SCROLL_ANIM_MS as f32).clamp(0.0, 1.0);
-        let eased = ease_out(t);
-        let next_top = lerp_i32(state.scroll_from_top, state.scroll_to_top, eased);
-        unsafe {
-            SendMessageW(state.list_hwnd, LB_SETTOPINDEX, next_top as usize, 0);
-        }
-
-        if t >= 1.0 {
-            state.scroll_anim_start = None;
-            return false;
-        }
-        true
     }
 
     fn row_animation_tick(state: &mut OverlayShellState) -> bool {
