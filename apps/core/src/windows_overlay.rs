@@ -243,6 +243,15 @@ mod imp {
         rows: Vec<OverlayRow>,
         icon_cache: HashMap<String, isize>,
         icon_cache_lru: VecDeque<String>,
+        icon_cache_metrics: IconCacheMetrics,
+    }
+
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    struct IconCacheMetrics {
+        hits: u64,
+        misses: u64,
+        load_failures: u64,
+        evictions: u64,
     }
 
     impl Default for OverlayShellState {
@@ -290,6 +299,7 @@ mod imp {
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
                 icon_cache_lru: VecDeque::new(),
+                icon_cache_metrics: IconCacheMetrics::default(),
             }
         }
     }
@@ -1876,11 +1886,17 @@ mod imp {
     fn icon_handle_for_row(state: &mut OverlayShellState, row: &OverlayRow) -> Option<isize> {
         let key = icon_cache_key(row);
         if let Some(cached) = state.icon_cache.get(&key).copied() {
+            state.icon_cache_metrics.hits = state.icon_cache_metrics.hits.saturating_add(1);
             touch_icon_cache_key(state, &key);
             return if cached == 0 { None } else { Some(cached) };
         }
+        state.icon_cache_metrics.misses = state.icon_cache_metrics.misses.saturating_add(1);
 
         let loaded = load_shell_icon_for_row(row).unwrap_or(0);
+        if loaded == 0 {
+            state.icon_cache_metrics.load_failures =
+                state.icon_cache_metrics.load_failures.saturating_add(1);
+        }
         insert_icon_cache_entry(state, key, loaded);
         if loaded == 0 {
             None
@@ -1973,6 +1989,7 @@ mod imp {
     }
 
     fn clear_icon_cache(state: &mut OverlayShellState) {
+        let cleared_entries = state.icon_cache.len();
         for handle in state.icon_cache.values() {
             if *handle != 0 {
                 unsafe {
@@ -1982,6 +1999,7 @@ mod imp {
         }
         state.icon_cache.clear();
         state.icon_cache_lru.clear();
+        log_icon_cache_metrics(state, "cache_clear", cleared_entries);
     }
 
     fn touch_icon_cache_key(state: &mut OverlayShellState, key: &str) {
@@ -2008,6 +2026,8 @@ mod imp {
                 continue;
             }
             if let Some(oldest_handle) = state.icon_cache.remove(&oldest_key) {
+                state.icon_cache_metrics.evictions =
+                    state.icon_cache_metrics.evictions.saturating_add(1);
                 if oldest_handle != 0 {
                     unsafe {
                         DestroyIcon(oldest_handle as _);
@@ -2015,6 +2035,32 @@ mod imp {
                 }
             }
         }
+    }
+
+    fn log_icon_cache_metrics(
+        state: &mut OverlayShellState,
+        reason: &str,
+        cleared_entries: usize,
+    ) {
+        let metrics = state.icon_cache_metrics;
+        if metrics.hits == 0
+            && metrics.misses == 0
+            && metrics.load_failures == 0
+            && metrics.evictions == 0
+            && cleared_entries == 0
+        {
+            return;
+        }
+        crate::logging::info(&format!(
+            "[swiftfind-core] overlay_icon_cache reason={} hits={} misses={} load_failures={} evictions={} cleared_entries={}",
+            reason,
+            metrics.hits,
+            metrics.misses,
+            metrics.load_failures,
+            metrics.evictions,
+            cleared_entries
+        ));
+        state.icon_cache_metrics = IconCacheMetrics::default();
     }
 
     fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {
