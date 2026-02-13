@@ -230,6 +230,7 @@ mod imp {
         results_visible: bool,
         help_config_path: String,
         active_query: String,
+        expanded_rows: i32,
 
         hover_index: i32,
         wheel_delta_remainder: i32,
@@ -286,6 +287,7 @@ mod imp {
                 results_visible: false,
                 help_config_path: String::new(),
                 active_query: String::new(),
+                expanded_rows: 0,
                 hover_index: -1,
                 wheel_delta_remainder: 0,
                 row_anim_start: None,
@@ -496,6 +498,7 @@ mod imp {
 
                     self.collapse_results();
                     state.hover_index = -1;
+                    state.expanded_rows = 0;
                     state.row_anim_start = None;
                     state.row_anim_exiting = false;
                     if !state.status_is_error {
@@ -662,6 +665,7 @@ mod imp {
             self.animate_results_height(COMPACT_HEIGHT, 0);
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
+                state.expanded_rows = 0;
                 state.hover_index = -1;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
@@ -675,27 +679,34 @@ mod imp {
         }
 
         fn expand_results(&self, result_count: usize) {
-            let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
+            let mut rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
+            let mut animate = RESULTS_ANIM_MS;
             let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
             // Keep enough vertical space for list rows plus footer hint area.
             // This must mirror layout_children() bottom reserve in footer mode.
             let footer_reserve = PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP;
-            let target_height = list_top + rows * ROW_HEIGHT + footer_reserve;
-
             if let Some(state) = state_for(self.hwnd) {
+                if state.results_visible {
+                    // While typing, keep panel height monotonic to avoid shrink/re-expand jitter.
+                    rows = rows.max(state.expanded_rows);
+                    animate = 0;
+                }
+                state.expanded_rows = rows;
                 state.results_visible = true;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_SHOW);
                 }
             }
 
-            self.animate_results_height(target_height, RESULTS_ANIM_MS);
+            let target_height = list_top + rows * ROW_HEIGHT + footer_reserve;
+            self.animate_results_height(target_height, animate);
         }
 
         fn collapse_results(&self) {
             self.animate_results_height(COMPACT_HEIGHT, RESULTS_ANIM_MS);
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
+                state.expanded_rows = 0;
             }
         }
 
