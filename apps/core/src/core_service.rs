@@ -140,8 +140,11 @@ impl CoreService {
             limit.min(self.config.max_results as usize)
         };
 
-        let snapshot = self.read_cached_items();
-        Ok(crate::search::search(&snapshot, query, effective_limit))
+        let guard = match self.cached_items.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        Ok(crate::search::search(&guard, query, effective_limit))
     }
 
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
@@ -172,7 +175,7 @@ impl CoreService {
         if self.providers.is_empty() {
             self.refresh_cache_from_store()?;
             return Ok(IndexRefreshReport {
-                indexed_total: self.read_cached_items().len(),
+                indexed_total: self.cached_len(),
                 discovered_total: 0,
                 upserted_total: 0,
                 removed_total: 0,
@@ -239,7 +242,7 @@ impl CoreService {
         }
 
         self.refresh_cache_from_store()?;
-        let indexed_total = self.read_cached_items().len();
+        let indexed_total = self.cached_len();
         Ok(IndexRefreshReport {
             indexed_total,
             discovered_total,
@@ -292,6 +295,13 @@ impl CoreService {
 }
 
 impl CoreService {
+    fn cached_len(&self) -> usize {
+        match self.cached_items.read() {
+            Ok(guard) => guard.len(),
+            Err(poisoned) => poisoned.into_inner().len(),
+        }
+    }
+
     fn read_cached_items(&self) -> Vec<SearchItem> {
         match self.cached_items.read() {
             Ok(guard) => guard.clone(),

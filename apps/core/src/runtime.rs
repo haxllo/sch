@@ -230,6 +230,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let max_results = config.max_results as usize;
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
         let mut selected_index = 0_usize;
+        let mut last_query = String::new();
 
         overlay
             .run_message_loop_with_events(|event| match event {
@@ -279,6 +280,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     if overlay_state.on_escape() {
                         overlay.hide_now();
                         reset_overlay_session(&overlay, &mut current_results, &mut selected_index);
+                        last_query.clear();
                     }
                 }
                 OverlayEvent::QueryChanged(query) => {
@@ -286,9 +288,14 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     if trimmed.is_empty() {
                         current_results.clear();
                         selected_index = 0;
+                        last_query.clear();
                         set_idle_overlay_state(&overlay);
                         return;
                     }
+                    if trimmed == last_query {
+                        return;
+                    }
+                    last_query = trimmed.to_string();
 
                     match search_overlay_results(&service, trimmed, max_results) {
                         Ok(mut results) => {
