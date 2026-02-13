@@ -1177,6 +1177,13 @@ mod imp {
                     // On systems with "activate window on hover", WA_INACTIVE can fire
                     // without an intentional click-away. Keep overlay open in that case.
                     if !is_any_mouse_button_pressed() {
+                        if let Some(state) = state_for(hwnd) {
+                            unsafe {
+                                SetForegroundWindow(hwnd);
+                                SetFocus(state.edit_hwnd);
+                            }
+                            hide_input_caret(state.edit_hwnd);
+                        }
                         return 0;
                     }
 
