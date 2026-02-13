@@ -28,6 +28,8 @@ Exit criteria:
 Deliverables:
 - Settings UI and runtime reload
 - Usage-based ranking improvements
+- Incremental indexing path (changed-items first, bounded rebuilds)
+- Provider federation diagnostics (timings, counts, stale-prune visibility)
 - Error and recovery UX polish
 - Test coverage expansion and perf regression suite
 
@@ -40,6 +42,8 @@ Deliverables:
 - Installer and auto-update path
 - Crash reporting (opt-in) and diagnostics
 - Security review and release documentation
+- Spotlight-parity relevance and privacy hardening pass
+- Include/exclude roots controls and offline-first policy enforcement
 
 Exit criteria:
 - Public beta candidate approved

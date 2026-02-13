@@ -62,6 +62,19 @@ Known limitations in this milestone:
 - Hotkey registration changes still require process restart to apply globally.
 - Native settings UI is temporarily disabled from `?` pending design polish pass.
 
+## Spotlight-Parity Direction
+
+SwiftFind now tracks a Spotlight-like architecture direction while staying performance-first:
+
+- keep index and ranking on-device by default
+- keep overlay UI thin and move heavy work to background indexing paths
+- prefer incremental updates over full rebuilds in normal runtime
+- merge and rank multi-provider results in one deterministic list
+- preserve hard latency and memory guardrails
+
+See:
+- `docs/engineering/spotlight-parity-architecture.md`
+
 Operator steps and troubleshooting are documented in:
 - `docs/engineering/windows-operator-runbook.md`
 
