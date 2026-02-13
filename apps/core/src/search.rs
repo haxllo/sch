@@ -111,35 +111,38 @@ fn score_normalized_title(normalized_title: &str, query: &str) -> Option<i64> {
         return Some(10_000 + prefix_bonus + compact_bonus - position_penalty - length_penalty);
     }
 
-    let positions = subsequence_positions(normalized_title, query)?;
-    let start_penalty = positions[0] as i64;
-    let gap_penalty: i64 = positions
-        .windows(2)
-        .map(|pair| pair[1].saturating_sub(pair[0] + 1) as i64)
-        .sum();
+    let (start_penalty, gap_penalty) = subsequence_penalties(normalized_title, query)?;
     let length_penalty = (normalized_title.len() as i64 - query.len() as i64).max(0);
 
     Some(5_000 + (query.len() as i64) * 30 - gap_penalty * 6 - start_penalty - length_penalty)
 }
 
-fn subsequence_positions(haystack: &str, needle: &str) -> Option<Vec<usize>> {
-    let mut positions = Vec::with_capacity(needle.len());
+fn subsequence_penalties(haystack: &str, needle: &str) -> Option<(i64, i64)> {
     let mut next_start = 0;
+    let mut start_penalty: Option<i64> = None;
+    let mut previous_position: Option<usize> = None;
+    let mut gap_penalty = 0_i64;
 
     for needle_char in needle.chars() {
-        let mut found = None;
+        let mut found: Option<(usize, usize)> = None;
         for (offset, hay_char) in haystack[next_start..].char_indices() {
             if hay_char == needle_char {
                 let absolute = next_start + offset;
-                found = Some(absolute);
-                next_start = absolute + hay_char.len_utf8();
+                found = Some((absolute, hay_char.len_utf8()));
                 break;
             }
         }
 
-        let position = found?;
-        positions.push(position);
+        let (position, char_len) = found?;
+        if start_penalty.is_none() {
+            start_penalty = Some(position as i64);
+        }
+        if let Some(previous) = previous_position {
+            gap_penalty += position.saturating_sub(previous + 1) as i64;
+        }
+        previous_position = Some(position);
+        next_start = position + char_len;
     }
 
-    Some(positions)
+    Some((start_penalty.unwrap_or(0), gap_penalty))
 }
