@@ -103,6 +103,10 @@ gh release upload v0.5.0 `
   --clobber
 ```
 
+Channel and rollout policy:
+
+- See `docs/engineering/windows-update-rollout-strategy.md` for `stable`/`beta` policy, upgrade expectations, and rollback rules.
+
 ## Local Install / Uninstall Commands
 
 Run on Windows PowerShell:

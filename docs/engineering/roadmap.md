@@ -77,3 +77,16 @@ Item status:
 - Spotlight-parity hardening: in progress (ranking/UX/shortcut icon quality improved).
 - Include/exclude roots controls: not started.
 - Offline-first policy: completed by default architecture (local index/ranking path).
+
+## Phase 3 Status (Verified 2026-02-14)
+
+Item status:
+- Installer path: completed (zip artifact + Inno Setup `setup.exe` packaging flow).
+- Update strategy: completed at operations/docs level (`stable`/`beta`, upgrade, rollback policy).
+- Runtime auto-update mechanism: not implemented (intentionally deferred).
+- Crash diagnostics: completed (panic hook + runtime diagnostics logs).
+- Security review: pending final pre-beta review pass.
+- Release documentation: completed baseline with lifecycle validation and rollout strategy docs.
+- Spotlight-parity hardening: in progress (ranking/UX/shortcut icon quality improved).
+- Include/exclude roots controls: not started.
+- Offline-first policy: completed by default architecture (local index/ranking path).

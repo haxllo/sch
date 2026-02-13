@@ -295,6 +295,9 @@ Run these on a Windows host before publishing a release.
    - reinstall previous known-good setup over the newer one.
    - verify runtime starts and open/query/launch/close flow still works.
 
+Release-channel/update policy reference:
+- `docs/engineering/windows-update-rollout-strategy.md`
+
 ## Progress Update (2026-02-13)
 
 Completed from recent hardening pass:
