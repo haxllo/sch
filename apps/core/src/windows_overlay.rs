@@ -11,8 +11,7 @@ mod imp {
     };
     use windows_sys::Win32::Graphics::Dwm::{
         DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BLURBEHIND, DWMSBT_TRANSIENTWINDOW,
-        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
-        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_BB_ENABLE,
+        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_BB_ENABLE,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
@@ -69,8 +68,8 @@ mod imp {
 
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
-    const COMPACT_HEIGHT: i32 = 90;
-    const PANEL_RADIUS: i32 = 20;
+    const COMPACT_HEIGHT: i32 = 80;
+    const PANEL_RADIUS: i32 = 28;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2425,16 +2424,6 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             );
         }
-        let corner_pref = DWMWCP_ROUND;
-        unsafe {
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
-                &corner_pref as *const _ as *const c_void,
-                std::mem::size_of::<i32>() as u32,
-            );
-        }
-
         // Windows 11+: prefer transient backdrop for palette-style surfaces.
         let backdrop_type = DWMSBT_TRANSIENTWINDOW;
         let hr_backdrop = unsafe {
