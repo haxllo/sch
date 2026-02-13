@@ -11,7 +11,8 @@ mod imp {
     };
     use windows_sys::Win32::Graphics::Dwm::{
         DwmEnableBlurBehindWindow, DwmSetWindowAttribute, DWM_BLURBEHIND, DWMSBT_TRANSIENTWINDOW,
-        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE, DWM_BB_ENABLE,
+        DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_USE_IMMERSIVE_DARK_MODE,
+        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DWM_BB_ENABLE,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
@@ -116,7 +117,7 @@ mod imp {
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const OVERLAY_ALPHA_OPAQUE: u8 = 255;
-    const OVERLAY_ALPHA_VIBRANCY: u8 = 244;
+    const OVERLAY_ALPHA_VIBRANCY: u8 = 248;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
@@ -2390,6 +2391,8 @@ mod imp {
                 height.max(1),
                 SWP_NOACTIVATE,
             );
+            // Keep clipping region synced with animated size to prevent transient sharp corners.
+            apply_rounded_corners_hwnd(hwnd);
             SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
         }
     }
@@ -2419,6 +2422,15 @@ mod imp {
                 hwnd,
                 DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
                 &dark_mode_enabled as *const _ as *const c_void,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+        let corner_pref = DWMWCP_ROUND;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &corner_pref as *const _ as *const c_void,
                 std::mem::size_of::<i32>() as u32,
             );
         }
