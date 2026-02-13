@@ -8,7 +8,9 @@ use crate::discovery::{
 };
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::time::Instant;
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -62,6 +64,24 @@ pub struct CoreService {
     config: Config,
     db: Connection,
     providers: Vec<Box<dyn DiscoveryProvider>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderRefreshReport {
+    pub provider: String,
+    pub discovered: usize,
+    pub upserted: usize,
+    pub removed: usize,
+    pub elapsed_ms: u128,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRefreshReport {
+    pub indexed_total: usize,
+    pub discovered_total: usize,
+    pub upserted_total: usize,
+    pub removed_total: usize,
+    pub providers: Vec<ProviderRefreshReport>,
 }
 
 impl CoreService {
@@ -147,22 +167,92 @@ impl CoreService {
     }
 
     pub fn rebuild_index(&self) -> Result<usize, ServiceError> {
+        let report = self.rebuild_index_with_report()?;
+        Ok(report.indexed_total)
+    }
+
+    pub fn rebuild_index_with_report(&self) -> Result<IndexRefreshReport, ServiceError> {
         if self.providers.is_empty() {
-            return Ok(index_store::list_items(&self.db)?.len());
+            return Ok(IndexRefreshReport {
+                indexed_total: index_store::list_items(&self.db)?.len(),
+                discovered_total: 0,
+                upserted_total: 0,
+                removed_total: 0,
+                providers: Vec::new(),
+            });
         }
 
-        index_store::clear_items(&self.db)?;
+        let mut existing_items = index_store::list_items(&self.db)?;
+        let mut existing_by_id: HashMap<String, SearchItem> = existing_items
+            .drain(..)
+            .map(|item| (item.id.clone(), item))
+            .collect();
 
-        let mut inserted = 0_usize;
+        let mut discovered_total = 0_usize;
+        let mut upserted_total = 0_usize;
+        let mut removed_total = 0_usize;
+        let mut provider_reports = Vec::with_capacity(self.providers.len());
+
         for provider in &self.providers {
+            let started = Instant::now();
             let discovered = provider.discover()?;
+            let discovered_count = discovered.len();
+            discovered_total += discovered_count;
+
+            let mut upserted = 0_usize;
+            let mut discovered_ids = HashSet::with_capacity(discovered_count);
+
             for item in discovered {
-                index_store::upsert_item(&self.db, &item)?;
-                inserted += 1;
+                discovered_ids.insert(item.id.clone());
+                let changed = existing_by_id
+                    .get(&item.id)
+                    .map(|previous| previous != &item)
+                    .unwrap_or(true);
+                if changed {
+                    index_store::upsert_item(&self.db, &item)?;
+                    upserted += 1;
+                    upserted_total += 1;
+                }
+                existing_by_id.insert(item.id.clone(), item);
             }
+
+            // Kind-based ownership is safe for current runtime provider composition:
+            // start-menu apps own kind=app, filesystem owns kind=file/folder.
+            let removable_ids: Vec<String> = existing_by_id
+                .values()
+                .filter(|item| provider_manages_kind(provider.provider_name(), &item.kind))
+                .filter(|item| !discovered_ids.contains(&item.id))
+                .map(|item| item.id.clone())
+                .collect();
+
+            for id in &removable_ids {
+                index_store::delete_item(&self.db, id)?;
+                existing_by_id.remove(id);
+            }
+
+            removed_total += removable_ids.len();
+            provider_reports.push(ProviderRefreshReport {
+                provider: provider.provider_name().to_string(),
+                discovered: discovered_count,
+                upserted,
+                removed: removable_ids.len(),
+                elapsed_ms: started.elapsed().as_millis(),
+            });
         }
 
-        Ok(inserted)
+        let indexed_total = index_store::list_items(&self.db)?.len();
+        Ok(IndexRefreshReport {
+            indexed_total,
+            discovered_total,
+            upserted_total,
+            removed_total,
+            providers: provider_reports,
+        })
+    }
+
+    pub fn rebuild_index_incremental(&self) -> Result<usize, ServiceError> {
+        let report = self.rebuild_index_with_report()?;
+        Ok(report.indexed_total)
     }
 
     pub fn upsert_item(&self, item: &SearchItem) -> Result<(), ServiceError> {
@@ -230,4 +320,13 @@ fn looks_like_filesystem_path(path: &str) -> bool {
 
     let bytes = path.as_bytes();
     bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+fn provider_manages_kind(provider_name: &str, kind: &str) -> bool {
+    let kind = kind.to_ascii_lowercase();
+    match provider_name {
+        "start-menu-apps" | "app" => kind == "app",
+        "filesystem" | "file" => kind == "file" || kind == "folder",
+        _ => false,
+    }
 }
