@@ -70,8 +70,6 @@ mod imp {
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 72;
     const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
-    const PANEL_BORDER_THICKNESS: i32 = 2;
-    const PANEL_INNER_RADIUS_DWM: i32 = 20;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2904,25 +2902,9 @@ mod imp {
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
                 if state.dwm_rounded_enabled {
-                    // Prefer plain fills when DWM-rounded corners are active.
-                    // This avoids jagged edges from GDI round-region rasterization.
-                    FillRect(hdc, &client_rect, state.border_brush as _);
-                    if width > PANEL_BORDER_THICKNESS * 2 && height > PANEL_BORDER_THICKNESS * 2 {
-                        // Keep the inner edge of the stroke rounded as well.
-                        let inner_radius = PANEL_INNER_RADIUS_DWM.max(2);
-                        let inner_region = CreateRoundRectRgn(
-                            PANEL_BORDER_THICKNESS,
-                            PANEL_BORDER_THICKNESS,
-                            width - PANEL_BORDER_THICKNESS,
-                            height - PANEL_BORDER_THICKNESS,
-                            inner_radius,
-                            inner_radius,
-                        );
-                        FillRgn(hdc, inner_region, state.panel_brush as _);
-                        DeleteObject(inner_region as _);
-                    } else {
-                        FillRect(hdc, &client_rect, state.panel_brush as _);
-                    }
+                    // In DWM mode, let DWM draw the rounded border (anti-aliased).
+                    // We only fill panel background to avoid jagged inner rounded edges.
+                    FillRect(hdc, &client_rect, state.panel_brush as _);
                     EndPaint(hwnd, &paint);
                     return;
                 }
@@ -2991,13 +2973,13 @@ mod imp {
                 std::mem::size_of::<i32>() as u32,
             )
         };
-        // Avoid an extra rectangular non-client border over our custom rounded stroke.
-        let border_none: u32 = DWMWA_COLOR_NONE;
+        // Use DWM border in rounded mode for cleaner anti-aliased edge.
+        let border_color: u32 = COLOR_PANEL_BORDER;
         let _ = unsafe {
             DwmSetWindowAttribute(
                 hwnd,
                 DWMWA_BORDER_COLOR as u32,
-                &border_none as *const _ as *const c_void,
+                &border_color as *const _ as *const c_void,
                 std::mem::size_of::<u32>() as u32,
             )
         };
