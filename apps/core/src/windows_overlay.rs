@@ -78,8 +78,6 @@ mod imp {
     const INPUT_TOP: i32 = (COMPACT_HEIGHT - INPUT_HEIGHT) / 2;
     const INPUT_TO_LIST_GAP: i32 = 2;
     const STATUS_HEIGHT: i32 = 18;
-    const STATUS_FOOTER_HEIGHT: i32 = 13;
-    const STATUS_FOOTER_BOTTOM_GAP: i32 = 3;
     const NO_RESULTS_INLINE_WIDTH: i32 = 96;
     const ROW_HEIGHT: i32 = 56;
     const LIST_RADIUS: i32 = 16;
@@ -177,7 +175,6 @@ mod imp {
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
-    const FOOTER_HINT_TEXT: &str = "Enter open • Esc close";
     const NO_RESULTS_STATUS_TEXT: &str = "No results";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -563,7 +560,7 @@ mod imp {
                 state.status_is_error = false;
                 state.no_results_mode = false;
                 state.no_results_anim_pending = false;
-                let wide = to_wide(FOOTER_HINT_TEXT);
+                let wide = to_wide("");
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
                     InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
@@ -726,9 +723,9 @@ mod imp {
             let rows = result_count.min(MAX_VISIBLE_ROWS) as i32;
             let animate = RESULTS_ANIM_MS;
             let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
-            // Keep enough vertical space for list rows plus footer hint area.
-            // This must mirror layout_children() bottom reserve in footer mode.
-            let footer_reserve = PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP;
+            // Keep enough vertical space for list rows plus bottom breathing room.
+            // This must mirror layout_children() non-inline list bottom reserve.
+            let list_bottom_reserve = PANEL_MARGIN_X + 1;
             if let Some(state) = state_for(self.hwnd) {
                 state.expanded_rows = rows;
                 state.results_visible = true;
@@ -737,7 +734,7 @@ mod imp {
                 }
             }
 
-            let target_height = list_top + rows * ROW_HEIGHT + footer_reserve;
+            let target_height = list_top + rows * ROW_HEIGHT + list_bottom_reserve;
             self.animate_results_height(target_height, animate);
         }
 
@@ -966,7 +963,7 @@ mod imp {
                         CreateWindowExW(
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
-                            to_wide(FOOTER_HINT_TEXT).as_ptr(),
+                            to_wide("").as_ptr(),
                             WS_CHILD | WS_VISIBLE | STATIC_RIGHT_STYLE,
                             0,
                             0,
@@ -2446,34 +2443,24 @@ mod imp {
         };
         let edit_width = (input_width - help_reserved).max(120);
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
-        let footer_hint_mode = state.results_visible && !state.status_is_error;
-        if footer_hint_mode && status_len == 0 {
-            let wide = to_wide(FOOTER_HINT_TEXT);
-            unsafe {
-                SetWindowTextW(state.status_hwnd, wide.as_ptr());
-            }
-        }
-        let status_visible = footer_hint_mode || status_len > 0;
+        let status_visible = status_len > 0;
+        let footer_status_mode = state.results_visible && status_visible && !no_results_inline;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
-        let status_top = if footer_hint_mode {
-            (height - PANEL_MARGIN_X - STATUS_FOOTER_HEIGHT).max(COMPACT_HEIGHT + 2)
+        let status_top = if footer_status_mode {
+            (height - PANEL_MARGIN_X - STATUS_HEIGHT).max(COMPACT_HEIGHT + 2)
         } else if no_results_inline {
             input_top + ((INPUT_HEIGHT - STATUS_HEIGHT).max(0) / 2)
         } else {
             COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT
         };
-        let status_height = if footer_hint_mode {
-            STATUS_FOOTER_HEIGHT
-        } else {
-            STATUS_HEIGHT
-        };
+        let status_height = STATUS_HEIGHT;
 
         let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
-        let list_bottom_reserved = if footer_hint_mode {
-            PANEL_MARGIN_X + STATUS_FOOTER_HEIGHT + STATUS_FOOTER_BOTTOM_GAP
+        let list_bottom_reserved = if footer_status_mode {
+            PANEL_MARGIN_X + STATUS_HEIGHT + 3
         } else {
             PANEL_MARGIN_X + 1
         };
@@ -2975,35 +2962,54 @@ mod imp {
                     // In DWM mode, let DWM draw the rounded border (anti-aliased).
                     // We only fill panel background to avoid jagged inner rounded edges.
                     FillRect(hdc, &client_rect, state.panel_brush as _);
-                    EndPaint(hwnd, &paint);
-                    return;
-                }
-
-                // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
-                // This avoids the angular look that FrameRgn can produce at tight corner radii.
-                let outer_region =
-                    CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
-                FillRgn(hdc, outer_region, state.border_brush as _);
-
-                if width > 2 && height > 2 {
-                    let inner_radius = (PANEL_RADIUS - 2).max(2);
-                    let inner_region = CreateRoundRectRgn(
-                        1,
-                        1,
-                        width,
-                        height,
-                        inner_radius,
-                        inner_radius,
-                    );
-                    FillRgn(hdc, inner_region, state.panel_brush as _);
-                    DeleteObject(inner_region as _);
                 } else {
-                    FillRgn(hdc, outer_region, state.panel_brush as _);
+                    // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
+                    // This avoids the angular look that FrameRgn can produce at tight corner radii.
+                    let outer_region =
+                        CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
+                    FillRgn(hdc, outer_region, state.border_brush as _);
+
+                    if width > 2 && height > 2 {
+                        let inner_radius = (PANEL_RADIUS - 2).max(2);
+                        let inner_region = CreateRoundRectRgn(
+                            1,
+                            1,
+                            width,
+                            height,
+                            inner_radius,
+                            inner_radius,
+                        );
+                        FillRgn(hdc, inner_region, state.panel_brush as _);
+                        DeleteObject(inner_region as _);
+                    } else {
+                        FillRgn(hdc, outer_region, state.panel_brush as _);
+                    }
+
+                    DeleteObject(outer_region as _);
                 }
 
-                DeleteObject(outer_region as _);
+                draw_input_results_divider(hdc, width, state);
             }
             EndPaint(hwnd, &paint);
+        }
+    }
+
+    fn draw_input_results_divider(hdc: HDC, width: i32, state: &OverlayShellState) {
+        if !state.results_visible || state.row_separator_brush == 0 {
+            return;
+        }
+
+        let left = PANEL_MARGIN_X + 1;
+        let right = (width - PANEL_MARGIN_X - 1).max(left + 1);
+        let y = COMPACT_HEIGHT + (INPUT_TO_LIST_GAP / 2);
+        let divider_rect = RECT {
+            left,
+            top: y,
+            right,
+            bottom: y + 1,
+        };
+        unsafe {
+            FillRect(hdc, &divider_rect, state.row_separator_brush as _);
         }
     }
 
