@@ -1372,9 +1372,19 @@ mod imp {
 
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
+                    let selected_before =
+                        unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32 };
                     state.hover_index = next_hover;
+                    if next_hover >= 0 && next_hover != selected_before {
+                        unsafe {
+                            SendMessageW(hwnd, LB_SETCURSEL, next_hover as usize, 0);
+                        }
+                    }
+                    let selected_after = unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32 };
                     invalidate_list_row(hwnd, previous_hover);
                     invalidate_list_row(hwnd, next_hover);
+                    invalidate_list_row(hwnd, selected_before);
+                    invalidate_list_row(hwnd, selected_after);
                 }
             }
             if message == WM_LBUTTONUP && hwnd == state.list_hwnd {
@@ -1559,9 +1569,10 @@ mod imp {
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
+        let selected_visible = selected_flag && (state.hover_index < 0 || hovered);
         unsafe {
             FillRect(dis.hDC, &dis.rcItem, state.results_brush as _);
-            if selected_flag || hovered {
+            if selected_visible || hovered {
                 let row_rect = RECT {
                     left: dis.rcItem.left + 2,
                     top: dis.rcItem.top + ROW_VERTICAL_INSET + offset_y,
