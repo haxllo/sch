@@ -68,8 +68,9 @@ mod imp {
 
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
-    const COMPACT_HEIGHT: i32 = 68;
+    const COMPACT_HEIGHT: i32 = 62;
     const PANEL_RADIUS: i32 = COMPACT_HEIGHT + 10;
+    const WINDOW_OFFSET_Y: i32 = -20;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -658,7 +659,7 @@ mod imp {
             let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
             let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
             let x = (screen_width - WINDOW_WIDTH).max(0) / 2;
-            let y = (screen_height - COMPACT_HEIGHT).max(0) / 5;
+            let y = ((screen_height - COMPACT_HEIGHT).max(0) / 5 + WINDOW_OFFSET_Y).max(0);
 
             unsafe {
                 SetWindowPos(
