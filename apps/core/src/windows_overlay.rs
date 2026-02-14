@@ -76,7 +76,10 @@ mod imp {
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
     const INPUT_TOP: i32 = (COMPACT_HEIGHT - INPUT_HEIGHT) / 2;
-    const INPUT_TO_LIST_GAP: i32 = 2;
+    const DIVIDER_TOP_SPACING: i32 = 2;
+    const DIVIDER_HEIGHT: i32 = 1;
+    const DIVIDER_BOTTOM_SPACING: i32 = 3;
+    const INPUT_TO_LIST_GAP: i32 = DIVIDER_TOP_SPACING + DIVIDER_HEIGHT + DIVIDER_BOTTOM_SPACING;
     const STATUS_HEIGHT: i32 = 18;
     const NO_RESULTS_INLINE_WIDTH: i32 = 96;
     const ROW_HEIGHT: i32 = 56;
@@ -2995,21 +2998,22 @@ mod imp {
     }
 
     fn draw_input_results_divider(hdc: HDC, width: i32, state: &OverlayShellState) {
-        if !state.results_visible || state.row_separator_brush == 0 {
+        if !state.results_visible || state.border_brush == 0 {
             return;
         }
 
-        let left = PANEL_MARGIN_X + 1;
-        let right = (width - PANEL_MARGIN_X - 1).max(left + 1);
-        let y = COMPACT_HEIGHT + (INPUT_TO_LIST_GAP / 2);
+        // Draw a full divider stroke (matching panel border color) between input and results.
+        let left = 1;
+        let right = (width - 1).max(left + 1);
+        let y = COMPACT_HEIGHT + DIVIDER_TOP_SPACING;
         let divider_rect = RECT {
             left,
             top: y,
             right,
-            bottom: y + 1,
+            bottom: y + DIVIDER_HEIGHT,
         };
         unsafe {
-            FillRect(hdc, &divider_rect, state.row_separator_brush as _);
+            FillRect(hdc, &divider_rect, state.border_brush as _);
         }
     }
 
