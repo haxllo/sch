@@ -40,15 +40,16 @@ mod imp {
         SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
+        AnimateWindow, CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon,
+        DispatchMessageW,
         DrawIconEx, FindWindowW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
         GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
         GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
         PeekMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
         SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
+        ShowWindow, TranslateMessage, AW_ACTIVATE, AW_BLEND, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
+        GWLP_WNDPROC, GWL_STYLE, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
         LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
         LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
@@ -98,6 +99,7 @@ mod imp {
     const CONTROL_ID_HELP: usize = 1004;
     const CONTROL_ID_HELP_TIP: usize = 1005;
     const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
+    const STATIC_CENTER_STYLE: u32 = 0x00000001; // SS_CENTER
     const STATIC_RIGHT_STYLE: u32 = 0x00000002; // SS_RIGHT
     const EX_NOACTIVATE_STYLE: u32 = 0x08000000; // WS_EX_NOACTIVATE
 
@@ -125,6 +127,7 @@ mod imp {
     const HELP_HOVER_POLL_MS: u32 = 33;
     const ICON_CACHE_IDLE_MS: u32 = 90_000;
     const ICON_CACHE_MAX_ENTRIES: usize = 96;
+    const NO_RESULTS_FADE_MS: u32 = 85;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -233,6 +236,8 @@ mod imp {
 
         status_is_error: bool,
         no_results_mode: bool,
+        no_results_anim_pending: bool,
+        status_center_aligned: bool,
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
@@ -290,6 +295,8 @@ mod imp {
                 help_tip_border_brush: 0,
                 status_is_error: false,
                 no_results_mode: false,
+                no_results_anim_pending: false,
+                status_center_aligned: false,
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
@@ -446,9 +453,15 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 let trimmed = message.trim();
                 let status_text = trimmed;
+                let was_no_results = state.no_results_mode;
                 state.status_is_error =
                     !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
                 state.no_results_mode = trimmed.eq_ignore_ascii_case(NO_RESULTS_STATUS_TEXT);
+                if state.no_results_mode && !was_no_results {
+                    state.no_results_anim_pending = true;
+                } else if !state.no_results_mode {
+                    state.no_results_anim_pending = false;
+                }
                 state.help_tip_visible = false;
                 unsafe {
                     ShowWindow(state.help_tip_hwnd, SW_HIDE);
@@ -456,6 +469,7 @@ mod imp {
                 if trimmed.is_empty() {
                     state.help_hovered = false;
                     state.no_results_mode = false;
+                    state.no_results_anim_pending = false;
                 }
                 let wide = to_wide(status_text);
                 unsafe {
@@ -548,6 +562,7 @@ mod imp {
                 self.expand_results(rows.len());
                 state.status_is_error = false;
                 state.no_results_mode = false;
+                state.no_results_anim_pending = false;
                 let wide = to_wide(FOOTER_HINT_TEXT);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -2477,6 +2492,7 @@ mod imp {
             );
             apply_edit_text_rect(state.edit_hwnd);
             if status_visible {
+                update_status_alignment(state, no_results_inline);
                 let (status_left, status_width) = if no_results_inline {
                     (
                         PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT,
@@ -2494,8 +2510,13 @@ mod imp {
                     status_height,
                     1,
                 );
+                if no_results_inline && state.no_results_anim_pending {
+                    let _ = AnimateWindow(state.status_hwnd, NO_RESULTS_FADE_MS, AW_BLEND | AW_ACTIVATE);
+                    state.no_results_anim_pending = false;
+                }
             } else {
                 ShowWindow(state.status_hwnd, SW_HIDE);
+                update_status_alignment(state, false);
             }
             if no_results_inline {
                 state.help_hovered = false;
@@ -2558,6 +2579,25 @@ mod imp {
             );
             InvalidateRect(edit_hwnd, std::ptr::null(), 1);
         }
+    }
+
+    fn update_status_alignment(state: &mut OverlayShellState, centered: bool) {
+        if state.status_hwnd.is_null() || state.status_center_aligned == centered {
+            return;
+        }
+
+        unsafe {
+            let style = GetWindowLongPtrW(state.status_hwnd, GWL_STYLE) as u32;
+            let mut updated = style & !(STATIC_CENTER_STYLE | STATIC_RIGHT_STYLE);
+            updated |= if centered {
+                STATIC_CENTER_STYLE
+            } else {
+                STATIC_RIGHT_STYLE
+            };
+            SetWindowLongPtrW(state.status_hwnd, GWL_STYLE, updated as isize);
+            InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
+        }
+        state.status_center_aligned = centered;
     }
 
     fn compute_input_text_rect(width: i32, height: i32, line_height: i32) -> RECT {
