@@ -68,8 +68,8 @@ mod imp {
 
     // Overlay layout tokens.
     const WINDOW_WIDTH: i32 = 576;
-    const COMPACT_HEIGHT: i32 = 72;
-    const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
+    const COMPACT_HEIGHT: i32 = 68;
+    const PANEL_RADIUS: i32 = COMPACT_HEIGHT + 10;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
