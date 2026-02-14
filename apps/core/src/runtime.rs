@@ -618,25 +618,23 @@ fn abbreviate_path(path: &str) -> String {
     }
 
     let normalized = trimmed.replace('/', "\\");
-    let mut total_parts = 0usize;
-    let mut tail: Vec<&str> = Vec::with_capacity(3);
-    for segment in normalized.rsplit('\\') {
-        if segment.is_empty() {
-            continue;
-        }
-        total_parts += 1;
-        if tail.len() < 3 {
-            tail.push(segment);
-        }
-    }
-
-    if tail.is_empty() {
+    let mut parts: Vec<&str> = normalized.split('\\').filter(|s| !s.is_empty()).collect();
+    if parts.is_empty() {
         return normalized;
     }
 
-    tail.reverse();
-    let joined_tail = tail.join("\\");
-    if total_parts > 3 {
+    // Strip filesystem roots (e.g. "C:") so the subtitle remains relative-looking.
+    if parts.first().is_some_and(|part| part.ends_with(':')) {
+        parts.remove(0);
+    }
+
+    if parts.is_empty() {
+        return String::new();
+    }
+
+    let tail_count = parts.len().min(3);
+    let joined_tail = parts[parts.len() - tail_count..].join("\\");
+    if parts.len() > 3 {
         format!("...\\{joined_tail}")
     } else {
         joined_tail

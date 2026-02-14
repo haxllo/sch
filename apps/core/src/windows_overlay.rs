@@ -19,7 +19,7 @@ mod imp {
         GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC,
         SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
         DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_SEMIBOLD, HDC, OPAQUE,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE,
         OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
@@ -89,10 +89,11 @@ mod imp {
     const ROW_ICON_SIZE: i32 = 34;
     const ROW_ICON_DRAW_SIZE: i32 = 32;
     const ROW_ICON_GAP: i32 = 10;
-    const ROW_TEXT_TOP_PAD: i32 = 7;
-    const ROW_TEXT_BOTTOM_PAD: i32 = 6;
     const ROW_VERTICAL_INSET: i32 = 1;
     const ROW_ACTIVE_RADIUS: i32 = 10;
+    const ROW_TITLE_BLOCK_HEIGHT: i32 = 20;
+    const ROW_META_BLOCK_HEIGHT: i32 = 16;
+    const ROW_TEXT_LINE_GAP: i32 = 2;
 
     const CONTROL_ID_INPUT: usize = 1001;
     const CONTROL_ID_LIST: usize = 1002;
@@ -133,11 +134,11 @@ mod imp {
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
     const FONT_TITLE_HEIGHT: i32 = -15;
-    const FONT_META_HEIGHT: i32 = -13;
+    const FONT_META_HEIGHT: i32 = -12;
     const FONT_STATUS_HEIGHT: i32 = -11;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const FONT_WEIGHT_INPUT: i32 = 400;
-    const FONT_WEIGHT_TITLE: i32 = FW_SEMIBOLD as i32;
+    const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
     const FONT_WEIGHT_STATUS: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
@@ -155,8 +156,8 @@ mod imp {
     const COLOR_PANEL_BORDER: u32 = 0x00424242;
     const COLOR_INPUT_BG: u32 = COLOR_PANEL_BG;
     const COLOR_RESULTS_BG: u32 = 0x00272727;
-    const COLOR_TEXT_PRIMARY: u32 = 0x00F4F4F4;
-    const COLOR_TEXT_SECONDARY: u32 = 0x00B8B8B8;
+    const COLOR_TEXT_PRIMARY: u32 = 0x00F5F5F5;
+    const COLOR_TEXT_SECONDARY: u32 = 0x00B5B5B5;
     const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
     const COLOR_TEXT_HIGHLIGHT: u32 = 0x00FFFFFF;
     const COLOR_TEXT_HINT: u32 = 0x00BEBEBE;
@@ -1612,19 +1613,19 @@ mod imp {
             SetTextColor(dis.hDC, primary_text);
             let text_left = icon_rect.right + ROW_ICON_GAP;
             let has_meta = !row.path.trim().is_empty();
+            let text_right = dis.rcItem.right - ROW_INSET_X;
+            let text_top = if has_meta {
+                let total_height =
+                    ROW_TITLE_BLOCK_HEIGHT + ROW_TEXT_LINE_GAP + ROW_META_BLOCK_HEIGHT;
+                dis.rcItem.top + ((ROW_HEIGHT - total_height).max(0) / 2) + offset_y
+            } else {
+                dis.rcItem.top + ((ROW_HEIGHT - ROW_TITLE_BLOCK_HEIGHT).max(0) / 2) + offset_y
+            };
             let title_rect = RECT {
                 left: text_left,
-                top: if has_meta {
-                    dis.rcItem.top + ROW_TEXT_TOP_PAD + offset_y
-                } else {
-                    dis.rcItem.top + offset_y
-                },
-                right: dis.rcItem.right - ROW_INSET_X,
-                bottom: if has_meta {
-                    dis.rcItem.top + ROW_HEIGHT / 2 + offset_y
-                } else {
-                    dis.rcItem.bottom + offset_y
-                },
+                top: text_top,
+                right: text_right,
+                bottom: text_top + ROW_TITLE_BLOCK_HEIGHT,
             };
             draw_highlighted_title(
                 dis.hDC,
@@ -1640,9 +1641,9 @@ mod imp {
                 SetTextColor(dis.hDC, secondary_text);
                 let mut path_rect = RECT {
                     left: text_left,
-                    top: dis.rcItem.top + ROW_HEIGHT / 2 - 1 + offset_y,
-                    right: dis.rcItem.right - ROW_INSET_X,
-                    bottom: dis.rcItem.bottom - ROW_TEXT_BOTTOM_PAD + offset_y,
+                    top: title_rect.bottom + ROW_TEXT_LINE_GAP,
+                    right: text_right,
+                    bottom: title_rect.bottom + ROW_TEXT_LINE_GAP + ROW_META_BLOCK_HEIGHT,
                 };
                 DrawTextW(
                     dis.hDC,
