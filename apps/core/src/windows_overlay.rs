@@ -70,6 +70,7 @@ mod imp {
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 72;
     const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
+    const PANEL_BORDER_THICKNESS: i32 = 2;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2905,12 +2906,12 @@ mod imp {
                     // Prefer plain fills when DWM-rounded corners are active.
                     // This avoids jagged edges from GDI round-region rasterization.
                     FillRect(hdc, &client_rect, state.border_brush as _);
-                    if width > 2 && height > 2 {
+                    if width > PANEL_BORDER_THICKNESS * 2 && height > PANEL_BORDER_THICKNESS * 2 {
                         let inner_rect = RECT {
-                            left: 1,
-                            top: 1,
-                            right: width - 1,
-                            bottom: height - 1,
+                            left: PANEL_BORDER_THICKNESS,
+                            top: PANEL_BORDER_THICKNESS,
+                            right: width - PANEL_BORDER_THICKNESS,
+                            bottom: height - PANEL_BORDER_THICKNESS,
                         };
                         FillRect(hdc, &inner_rect, state.panel_brush as _);
                     } else {
