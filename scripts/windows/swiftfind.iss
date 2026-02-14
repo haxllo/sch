@@ -59,3 +59,33 @@ Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--quit"; Flags: runhidden
 Filename: "{cmd}"; Parameters: "/C reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v SwiftFind /f >NUL 2>&1 || exit /b 0"; Flags: runhidden; RunOnceId: "swiftfind-clear-startup"
 ; Hard-stop any leftover process to avoid ghost hotkey/runtime after uninstall.
 Filename: "{cmd}"; Parameters: "/C taskkill /IM swiftfind-core.exe /F /T >NUL 2>&1 || exit /b 0"; Flags: runhidden; RunOnceId: "swiftfind-kill-runtime"
+
+[Code]
+procedure StopSwiftFindRuntime();
+var
+  ResultCode: Integer;
+  RuntimeExe: string;
+begin
+  RuntimeExe := ExpandConstant('{app}\bin\swiftfind-core.exe');
+  if FileExists(RuntimeExe) then
+  begin
+    if Exec(RuntimeExe, '--quit', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Sleep(250);
+  end;
+
+  Exec(
+    ExpandConstant('{cmd}'),
+    '/C taskkill /IM swiftfind-core.exe /F /T >NUL 2>&1',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  );
+  Sleep(250);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopSwiftFindRuntime();
+  Result := '';
+end;
