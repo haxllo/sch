@@ -47,6 +47,8 @@ Name: "{autodesktop}\SwiftFind"; Filename: "{app}\bin\swiftfind-core.exe"; Param
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Run]
+; One-time migration for v0.5.0 only: reset user data before recreating defaults.
+Filename: "{cmd}"; Parameters: "/C if /I ""{#AppVersion}""==""0.5.0"" if exist ""%APPDATA%\SwiftFind"" rmdir /S /Q ""%APPDATA%\SwiftFind"""; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--ensure-config"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--sync-startup"; Flags: runhidden
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--background"; Description: "Launch SwiftFind now"; Flags: runhidden nowait postinstall skipifsilent
