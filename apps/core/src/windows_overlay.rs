@@ -232,6 +232,7 @@ mod imp {
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
+        dwm_rounded_enabled: bool,
         help_config_path: String,
         active_query: String,
         expanded_rows: i32,
@@ -287,6 +288,7 @@ mod imp {
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
+                dwm_rounded_enabled: false,
                 help_config_path: String::new(),
                 active_query: String::new(),
                 expanded_rows: 0,
@@ -870,7 +872,7 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
-                    let _ = try_enable_dwm_rounded_corners(hwnd);
+                    state.dwm_rounded_enabled = try_enable_dwm_rounded_corners(hwnd);
                     state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
                     state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
                     state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
@@ -2899,6 +2901,25 @@ mod imp {
             let width = client_rect.right - client_rect.left;
             let height = client_rect.bottom - client_rect.top;
             if width > 0 && height > 0 {
+                if state.dwm_rounded_enabled {
+                    // Prefer plain fills when DWM-rounded corners are active.
+                    // This avoids jagged edges from GDI round-region rasterization.
+                    FillRect(hdc, &client_rect, state.border_brush as _);
+                    if width > 2 && height > 2 {
+                        let inner_rect = RECT {
+                            left: 1,
+                            top: 1,
+                            right: width - 1,
+                            bottom: height - 1,
+                        };
+                        FillRect(hdc, &inner_rect, state.panel_brush as _);
+                    } else {
+                        FillRect(hdc, &client_rect, state.panel_brush as _);
+                    }
+                    EndPaint(hwnd, &paint);
+                    return;
+                }
+
                 // Paint border as an outer rounded fill, then paint panel fill as inner rounded fill.
                 // This avoids the angular look that FrameRgn can produce at tight corner radii.
                 let outer_region =
@@ -2928,6 +2949,14 @@ mod imp {
     }
 
     fn apply_rounded_corners_hwnd(hwnd: HWND) {
+        if let Some(state) = state_for(hwnd) {
+            if state.dwm_rounded_enabled {
+                // Let DWM own the main window corner clipping when available.
+                // Avoid SetWindowRgn here to prevent aliasing on curve edges.
+                return;
+            }
+        }
+
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
