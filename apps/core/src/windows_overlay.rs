@@ -57,7 +57,7 @@ mod imp {
         SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
         WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
         WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
-        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
+        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SETREDRAW, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
 
@@ -126,6 +126,7 @@ mod imp {
     const RESULTS_ANIM_MS: u32 = 140;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
+    const MAX_PENDING_WHEEL_DELTA: i32 = 120 * 8;
     const HELP_HOVER_POLL_MS: u32 = 33;
     const ICON_CACHE_IDLE_MS: u32 = 90_000;
     const ICON_CACHE_MAX_ENTRIES: usize = 96;
@@ -249,6 +250,7 @@ mod imp {
 
         hover_index: i32,
         wheel_delta_remainder: i32,
+        pending_wheel_delta: i32,
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
@@ -307,6 +309,7 @@ mod imp {
                 expanded_rows: 0,
                 hover_index: -1,
                 wheel_delta_remainder: 0,
+                pending_wheel_delta: 0,
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
@@ -515,6 +518,7 @@ mod imp {
                 state.active_query = self.query_text().trim().to_string();
                 state.hover_index = -1;
                 state.wheel_delta_remainder = 0;
+                state.pending_wheel_delta = 0;
                 let had_rows = !state.rows.is_empty();
 
                 if rows.is_empty() {
@@ -1219,12 +1223,11 @@ mod imp {
             }
             WM_MOUSEWHEEL => {
                 if let Some(state) = state_for(hwnd) {
-                    complete_window_animation_if_running(hwnd, state);
                     if !state.results_visible {
                         return 0;
                     }
                     if is_cursor_over_window(state.list_hwnd) {
-                        scroll_list_by_wheel(state, wparam);
+                        handle_wheel_input(state, wparam);
                     }
                     return 0;
                 }
@@ -1336,14 +1339,13 @@ mod imp {
                 }
             }
             if message == WM_MOUSEWHEEL && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd) {
-                complete_window_animation_if_running(parent, state);
                 if !state.results_visible {
                     return 0;
                 }
                 if hwnd == state.edit_hwnd && !is_cursor_over_window(state.list_hwnd) {
                     return 0;
                 }
-                scroll_list_by_wheel(state, wparam);
+                handle_wheel_input(state, wparam);
                 return 0;
             }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
@@ -1658,7 +1660,29 @@ mod imp {
         }
     }
 
-    fn scroll_list_by_wheel(state: &mut OverlayShellState, wparam: WPARAM) {
+    fn handle_wheel_input(state: &mut OverlayShellState, wparam: WPARAM) {
+        let wheel_delta = wheel_delta_from_wparam(wparam);
+        if wheel_delta == 0 {
+            return;
+        }
+
+        if let Some(anim) = state.window_anim.as_ref() {
+            if anim.hide_on_complete {
+                return;
+            }
+            state.pending_wheel_delta = (state.pending_wheel_delta + wheel_delta)
+                .clamp(-MAX_PENDING_WHEEL_DELTA, MAX_PENDING_WHEEL_DELTA);
+            return;
+        }
+
+        scroll_list_by_wheel_delta(state, wheel_delta);
+    }
+
+    fn wheel_delta_from_wparam(wparam: WPARAM) -> i32 {
+        ((wparam >> 16) & 0xFFFF) as u16 as i16 as i32
+    }
+
+    fn scroll_list_by_wheel_delta(state: &mut OverlayShellState, wheel_delta: i32) {
         let list_hwnd = state.list_hwnd;
         let count = unsafe { SendMessageW(list_hwnd, LB_GETCOUNT, 0, 0) as i32 };
         if count <= 0 {
@@ -1668,8 +1692,7 @@ mod imp {
         let current_top = unsafe { SendMessageW(list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
         let visible_rows = visible_row_capacity(list_hwnd);
         let max_top = (count - visible_rows).max(0);
-        let wheel = ((wparam >> 16) & 0xFFFF) as u16 as i16 as i32;
-        state.wheel_delta_remainder += wheel;
+        state.wheel_delta_remainder += wheel_delta;
         let notches = state.wheel_delta_remainder / 120;
         if notches == 0 {
             return;
@@ -1677,8 +1700,18 @@ mod imp {
         state.wheel_delta_remainder -= notches * 120;
 
         let target_top = (current_top - notches * WHEEL_LINES_PER_NOTCH).clamp(0, max_top);
+        if target_top == current_top {
+            return;
+        }
+        set_list_top_index_no_anim(list_hwnd, target_top);
+    }
+
+    fn set_list_top_index_no_anim(list_hwnd: HWND, target_top: i32) {
         unsafe {
+            SendMessageW(list_hwnd, WM_SETREDRAW as u32, 0, 0);
             SendMessageW(list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+            SendMessageW(list_hwnd, WM_SETREDRAW as u32, 1, 0);
+            InvalidateRect(list_hwnd, std::ptr::null(), 0);
         }
     }
 
@@ -1718,10 +1751,12 @@ mod imp {
                 ShowWindow(hwnd, SW_HIDE);
                 SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             }
+            state.pending_wheel_delta = 0;
             return;
         }
 
         layout_children(hwnd, state);
+        flush_pending_wheel_after_animation(state);
     }
 
     fn draw_highlighted_title(
@@ -2379,6 +2414,7 @@ mod imp {
                     ShowWindow(hwnd, SW_HIDE);
                     SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 }
+                state.pending_wheel_delta = 0;
             } else if !state.results_visible {
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
@@ -2386,11 +2422,23 @@ mod imp {
                 }
                 state.rows.clear();
                 state.hover_index = -1;
+                state.pending_wheel_delta = 0;
+            } else {
+                flush_pending_wheel_after_animation(state);
             }
             return false;
         }
 
         true
+    }
+
+    fn flush_pending_wheel_after_animation(state: &mut OverlayShellState) {
+        if state.pending_wheel_delta == 0 {
+            return;
+        }
+        let pending = state.pending_wheel_delta;
+        state.pending_wheel_delta = 0;
+        scroll_list_by_wheel_delta(state, pending);
     }
 
     fn apply_window_state(hwnd: HWND, left: i32, top: i32, width: i32, height: i32, alpha: u8) {
