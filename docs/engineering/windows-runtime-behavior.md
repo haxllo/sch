@@ -38,7 +38,7 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - rounded results panel; top edge flush to input section
    - bottom margin matches left/right margin
    - hover-driven row emphasis (no hard selected border)
-   - lightweight show/hide and results expansion animations with smooth scroll behavior
+   - lightweight show/hide and results expansion animations
 
 ## Runtime Host and Lifecycle
 
@@ -59,6 +59,7 @@ Known limitations in this milestone:
 
 - Launcher is native Win32 shell (not a full React/WebView overlay).
 - Animations are intentionally lightweight to prioritize runtime stability.
+- Known UI edge case: on the first mouse-wheel scroll after a fresh query update, list movement can appear briefly eased/smoothed instead of matching subsequent discrete wheel steps.
 - Runtime must remain active in its process; stopping `swiftfind-core.exe` unregisters hotkey and closes launcher.
 - Hotkey registration changes still require process restart to apply globally.
 - Native settings UI is not planned in the near term; `?` keeps config-file edit flow.

@@ -64,3 +64,4 @@ Major tasks:
 
 - [ ] Runtime auto-update mechanism (intentionally deferred)
 - [ ] Additional UWP/AppX icon edge-case polish (optional, post-stable)
+- [ ] Investigate first-wheel visual easing on fresh query updates (first scroll can look animated while later wheel steps are discrete)
