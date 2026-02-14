@@ -307,9 +307,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             selected_index = 0;
                             if current_results.is_empty() {
                                 overlay.set_results(&[], 0);
-                                overlay.set_status_text(&format!(
-                                    "No matches for '{trimmed}'. Try a broader query."
-                                ));
+                                overlay.set_status_text("No results");
                             } else {
                                 let rows = overlay_rows(&current_results);
                                 overlay.set_results(&rows, selected_index);

@@ -79,6 +79,7 @@ mod imp {
     const STATUS_HEIGHT: i32 = 18;
     const STATUS_FOOTER_HEIGHT: i32 = 13;
     const STATUS_FOOTER_BOTTOM_GAP: i32 = 3;
+    const NO_RESULTS_INLINE_WIDTH: i32 = 96;
     const ROW_HEIGHT: i32 = 56;
     const LIST_RADIUS: i32 = 16;
     const MAX_VISIBLE_ROWS: usize = 5;
@@ -174,6 +175,7 @@ mod imp {
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
     const FOOTER_HINT_TEXT: &str = "Enter open • Esc close";
+    const NO_RESULTS_STATUS_TEXT: &str = "No results";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -230,6 +232,7 @@ mod imp {
         help_tip_border_brush: isize,
 
         status_is_error: bool,
+        no_results_mode: bool,
         help_hovered: bool,
         help_tip_visible: bool,
         results_visible: bool,
@@ -286,6 +289,7 @@ mod imp {
                 help_tip_brush: 0,
                 help_tip_border_brush: 0,
                 status_is_error: false,
+                no_results_mode: false,
                 help_hovered: false,
                 help_tip_visible: false,
                 results_visible: false,
@@ -444,12 +448,14 @@ mod imp {
                 let status_text = trimmed;
                 state.status_is_error =
                     !trimmed.is_empty() && trimmed.to_ascii_lowercase().contains("error");
+                state.no_results_mode = trimmed.eq_ignore_ascii_case(NO_RESULTS_STATUS_TEXT);
                 state.help_tip_visible = false;
                 unsafe {
                     ShowWindow(state.help_tip_hwnd, SW_HIDE);
                 }
                 if trimmed.is_empty() {
                     state.help_hovered = false;
+                    state.no_results_mode = false;
                 }
                 let wide = to_wide(status_text);
                 unsafe {
@@ -541,6 +547,7 @@ mod imp {
 
                 self.expand_results(rows.len());
                 state.status_is_error = false;
+                state.no_results_mode = false;
                 let wide = to_wide(FOOTER_HINT_TEXT);
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -2416,7 +2423,12 @@ mod imp {
         }
 
         let input_width = width - PANEL_MARGIN_X * 2;
-        let help_reserved = HELP_ICON_SIZE + HELP_ICON_RIGHT_INSET + HELP_ICON_GAP_FROM_INPUT;
+        let no_results_inline = state.no_results_mode && !state.results_visible && !state.status_is_error;
+        let help_reserved = if no_results_inline {
+            NO_RESULTS_INLINE_WIDTH + HELP_ICON_GAP_FROM_INPUT
+        } else {
+            HELP_ICON_SIZE + HELP_ICON_RIGHT_INSET + HELP_ICON_GAP_FROM_INPUT
+        };
         let edit_width = (input_width - help_reserved).max(120);
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let footer_hint_mode = state.results_visible && !state.status_is_error;
@@ -2431,6 +2443,8 @@ mod imp {
         let input_top = INPUT_TOP.max(0);
         let status_top = if footer_hint_mode {
             (height - PANEL_MARGIN_X - STATUS_FOOTER_HEIGHT).max(COMPACT_HEIGHT + 2)
+        } else if no_results_inline {
+            input_top + ((INPUT_HEIGHT - STATUS_HEIGHT).max(0) / 2)
         } else {
             COMPACT_HEIGHT - PANEL_MARGIN_BOTTOM - STATUS_HEIGHT
         };
@@ -2463,26 +2477,41 @@ mod imp {
             );
             apply_edit_text_rect(state.edit_hwnd);
             if status_visible {
+                let (status_left, status_width) = if no_results_inline {
+                    (
+                        PANEL_MARGIN_X + edit_width + HELP_ICON_GAP_FROM_INPUT,
+                        NO_RESULTS_INLINE_WIDTH,
+                    )
+                } else {
+                    (PANEL_MARGIN_X, input_width)
+                };
                 ShowWindow(state.status_hwnd, SW_SHOW);
                 MoveWindow(
                     state.status_hwnd,
-                    PANEL_MARGIN_X,
+                    status_left,
                     status_top,
-                    input_width,
+                    status_width,
                     status_height,
                     1,
                 );
             } else {
                 ShowWindow(state.status_hwnd, SW_HIDE);
             }
-            MoveWindow(
-                state.help_hwnd,
-                help_left,
-                help_top,
-                HELP_ICON_SIZE,
-                HELP_ICON_SIZE,
-                1,
-            );
+            if no_results_inline {
+                state.help_hovered = false;
+                state.help_tip_visible = false;
+                ShowWindow(state.help_hwnd, SW_HIDE);
+            } else {
+                MoveWindow(
+                    state.help_hwnd,
+                    help_left,
+                    help_top,
+                    HELP_ICON_SIZE,
+                    HELP_ICON_SIZE,
+                    1,
+                );
+                ShowWindow(state.help_hwnd, SW_SHOW);
+            }
             position_help_tip_popup(state);
             apply_help_tip_rounded_corners(
                 state.help_tip_hwnd,
