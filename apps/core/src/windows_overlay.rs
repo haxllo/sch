@@ -2907,13 +2907,18 @@ mod imp {
                     // This avoids jagged edges from GDI round-region rasterization.
                     FillRect(hdc, &client_rect, state.border_brush as _);
                     if width > PANEL_BORDER_THICKNESS * 2 && height > PANEL_BORDER_THICKNESS * 2 {
-                        let inner_rect = RECT {
-                            left: PANEL_BORDER_THICKNESS,
-                            top: PANEL_BORDER_THICKNESS,
-                            right: width - PANEL_BORDER_THICKNESS,
-                            bottom: height - PANEL_BORDER_THICKNESS,
-                        };
-                        FillRect(hdc, &inner_rect, state.panel_brush as _);
+                        // Keep the inner edge of the stroke rounded as well.
+                        let inner_radius = (PANEL_RADIUS - PANEL_BORDER_THICKNESS * 2).max(2);
+                        let inner_region = CreateRoundRectRgn(
+                            PANEL_BORDER_THICKNESS,
+                            PANEL_BORDER_THICKNESS,
+                            width - PANEL_BORDER_THICKNESS,
+                            height - PANEL_BORDER_THICKNESS,
+                            inner_radius,
+                            inner_radius,
+                        );
+                        FillRgn(hdc, inner_region, state.panel_brush as _);
+                        DeleteObject(inner_region as _);
                     } else {
                         FillRect(hdc, &client_rect, state.panel_brush as _);
                     }
