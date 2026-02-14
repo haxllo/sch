@@ -14,49 +14,49 @@ mod imp {
         DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
-        DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
-        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC,
-        SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
-        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_SEMIBOLD, HDC, OPAQUE,
-        OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
+        AddFontResourceExW, BeginPaint, CreateCompatibleDC, CreateDIBSection, CreateFontW,
+        CreateRoundRectRgn, CreateSolidBrush, DeleteDC, DeleteObject, DrawTextW, EndPaint,
+        FillRect, FillRgn, FrameRgn, GetDC, GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect,
+        ReleaseDC, SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW,
+        AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION,
+        DEFAULT_CHARSET, DEFAULT_QUALITY, DIB_RGB_COLORS, DT_CENTER, DT_EDITCONTROL,
+        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, FW_SEMIBOLD,
+        HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
-        DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
+        ImageList_GetIcon, DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHParseDisplayName, SHFILEINFOW,
-        SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SYSICONINDEX,
-        SHGFI_USEFILEATTRIBUTES,
+        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW,
+        SHParseDisplayName, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON,
+        SHGFI_PIDL, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW,
         DrawIconEx, FindWindowW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
         GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
-        GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
-        PeekMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
-        SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
+        GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PeekMessageW,
+        PostMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor,
+        SetForegroundWindow, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+        TranslateMessage, UpdateLayeredWindow, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
         CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
         GWLP_WNDPROC, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
         LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
         LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
-        LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
-        SWP_NOACTIVATE,
-        SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
-        WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
-        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
-        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
+        LB_SETCURSEL, LB_SETTOPINDEX, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE,
+        SW_HIDE, SW_SHOW, ULW_ALPHA, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE,
+        WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY,
+        WM_KEYDOWN, WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE,
+        WM_NCDESTROY, WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
 
@@ -572,8 +572,12 @@ mod imp {
                 SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
             }
             let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-            let target_top =
-                target_top_index_for_selection(state.list_hwnd, clamped as i32, count as i32, current_top);
+            let target_top = target_top_index_for_selection(
+                state.list_hwnd,
+                clamped as i32,
+                count as i32,
+                current_top,
+            );
             if animate_scroll || target_top != current_top {
                 unsafe {
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
@@ -672,12 +676,11 @@ mod imp {
         }
 
         fn apply_rounded_corners(&self) {
-            apply_rounded_corners_hwnd(self.hwnd);
+            apply_rounded_corners_hwnd(self.hwnd, OVERLAY_ALPHA_OPAQUE);
         }
 
         fn hide_immediate(&self) {
             unsafe {
-                SetLayeredWindowAttributes(self.hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 ShowWindow(self.hwnd, SW_HIDE);
             }
         }
@@ -1160,7 +1163,7 @@ mod imp {
                 if let Some(state) = state_for(hwnd) {
                     layout_children(hwnd, state);
                 }
-                apply_rounded_corners_hwnd(hwnd);
+                apply_rounded_corners_hwnd(hwnd, OVERLAY_ALPHA_OPAQUE);
                 0
             }
             WM_ACTIVATE => {
@@ -1188,7 +1191,9 @@ mod imp {
                 0
             }
             WM_PAINT => {
-                draw_panel_background(hwnd);
+                if !update_overlay_layer_surface(hwnd, OVERLAY_ALPHA_OPAQUE) {
+                    draw_panel_background(hwnd);
+                }
                 0
             }
             WM_MOUSEWHEEL => {
@@ -1690,7 +1695,6 @@ mod imp {
         if anim.hide_on_complete {
             unsafe {
                 ShowWindow(hwnd, SW_HIDE);
-                SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             }
             return;
         }
@@ -2006,7 +2010,13 @@ mod imp {
     fn executable_icon_from_shortcut(shortcut_path: &str) -> Option<isize> {
         let wide_shortcut = to_wide(shortcut_path);
         let mut exe_out = vec![0u16; 260];
-        let result = unsafe { FindExecutableW(wide_shortcut.as_ptr(), std::ptr::null(), exe_out.as_mut_ptr()) };
+        let result = unsafe {
+            FindExecutableW(
+                wide_shortcut.as_ptr(),
+                std::ptr::null(),
+                exe_out.as_mut_ptr(),
+            )
+        };
         if (result as isize) <= 32 {
             return None;
         }
@@ -2023,11 +2033,7 @@ mod imp {
         let mut target: windows_sys::core::PWSTR = std::ptr::null_mut();
         let mut location: windows_sys::core::PWSTR = std::ptr::null_mut();
         let hr = unsafe {
-            HlinkResolveShortcutToString(
-                wide_shortcut.as_ptr(),
-                &mut target,
-                &mut location,
-            )
+            HlinkResolveShortcutToString(wide_shortcut.as_ptr(), &mut target, &mut location)
         };
 
         let resolved_target = pwstr_to_string_and_free(target);
@@ -2221,11 +2227,7 @@ mod imp {
         }
     }
 
-    fn log_icon_cache_metrics(
-        state: &mut OverlayShellState,
-        reason: &str,
-        cleared_entries: usize,
-    ) {
+    fn log_icon_cache_metrics(state: &mut OverlayShellState, reason: &str, cleared_entries: usize) {
         let metrics = state.icon_cache_metrics;
         if metrics.hits == 0
             && metrics.misses == 0
@@ -2351,7 +2353,6 @@ mod imp {
             if hide_on_complete {
                 unsafe {
                     ShowWindow(hwnd, SW_HIDE);
-                    SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 }
             } else if !state.results_visible {
                 unsafe {
@@ -2379,8 +2380,7 @@ mod imp {
                 SWP_NOACTIVATE,
             );
             // Keep clipping region synced with animated size to prevent transient sharp corners.
-            apply_rounded_corners_hwnd(hwnd);
-            SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+            apply_rounded_corners_hwnd(hwnd, alpha);
         }
     }
 
@@ -2395,7 +2395,6 @@ mod imp {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
-            SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
         schedule_icon_cache_idle_cleanup(hwnd);
@@ -2907,14 +2906,8 @@ mod imp {
 
                 if width > 2 && height > 2 {
                     let inner_radius = (PANEL_RADIUS - 2).max(2);
-                    let inner_region = CreateRoundRectRgn(
-                        1,
-                        1,
-                        width,
-                        height,
-                        inner_radius,
-                        inner_radius,
-                    );
+                    let inner_region =
+                        CreateRoundRectRgn(1, 1, width, height, inner_radius, inner_radius);
                     FillRgn(hdc, inner_region, state.panel_brush as _);
                     DeleteObject(inner_region as _);
                 } else {
@@ -2927,7 +2920,12 @@ mod imp {
         }
     }
 
-    fn apply_rounded_corners_hwnd(hwnd: HWND) {
+    fn apply_rounded_corners_hwnd(hwnd: HWND, alpha: u8) {
+        if update_overlay_layer_surface(hwnd, alpha) {
+            return;
+        }
+
+        // Fallback for environments where layered updates fail.
         let mut rect: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(hwnd, &mut rect);
@@ -2943,6 +2941,182 @@ mod imp {
                 CreateRoundRectRgn(0, 0, width + 1, height + 1, PANEL_RADIUS, PANEL_RADIUS);
             SetWindowRgn(hwnd, region, 1);
         }
+    }
+
+    fn update_overlay_layer_surface(hwnd: HWND, alpha: u8) -> bool {
+        let mut client_rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(hwnd, &mut client_rect);
+        }
+        let width = client_rect.right - client_rect.left;
+        let height = client_rect.bottom - client_rect.top;
+        if width <= 0 || height <= 0 {
+            return false;
+        }
+
+        render_layered_panel(hwnd, width, height, alpha)
+    }
+
+    fn render_layered_panel(hwnd: HWND, width: i32, height: i32, alpha: u8) -> bool {
+        unsafe {
+            let screen_dc = GetDC(std::ptr::null_mut());
+            if screen_dc.is_null() {
+                return false;
+            }
+
+            let memory_dc = CreateCompatibleDC(screen_dc);
+            if memory_dc.is_null() {
+                ReleaseDC(std::ptr::null_mut(), screen_dc);
+                return false;
+            }
+
+            let mut bits: *mut c_void = std::ptr::null_mut();
+            let mut bitmap_info: BITMAPINFO = std::mem::zeroed();
+            bitmap_info.bmiHeader = BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // top-down
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            };
+
+            let dib = CreateDIBSection(
+                memory_dc,
+                &bitmap_info,
+                DIB_RGB_COLORS,
+                &mut bits,
+                std::ptr::null_mut(),
+                0,
+            );
+            if dib.is_null() || bits.is_null() {
+                DeleteDC(memory_dc);
+                ReleaseDC(std::ptr::null_mut(), screen_dc);
+                return false;
+            }
+
+            let old_object = SelectObject(memory_dc, dib as _);
+            paint_panel_pixels(bits as *mut u32, width, height);
+
+            let mut window_rect: RECT = std::mem::zeroed();
+            GetWindowRect(hwnd, &mut window_rect);
+            let dst = POINT {
+                x: window_rect.left,
+                y: window_rect.top,
+            };
+            let src = POINT { x: 0, y: 0 };
+            let size = SIZE {
+                cx: width,
+                cy: height,
+            };
+            let blend = BLENDFUNCTION {
+                BlendOp: AC_SRC_OVER as u8,
+                BlendFlags: 0,
+                SourceConstantAlpha: alpha,
+                AlphaFormat: AC_SRC_ALPHA as u8,
+            };
+
+            let updated = UpdateLayeredWindow(
+                hwnd, screen_dc, &dst, &size, memory_dc, &src, 0, &blend, ULW_ALPHA,
+            ) != 0;
+
+            if old_object != 0 {
+                SelectObject(memory_dc, old_object);
+            }
+            DeleteObject(dib as _);
+            DeleteDC(memory_dc);
+            ReleaseDC(std::ptr::null_mut(), screen_dc);
+            updated
+        }
+    }
+
+    fn paint_panel_pixels(dst: *mut u32, width: i32, height: i32) {
+        if dst.is_null() || width <= 0 || height <= 0 {
+            return;
+        }
+
+        let pixel_count = (width as usize).saturating_mul(height as usize);
+        let pixels = unsafe { std::slice::from_raw_parts_mut(dst, pixel_count) };
+        let (border_r, border_g, border_b) = colorref_rgb(COLOR_PANEL_BORDER);
+        let (fill_r, fill_g, fill_b) = colorref_rgb(COLOR_PANEL_BG);
+
+        let outer_radius = (PANEL_RADIUS as f32 * 0.5).max(1.0);
+        let inner_width = (width - 2).max(0);
+        let inner_height = (height - 2).max(0);
+        let inner_radius = ((PANEL_RADIUS - 2).max(2) as f32 * 0.5).max(1.0);
+
+        let width_usize = width as usize;
+        for y in 0..height {
+            for x in 0..width {
+                let px = x as f32 + 0.5;
+                let py = y as f32 + 0.5;
+                let outer =
+                    rounded_rect_coverage(px, py, width as f32, height as f32, outer_radius);
+                if outer <= 0.0 {
+                    pixels[y as usize * width_usize + x as usize] = 0;
+                    continue;
+                }
+
+                let inner = if inner_width > 0 && inner_height > 0 {
+                    rounded_rect_coverage(
+                        px - 1.0,
+                        py - 1.0,
+                        inner_width as f32,
+                        inner_height as f32,
+                        inner_radius,
+                    )
+                } else {
+                    0.0
+                };
+                let fill_cov = inner.clamp(0.0, 1.0);
+                let border_cov = (outer - fill_cov).clamp(0.0, 1.0);
+
+                let alpha = (outer * 255.0).round().clamp(0.0, 255.0) as u8;
+                let premul_r = (border_r * border_cov + fill_r * fill_cov)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let premul_g = (border_g * border_cov + fill_g * fill_cov)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+                let premul_b = (border_b * border_cov + fill_b * fill_cov)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+
+                pixels[y as usize * width_usize + x as usize] = ((alpha as u32) << 24)
+                    | ((premul_r as u32) << 16)
+                    | ((premul_g as u32) << 8)
+                    | premul_b as u32;
+            }
+        }
+    }
+
+    fn colorref_rgb(color: u32) -> (f32, f32, f32) {
+        let r = (color & 0xFF) as f32;
+        let g = ((color >> 8) & 0xFF) as f32;
+        let b = ((color >> 16) & 0xFF) as f32;
+        (r, g, b)
+    }
+
+    fn rounded_rect_coverage(px: f32, py: f32, width: f32, height: f32, radius: f32) -> f32 {
+        if width <= 0.0 || height <= 0.0 {
+            return 0.0;
+        }
+        let r = radius.clamp(0.0, width.min(height) * 0.5);
+        let cx = width * 0.5;
+        let cy = height * 0.5;
+        let bx = (width * 0.5 - r).max(0.0);
+        let by = (height * 0.5 - r).max(0.0);
+        let qx = (px - cx).abs() - bx;
+        let qy = (py - cy).abs() - by;
+        let outside = qx.max(0.0).hypot(qy.max(0.0));
+        let inside = qx.max(qy).min(0.0);
+        let signed_distance = outside + inside - r;
+        (0.5 - signed_distance).clamp(0.0, 1.0)
     }
 
     fn try_enable_dwm_rounded_corners(hwnd: HWND) -> bool {
@@ -3200,7 +3374,12 @@ mod imp {
     }
 
     fn normalize_icon_source_path(raw: &str) -> String {
-        let mut s = raw.trim().trim_matches('"').trim_start_matches('@').trim().to_string();
+        let mut s = raw
+            .trim()
+            .trim_matches('"')
+            .trim_start_matches('@')
+            .trim()
+            .to_string();
         if s.is_empty() {
             return String::new();
         }
@@ -3226,12 +3405,14 @@ mod imp {
             return raw.to_string();
         }
         let input = to_wide(raw);
-        let required = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), std::ptr::null_mut(), 0) };
+        let required =
+            unsafe { ExpandEnvironmentStringsW(input.as_ptr(), std::ptr::null_mut(), 0) };
         if required <= 1 {
             return raw.to_string();
         }
         let mut out = vec![0u16; required as usize];
-        let written = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), out.as_mut_ptr(), required) };
+        let written =
+            unsafe { ExpandEnvironmentStringsW(input.as_ptr(), out.as_mut_ptr(), required) };
         if written <= 1 {
             return raw.to_string();
         }
