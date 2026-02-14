@@ -251,6 +251,7 @@ mod imp {
         hover_index: i32,
         wheel_delta_remainder: i32,
         pending_wheel_delta: i32,
+        suppress_next_hover_sync: bool,
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
@@ -310,6 +311,7 @@ mod imp {
                 hover_index: -1,
                 wheel_delta_remainder: 0,
                 pending_wheel_delta: 0,
+                suppress_next_hover_sync: false,
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
@@ -537,6 +539,7 @@ mod imp {
                     self.collapse_results();
                     state.hover_index = -1;
                     state.expanded_rows = 0;
+                    state.suppress_next_hover_sync = false;
                     if !state.status_is_error {
                         let wide = to_wide("");
                         unsafe {
@@ -568,6 +571,7 @@ mod imp {
                 state.status_is_error = false;
                 state.no_results_mode = false;
                 state.no_results_anim_pending = false;
+                state.suppress_next_hover_sync = true;
                 let wide = to_wide("");
                 unsafe {
                     SetWindowTextW(state.status_hwnd, wide.as_ptr());
@@ -718,6 +722,7 @@ mod imp {
                 state.results_visible = false;
                 state.expanded_rows = 0;
                 state.hover_index = -1;
+                state.suppress_next_hover_sync = false;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
@@ -751,6 +756,7 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.results_visible = false;
                 state.expanded_rows = 0;
+                state.suppress_next_hover_sync = false;
             }
         }
 
@@ -1369,6 +1375,29 @@ mod imp {
                 } else {
                     row
                 };
+
+                // During expand/collapse animation, ignore hover-driven selection sync to
+                // avoid listbox auto-scroll side effects (top row can jump out of view).
+                if state.window_anim.is_some() {
+                    if state.hover_index != -1 {
+                        let previous_hover = state.hover_index;
+                        state.hover_index = -1;
+                        invalidate_list_row(hwnd, previous_hover);
+                    }
+                    return 0;
+                }
+
+                // Ignore one initial hover pulse after a fresh results refresh so a stationary
+                // cursor does not immediately steal active row/scroll state from row 0.
+                if state.suppress_next_hover_sync {
+                    state.suppress_next_hover_sync = false;
+                    if state.hover_index != -1 {
+                        let previous_hover = state.hover_index;
+                        state.hover_index = -1;
+                        invalidate_list_row(hwnd, previous_hover);
+                    }
+                    return 0;
+                }
 
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
@@ -2426,6 +2455,7 @@ mod imp {
                     SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
                 }
                 state.pending_wheel_delta = 0;
+                state.suppress_next_hover_sync = false;
             } else if !state.results_visible {
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
@@ -2434,6 +2464,7 @@ mod imp {
                 state.rows.clear();
                 state.hover_index = -1;
                 state.pending_wheel_delta = 0;
+                state.suppress_next_hover_sync = false;
             } else {
                 flush_pending_wheel_after_animation(state);
             }
@@ -2473,6 +2504,7 @@ mod imp {
         if let Some(state) = state_for(hwnd) {
             state.help_tip_visible = false;
             state.help_hovered = false;
+            state.suppress_next_hover_sync = false;
             unsafe {
                 ShowWindow(state.help_tip_hwnd, SW_HIDE);
             }
