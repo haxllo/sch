@@ -70,7 +70,7 @@ mod imp {
     const WINDOW_WIDTH: i32 = 576;
     const COMPACT_HEIGHT: i32 = 62;
     const PANEL_RADIUS: i32 = COMPACT_HEIGHT + 10;
-    const WINDOW_OFFSET_Y: i32 = -40;
+    const WINDOW_OFFSET_Y: i32 = -80;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
