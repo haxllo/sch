@@ -71,6 +71,7 @@ mod imp {
     const COMPACT_HEIGHT: i32 = 72;
     const PANEL_RADIUS: i32 = COMPACT_HEIGHT;
     const PANEL_BORDER_THICKNESS: i32 = 2;
+    const PANEL_INNER_RADIUS_DWM: i32 = 20;
     const PANEL_MARGIN_X: i32 = 14;
     const PANEL_MARGIN_BOTTOM: i32 = 8;
     const INPUT_HEIGHT: i32 = 36;
@@ -2908,7 +2909,7 @@ mod imp {
                     FillRect(hdc, &client_rect, state.border_brush as _);
                     if width > PANEL_BORDER_THICKNESS * 2 && height > PANEL_BORDER_THICKNESS * 2 {
                         // Keep the inner edge of the stroke rounded as well.
-                        let inner_radius = (PANEL_RADIUS - PANEL_BORDER_THICKNESS * 2).max(2);
+                        let inner_radius = PANEL_INNER_RADIUS_DWM.max(2);
                         let inner_region = CreateRoundRectRgn(
                             PANEL_BORDER_THICKNESS,
                             PANEL_BORDER_THICKNESS,
