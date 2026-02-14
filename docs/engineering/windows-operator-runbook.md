@@ -161,7 +161,7 @@ Behavior details:
   - primary title line (higher contrast, semibold)
   - secondary path line (muted, ellipsized)
 - Per-item native icon rendering is used for app/file/folder rows (glyph fallback only when icon load fails).
-- Active row uses soft hover-style emphasis without a hard selection border.
+- Active row uses one soft emphasis style for both keyboard and mouse (no dual selected+hovered highlight).
 - Input focus is forced on open and text is selected for immediate re-query.
 - Results panel stays collapsed for empty query, and expands downward only after matching query text.
 - Results panel has no top gap and uses matched side/bottom spacing.
@@ -180,7 +180,7 @@ After:
 - two-line row hierarchy improves scan speed and disambiguation for similarly named items.
 - type glyph gives quick context without visual noise.
 - path line remains readable while preserving compact density.
-- selection and hover are distinct but harmonious for keyboard + mouse workflows.
+- selection and hover are unified into one active-row state for keyboard + mouse workflows.
 
 ## Manual Validation Checklist
 
@@ -208,6 +208,7 @@ Run these on a real Windows host:
    - Icons are crisp (no obvious blur) for app, file, and folder rows at your current display scale.
    - Icons render without a decorative icon backplate/border.
    - Result rows have no hard border selection box; emphasis is subtle/hover-style.
+   - Moving mouse across rows updates one active highlight and clears the previous row highlight.
    - Status line color changes for error states.
 
 ## Screenshot Notes (Before/After)
@@ -318,3 +319,4 @@ Operator note:
 - Existing validation steps remain valid.
 - Add one explicit check after update:
   - type first letter of a query and confirm first row remains visible and selectable without auto-jump.
+  - first wheel movement after query update should be discrete (3 rows/notch), without one-time easing.

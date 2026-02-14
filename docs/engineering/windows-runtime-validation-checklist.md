@@ -37,7 +37,8 @@ Expected:
 
 4. Use `ArrowDown` / `ArrowUp` to change selected result.
 - Expected: selected row changes as keys are pressed.
-- Expected: hover highlight can appear with mouse move, but wheel scroll does not randomly change keyboard selection.
+- Expected: moving mouse over rows updates the same active row state (no separate stale selected+hovered highlight).
+- Expected: first wheel movement after query update scrolls in discrete steps (3 rows per notch), without one-time easing.
 
 5. Press `Enter` on a valid result.
 - Expected: selected launch path is executed.

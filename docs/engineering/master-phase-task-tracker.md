@@ -32,6 +32,7 @@ Major tasks:
 - [x] Animation smoothness and interaction polish
 - [x] Keyboard/mouse parity hardening (Enter/Esc/Up/Down/click)
 - [x] Result dedupe + first-keystroke list stability fixes
+- [x] Deterministic first-wheel scrolling + unified hover/selection active-row behavior
 - [x] Config-file settings workflow finalized (`?` -> config.json)
 
 ## Phase 3: Beta Hardening
@@ -64,4 +65,3 @@ Major tasks:
 
 - [ ] Runtime auto-update mechanism (intentionally deferred)
 - [ ] Additional UWP/AppX icon edge-case polish (optional, post-stable)
-- [ ] Investigate first-wheel visual easing on fresh query updates (first scroll can look animated while later wheel steps are discrete)
