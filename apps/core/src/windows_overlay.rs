@@ -3025,7 +3025,7 @@ mod imp {
                 hwnd, screen_dc, &dst, &size, memory_dc, &src, 0, &blend, ULW_ALPHA,
             ) != 0;
 
-            if old_object != 0 {
+            if !old_object.is_null() {
                 SelectObject(memory_dc, old_object);
             }
             DeleteObject(dib as _);
