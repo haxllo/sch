@@ -1354,6 +1354,16 @@ mod imp {
                 handle_wheel_input(state, wparam);
                 return 0;
             }
+            if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_CHAR
+                && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
+            {
+                // Suppress default control beep for handled launcher keys.
+                // Enter submits through WM_KEYDOWN -> SWIFTFIND_WM_SUBMIT.
+                match wparam as u32 {
+                    10 | 13 | 27 => return 0, // '\n', '\r', ESC
+                    _ => {}
+                }
+            }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_SETCURSOR
                 && (hwnd == state.help_hwnd || hwnd == state.help_tip_hwnd)
             {
