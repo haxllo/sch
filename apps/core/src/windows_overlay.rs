@@ -2027,6 +2027,9 @@ mod imp {
                 if let Some(icon) = executable_icon_from_shortcut(source) {
                     return Some(icon);
                 }
+                if let Some(icon) = shortcut_shell_item_icon(source) {
+                    return Some(icon);
+                }
                 if let Some(icon) = shortcut_system_icon_without_overlay(source) {
                     return Some(icon);
                 }
@@ -2108,7 +2111,7 @@ mod imp {
         }
 
         if extracted == 0 || large_icon.is_null() {
-            None
+            shell_icon_for_existing_path(&normalized)
         } else {
             Some(large_icon as isize)
         }
@@ -2145,24 +2148,31 @@ mod imp {
         let resolved_location = pwstr_to_string_and_free(location);
 
         if hr < 0 {
-            return None;
+            return shortcut_shell_item_icon(shortcut_path);
         }
-        if !resolved_location.trim().is_empty() {
-            let (icon_path, parsed_index) = split_icon_resource_spec(resolved_location.trim());
-            if let Some(icon) = extract_icon_from_path(icon_path, parsed_index.unwrap_or(0)) {
+        let resolved_location_trimmed = resolved_location.trim();
+        if !resolved_location_trimmed.is_empty() {
+            if let Some(icon) = shell_icon_from_appsfolder_target(resolved_location_trimmed) {
                 return Some(icon);
             }
-        }
-        if is_appsfolder_target(resolved_target.trim()) {
-            if let Some(icon) = shell_icon_from_display_name(resolved_target.trim()) {
-                return Some(icon);
+            let (icon_path, parsed_index) = split_icon_resource_spec(resolved_location_trimmed);
+            let normalized_icon_path = normalize_icon_source_path(icon_path);
+            if is_icon_module_path(&normalized_icon_path) {
+                if let Some(icon) = extract_icon_from_path(&normalized_icon_path, parsed_index.unwrap_or(0)) {
+                    return Some(icon);
+                }
             }
+        }
+        if let Some(icon) = shell_icon_from_appsfolder_target(resolved_target.trim()) {
+            return Some(icon);
         }
         let normalized = normalize_icon_source_path(resolved_target.trim());
-        if normalized.is_empty() {
-            return None;
+        if !normalized.is_empty() {
+            if let Some(icon) = extract_icon_from_path(&normalized, 0) {
+                return Some(icon);
+            }
         }
-        extract_icon_from_path(&normalized, 0)
+        shortcut_shell_item_icon(shortcut_path)
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
@@ -2236,9 +2246,43 @@ mod imp {
         }
     }
 
-    fn is_appsfolder_target(target: &str) -> bool {
-        let lowered = target.trim().to_ascii_lowercase();
-        lowered.starts_with("shell:appsfolder\\") || lowered.contains("appsfolder\\")
+    fn shortcut_shell_item_icon(shortcut_path: &str) -> Option<isize> {
+        shell_icon_from_display_name(shortcut_path)
+    }
+
+    fn shell_icon_from_appsfolder_target(target: &str) -> Option<isize> {
+        for candidate in appsfolder_display_name_candidates(target) {
+            if let Some(icon) = shell_icon_from_display_name(&candidate) {
+                return Some(icon);
+            }
+        }
+        None
+    }
+
+    fn appsfolder_display_name_candidates(target: &str) -> Vec<String> {
+        let trimmed = target.trim().trim_matches('"');
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        let mut candidates = Vec::with_capacity(4);
+        candidates.push(trimmed.to_string());
+
+        let lowered = trimmed.to_ascii_lowercase();
+        if lowered.starts_with("appsfolder\\") {
+            candidates.push(format!("shell:{trimmed}"));
+        } else if lowered.starts_with("shell:appsfolder\\") {
+            candidates.push(trimmed[6..].to_string());
+        } else if let Some(index) = lowered.find("appsfolder\\") {
+            candidates.push(format!("shell:{}", &trimmed[index..]));
+        }
+
+        candidates
+    }
+
+    fn is_icon_module_path(path: &str) -> bool {
+        let lowered = path.to_ascii_lowercase();
+        lowered.ends_with(".exe") || lowered.ends_with(".dll") || lowered.ends_with(".ico")
     }
 
     fn shell_icon_from_display_name(display_name: &str) -> Option<isize> {
