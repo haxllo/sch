@@ -640,7 +640,7 @@ mod imp {
                         SendMessageW(state.list_hwnd, LB_SETCURSEL, usize::MAX, 0);
                     }
                 } else {
-                    self.set_selected_index_internal(selected_index, false);
+                    self.set_selected_index_internal(selected_index);
                 }
                 if selected_index == 0 || status_only_row {
                     unsafe {
@@ -651,10 +651,10 @@ mod imp {
         }
 
         pub fn set_selected_index(&self, selected_index: usize) {
-            self.set_selected_index_internal(selected_index, true);
+            self.set_selected_index_internal(selected_index);
         }
 
-        fn set_selected_index_internal(&self, selected_index: usize, animate_scroll: bool) {
+        fn set_selected_index_internal(&self, selected_index: usize) {
             let Some(state) = state_for(self.hwnd) else {
                 return;
             };
@@ -677,10 +677,8 @@ mod imp {
             let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
             let target_top =
                 target_top_index_for_selection(state.list_hwnd, clamped as i32, count as i32, current_top);
-            if animate_scroll || target_top != current_top {
-                unsafe {
-                    SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
-                }
+            if target_top != current_top {
+                set_list_top_index_no_anim(state.list_hwnd, target_top);
             }
             unsafe {
                 InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
