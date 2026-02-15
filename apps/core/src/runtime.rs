@@ -810,16 +810,36 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
+    let app_title_keys: std::collections::HashSet<String> = results
+        .iter()
+        .filter(|item| item.kind.eq_ignore_ascii_case("app"))
+        .filter_map(|item| {
+            let key = normalize_title_key(&item.title);
+            if key.is_empty() {
+                None
+            } else {
+                Some(key)
+            }
+        })
+        .collect();
+
     let mut seen_app_titles = std::collections::HashSet::new();
     let mut seen_other_paths = std::collections::HashSet::new();
 
     results.retain(|item| {
         if item.kind.eq_ignore_ascii_case("app") {
-            let key = item.title.trim().to_ascii_lowercase();
+            let key = normalize_title_key(&item.title);
             if key.is_empty() {
                 return true;
             }
             return seen_app_titles.insert(key);
+        }
+
+        if item.kind.eq_ignore_ascii_case("file")
+            && is_windows_shortcut_path(&item.path)
+            && app_title_keys.contains(&shortcut_base_title_key(&item.title))
+        {
+            return false;
         }
 
         let key = normalize_path_key(&item.path);
@@ -828,6 +848,27 @@ fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
         }
         seen_other_paths.insert(key)
     });
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn normalize_title_key(title: &str) -> String {
+    crate::model::normalize_for_search(title.trim())
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn shortcut_base_title_key(title: &str) -> String {
+    let trimmed = title.trim();
+    if trimmed.len() >= 4 && trimmed[trimmed.len() - 4..].eq_ignore_ascii_case(".lnk") {
+        normalize_title_key(&trimmed[..trimmed.len() - 4])
+    } else {
+        normalize_title_key(trimmed)
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn is_windows_shortcut_path(path: &str) -> bool {
+    let trimmed = path.trim();
+    trimmed.len() >= 4 && trimmed[trimmed.len() - 4..].eq_ignore_ascii_case(".lnk")
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -1286,6 +1327,25 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].id, "f1");
         assert_eq!(results[1].id, "f3");
+    }
+
+    #[test]
+    fn dedupes_lnk_file_when_matching_app_title_exists() {
+        let mut results = vec![
+            SearchItem::new("a1", "app", "Framer", "C:\\ProgramData\\Framer.lnk"),
+            SearchItem::new("f1", "file", "Framer.lnk", "C:\\Users\\Admin\\Desktop\\Framer.lnk"),
+            SearchItem::new(
+                "f2",
+                "file",
+                "Framer Notes.lnk",
+                "C:\\Users\\Admin\\Desktop\\Framer Notes.lnk",
+            ),
+        ];
+
+        dedupe_overlay_results(&mut results);
+        let ids: Vec<&str> = results.iter().map(|item| item.id.as_str()).collect();
+
+        assert_eq!(ids, vec!["a1", "f2"]);
     }
 
     #[test]
