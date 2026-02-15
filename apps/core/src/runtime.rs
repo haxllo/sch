@@ -16,7 +16,7 @@ const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
 #[cfg(target_os = "windows")]
-const STATUS_ROW_TYPE_TO_SEARCH: &str = "Type to search";
+const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
@@ -339,12 +339,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 }
                 OverlayEvent::Submit => {
                     if current_results.is_empty() {
-                        let status_text = if overlay.query_text().trim().is_empty() {
-                            STATUS_ROW_TYPE_TO_SEARCH
+                        if overlay.query_text().trim().is_empty() {
+                            set_idle_overlay_state(&overlay);
+                            overlay.show_placeholder_hint(STATUS_ROW_TYPE_TO_SEARCH);
                         } else {
-                            STATUS_ROW_NO_RESULTS
-                        };
-                        set_status_row_overlay_state(&overlay, status_text);
+                            set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
+                        }
                         return;
                     }
 
@@ -942,12 +942,14 @@ fn abbreviate_path(path: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
+    overlay.clear_placeholder_hint();
     overlay.set_results(&[], 0);
     overlay.set_status_text("");
 }
 
 #[cfg(target_os = "windows")]
 fn set_status_row_overlay_state(overlay: &NativeOverlayShell, message: &str) {
+    overlay.clear_placeholder_hint();
     let rows = [OverlayRow {
         kind: "status".to_string(),
         title: message.to_string(),
