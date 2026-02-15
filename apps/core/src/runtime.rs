@@ -310,8 +310,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             current_results = results;
                             selected_index = 0;
                             if current_results.is_empty() {
-                                overlay.set_results(&[], 0);
-                                overlay.set_status_text("No results");
+                                set_no_results_overlay_state(&overlay);
                             } else {
                                 let rows = overlay_rows(&current_results);
                                 overlay.set_results(&rows, selected_index);
@@ -336,7 +335,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 }
                 OverlayEvent::Submit => {
                     if current_results.is_empty() {
-                        overlay.set_status_text("No launchable result selected.");
+                        set_no_results_overlay_state(&overlay);
                         return;
                     }
 
@@ -935,6 +934,18 @@ fn abbreviate_path(path: &str) -> String {
 #[cfg(target_os = "windows")]
 fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
     overlay.set_results(&[], 0);
+    overlay.set_status_text("");
+}
+
+#[cfg(target_os = "windows")]
+fn set_no_results_overlay_state(overlay: &NativeOverlayShell) {
+    let rows = [OverlayRow {
+        kind: "status".to_string(),
+        title: "No results".to_string(),
+        path: String::new(),
+        icon_path: String::new(),
+    }];
+    overlay.set_results(&rows, 0);
     overlay.set_status_text("");
 }
 

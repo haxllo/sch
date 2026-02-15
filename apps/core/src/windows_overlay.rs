@@ -181,6 +181,7 @@ mod imp {
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
     const NO_RESULTS_STATUS_TEXT: &str = "No results";
+    const STATUS_ROW_KIND: &str = "status";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -578,8 +579,16 @@ mod imp {
                     InvalidateRect(state.status_hwnd, std::ptr::null(), 1);
                 }
                 layout_children(self.hwnd, state);
-                self.set_selected_index_internal(selected_index, false);
-                if selected_index == 0 {
+                let status_only_row =
+                    rows.len() == 1 && is_status_row_kind(rows[0].kind.as_str());
+                if status_only_row {
+                    unsafe {
+                        SendMessageW(state.list_hwnd, LB_SETCURSEL, usize::MAX, 0);
+                    }
+                } else {
+                    self.set_selected_index_internal(selected_index, false);
+                }
+                if selected_index == 0 || status_only_row {
                     unsafe {
                         SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     }
@@ -1382,6 +1391,8 @@ mod imp {
                 let count = unsafe { SendMessageW(hwnd, LB_GETCOUNT, 0, 0) as i32 };
                 let next_hover = if outside || count <= 0 || row < 0 || row >= count {
                     -1
+                } else if row_is_status(state, row as usize) {
+                    -1
                 } else {
                     row
                 };
@@ -1436,6 +1447,12 @@ mod imp {
                     let row = (hit & 0xFFFF) as i32;
                     let outside = ((hit >> 16) & 0xFFFF) != 0;
                     if !outside && row >= 0 && row < count {
+                        if row_is_status(state, row as usize) {
+                            unsafe {
+                                SendMessageW(hwnd, LB_SETCURSEL, usize::MAX, 0);
+                            }
+                            return 0;
+                        }
                         unsafe {
                             SendMessageW(hwnd, LB_SETCURSEL, row as usize, 0);
                             PostMessageW(parent, SWIFTFIND_WM_SUBMIT, 0, 0);
@@ -1605,13 +1622,14 @@ mod imp {
             });
 
         let offset_y = 0;
+        let status_row = is_status_row_kind(row.kind.as_str());
 
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
-        let selected_visible = selected_flag && (state.hover_index < 0 || hovered);
+        let selected_visible = !status_row && selected_flag && (state.hover_index < 0 || hovered);
         unsafe {
             FillRect(dis.hDC, &dis.rcItem, state.results_brush as _);
-            if selected_visible || hovered {
+            if !status_row && (selected_visible || hovered) {
                 let row_rect = RECT {
                     left: dis.rcItem.left + 2,
                     top: dis.rcItem.top + ROW_VERTICAL_INSET + offset_y,
@@ -1648,22 +1666,25 @@ mod imp {
             let highlight_text = COLOR_TEXT_HIGHLIGHT;
             SetTextColor(dis.hDC, primary_text);
 
-            let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
-            if !icon_drawn {
-                FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
-                let mut icon_text_rect = icon_rect;
-                SetTextColor(dis.hDC, COLOR_ICON_TEXT);
-                DrawTextW(
-                    dis.hDC,
-                    to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
-                    -1,
-                    &mut icon_text_rect,
-                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-                );
-            }
-
-            SetTextColor(dis.hDC, primary_text);
-            let text_left = icon_rect.right + ROW_ICON_GAP;
+            let text_left = if status_row {
+                dis.rcItem.left + ROW_INSET_X
+            } else {
+                let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
+                if !icon_drawn {
+                    FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
+                    let mut icon_text_rect = icon_rect;
+                    SetTextColor(dis.hDC, COLOR_ICON_TEXT);
+                    DrawTextW(
+                        dis.hDC,
+                        to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
+                        -1,
+                        &mut icon_text_rect,
+                        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                    );
+                }
+                SetTextColor(dis.hDC, primary_text);
+                icon_rect.right + ROW_ICON_GAP
+            };
             let has_meta = !row.path.trim().is_empty();
             let text_right = dis.rcItem.right - ROW_INSET_X;
             let text_top = if has_meta {
@@ -1673,22 +1694,33 @@ mod imp {
             } else {
                 dis.rcItem.top + ((ROW_HEIGHT - ROW_TITLE_BLOCK_HEIGHT).max(0) / 2) + offset_y
             };
-            let title_rect = RECT {
+            let mut title_rect = RECT {
                 left: text_left,
                 top: text_top,
                 right: text_right,
                 bottom: text_top + ROW_TITLE_BLOCK_HEIGHT,
             };
-            draw_highlighted_title(
-                dis.hDC,
-                &title_rect,
-                &row.title,
-                &state.active_query,
-                primary_text,
-                highlight_text,
-            );
+            if status_row {
+                SetTextColor(dis.hDC, secondary_text);
+                DrawTextW(
+                    dis.hDC,
+                    to_wide(&row.title).as_ptr(),
+                    -1,
+                    &mut title_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                );
+            } else {
+                draw_highlighted_title(
+                    dis.hDC,
+                    &title_rect,
+                    &row.title,
+                    &state.active_query,
+                    primary_text,
+                    highlight_text,
+                );
+            }
 
-            if has_meta {
+            if has_meta && !status_row {
                 SelectObject(dis.hDC, state.meta_font as _);
                 SetTextColor(dis.hDC, secondary_text);
                 let mut path_rect = RECT {
@@ -1708,6 +1740,17 @@ mod imp {
 
             SelectObject(dis.hDC, old_font);
         }
+    }
+
+    fn is_status_row_kind(kind: &str) -> bool {
+        kind.eq_ignore_ascii_case(STATUS_ROW_KIND)
+    }
+
+    fn row_is_status(state: &OverlayShellState, index: usize) -> bool {
+        state
+            .rows
+            .get(index)
+            .is_some_and(|row| is_status_row_kind(row.kind.as_str()))
     }
 
     fn handle_wheel_input(state: &mut OverlayShellState, wparam: WPARAM) {
