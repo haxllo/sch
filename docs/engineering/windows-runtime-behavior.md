@@ -44,11 +44,12 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
 
 - `--background`: starts detached background runtime process.
 - `--foreground`: explicit attached mode (primarily for debugging).
-- `--status`: reports whether an existing instance is running.
-- `--quit`: signals existing instance to close.
-- `--restart`: signals existing instance to close, then starts runtime again.
+- `--status`: reports `running`, `stopped`, or degraded runtime state.
+- `--quit`: attempts graceful quit, then force-terminates stuck runtime if needed.
+- `--restart`: stops runtime (graceful + fallback) and starts again.
 - `--ensure-config`: creates config template if missing.
 - `--sync-startup`: applies `launch_at_startup` from config to Windows Run key.
+- `--diagnostics-bundle`: writes support bundle under `%APPDATA%\SwiftFind\support`.
 
 Single-instance behavior:
 

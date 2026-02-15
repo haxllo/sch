@@ -54,15 +54,17 @@ swiftfind-core.exe --quit
 swiftfind-core.exe --restart
 swiftfind-core.exe --ensure-config
 swiftfind-core.exe --sync-startup
+swiftfind-core.exe --diagnostics-bundle
 ```
 
 Notes:
 
-- `--status` reports whether an instance window is active.
-- `--quit` signals the running instance to close.
-- `--restart` signals quit then starts again.
+- `--status` reports running/stopped and degraded process-without-window state.
+- `--quit` attempts graceful stop and falls back to force stop if runtime is stuck.
+- `--restart` performs the same stop flow then starts runtime again.
 - `--ensure-config` creates `%APPDATA%\SwiftFind\config.json` if missing.
 - `--sync-startup` applies `launch_at_startup` from config to HKCU Run.
+- `--diagnostics-bundle` writes a support bundle with summary, sanitized config, and recent logs.
 
 ## Default Hotkey and Config
 
