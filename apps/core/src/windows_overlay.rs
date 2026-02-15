@@ -2027,9 +2027,6 @@ mod imp {
                 if let Some(icon) = executable_icon_from_shortcut(source) {
                     return Some(icon);
                 }
-                if let Some(icon) = shortcut_shell_item_icon(source) {
-                    return Some(icon);
-                }
                 if let Some(icon) = shortcut_system_icon_without_overlay(source) {
                     return Some(icon);
                 }
@@ -2111,7 +2108,7 @@ mod imp {
         }
 
         if extracted == 0 || large_icon.is_null() {
-            shell_icon_for_existing_path(&normalized)
+            None
         } else {
             Some(large_icon as isize)
         }
@@ -2148,7 +2145,7 @@ mod imp {
         let resolved_location = pwstr_to_string_and_free(location);
 
         if hr < 0 {
-            return shortcut_shell_item_icon(shortcut_path);
+            return None;
         }
         let resolved_location_trimmed = resolved_location.trim();
         if !resolved_location_trimmed.is_empty() {
@@ -2172,7 +2169,7 @@ mod imp {
                 return Some(icon);
             }
         }
-        shortcut_shell_item_icon(shortcut_path)
+        None
     }
 
     fn shell_icon_for_existing_path(path: &str) -> Option<isize> {
@@ -2244,10 +2241,6 @@ mod imp {
         } else {
             Some(icon as isize)
         }
-    }
-
-    fn shortcut_shell_item_icon(shortcut_path: &str) -> Option<isize> {
-        shell_icon_from_display_name(shortcut_path)
     }
 
     fn shell_icon_from_appsfolder_target(target: &str) -> Option<isize> {
