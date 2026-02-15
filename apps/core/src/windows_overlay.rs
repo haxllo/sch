@@ -671,16 +671,17 @@ mod imp {
                 }
                 return;
             };
-            unsafe {
-                SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
-            }
             let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
             let target_top =
                 target_top_index_for_selection(state.list_hwnd, clamped as i32, count as i32, current_top);
-            if target_top != current_top {
-                set_list_top_index_no_anim(state.list_hwnd, target_top);
-            }
             unsafe {
+                // Avoid default listbox "scroll into view" animation on keyboard selection changes.
+                SendMessageW(state.list_hwnd, WM_SETREDRAW as u32, 0, 0);
+                if target_top != current_top {
+                    SendMessageW(state.list_hwnd, LB_SETTOPINDEX, target_top as usize, 0);
+                }
+                SendMessageW(state.list_hwnd, LB_SETCURSEL, clamped, 0);
+                SendMessageW(state.list_hwnd, WM_SETREDRAW as u32, 1, 0);
                 InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
             }
         }
