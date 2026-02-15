@@ -1735,8 +1735,6 @@ mod imp {
         let offset_y = 0;
         let status_row = matches!(row.role, OverlayRowRole::Status);
         let section_row = matches!(row.role, OverlayRowRole::Header);
-        let top_hit_row = matches!(row.role, OverlayRowRole::TopHit);
-
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
         let selected_visible =
@@ -1764,37 +1762,6 @@ mod imp {
                 );
                 SelectObject(dis.hDC, old_font);
                 return;
-            }
-
-            if top_hit_row {
-                let card_rect = RECT {
-                    left: dis.rcItem.left + 2,
-                    top: dis.rcItem.top + ROW_VERTICAL_INSET + offset_y,
-                    right: dis.rcItem.right - 2,
-                    bottom: dis.rcItem.bottom - ROW_VERTICAL_INSET + offset_y,
-                };
-                let region = CreateRoundRectRgn(
-                    card_rect.left,
-                    card_rect.top,
-                    card_rect.right,
-                    card_rect.bottom,
-                    ROW_ACTIVE_RADIUS,
-                    ROW_ACTIVE_RADIUS,
-                );
-                let fill_brush = CreateSolidBrush(COLOR_TOP_HIT_BG);
-                FillRgn(dis.hDC, region, fill_brush);
-                DeleteObject(fill_brush as _);
-                DeleteObject(region as _);
-
-                let accent_rect = RECT {
-                    left: card_rect.left + 2,
-                    top: card_rect.top + 4,
-                    right: card_rect.left + 4,
-                    bottom: card_rect.bottom - 4,
-                };
-                let accent_brush = CreateSolidBrush(COLOR_TOP_HIT_ACCENT);
-                FillRect(dis.hDC, &accent_rect, accent_brush);
-                DeleteObject(accent_brush as _);
             }
 
             if !status_row && (selected_visible || hovered) {
