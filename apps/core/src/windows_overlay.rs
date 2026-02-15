@@ -761,7 +761,7 @@ mod imp {
             let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
             let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
             let x = (screen_width - WINDOW_WIDTH).max(0) / 2;
-            let y = ((screen_height - COMPACT_HEIGHT).max(0) / 3 + WINDOW_OFFSET_Y).max(0);
+            let y = ((screen_height - COMPACT_HEIGHT).max(0) / 4 + WINDOW_OFFSET_Y).max(0);
 
             unsafe {
                 SetWindowPos(
