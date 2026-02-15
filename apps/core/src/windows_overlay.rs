@@ -178,8 +178,6 @@ mod imp {
     const COLOR_ROW_HOVER: u32 = 0x00313131;
     const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
     const COLOR_SELECTION_ACCENT: u32 = 0x00343434;
-    const COLOR_TOP_HIT_BG: u32 = 0x00343434;
-    const COLOR_TOP_HIT_ACCENT: u32 = 0x004A4A4A;
     const COLOR_ICON_BG: u32 = 0x001D1D1D;
     const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
     const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
@@ -1868,7 +1866,7 @@ mod imp {
             if has_meta && !status_row {
                 SelectObject(dis.hDC, state.meta_font as _);
                 SetTextColor(dis.hDC, secondary_text);
-                let mut path_rect = RECT {
+                let path_rect = RECT {
                     left: text_left,
                     top: title_rect.bottom + ROW_TEXT_LINE_GAP,
                     right: text_right,
