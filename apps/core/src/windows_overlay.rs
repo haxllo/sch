@@ -118,7 +118,6 @@ mod imp {
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
     const TIMER_HELP_HOVER: usize = 0xBEF3;
     const TIMER_ICON_CACHE_IDLE: usize = 0xBEF4;
-    const TIMER_PLACEHOLDER_HINT: usize = 0xBEF5;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
@@ -132,7 +131,6 @@ mod imp {
     const ICON_CACHE_IDLE_MS: u32 = 90_000;
     const ICON_CACHE_MAX_ENTRIES: usize = 96;
     const NO_RESULTS_FADE_MS: u32 = 85;
-    const PLACEHOLDER_HINT_MS: u32 = 800;
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -509,14 +507,6 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 state.placeholder_hint = message.trim().to_string();
                 unsafe {
-                    KillTimer(self.hwnd, TIMER_PLACEHOLDER_HINT);
-                }
-                if !state.placeholder_hint.is_empty() {
-                    unsafe {
-                        SetTimer(self.hwnd, TIMER_PLACEHOLDER_HINT, PLACEHOLDER_HINT_MS, None);
-                    }
-                }
-                unsafe {
                     InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                 }
             }
@@ -526,9 +516,6 @@ mod imp {
             if let Some(state) = state_for(self.hwnd) {
                 let had_hint = !state.placeholder_hint.is_empty();
                 state.placeholder_hint.clear();
-                unsafe {
-                    KillTimer(self.hwnd, TIMER_PLACEHOLDER_HINT);
-                }
                 if had_hint {
                     unsafe {
                         InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
@@ -1145,7 +1132,6 @@ mod imp {
                         if !state.placeholder_hint.is_empty() {
                             state.placeholder_hint.clear();
                             unsafe {
-                                KillTimer(hwnd, TIMER_PLACEHOLDER_HINT);
                                 InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                             }
                         }
@@ -1326,19 +1312,6 @@ mod imp {
                         }
                     }
                 }
-                if wparam == TIMER_PLACEHOLDER_HINT {
-                    if let Some(state) = state_for(hwnd) {
-                        if !state.placeholder_hint.is_empty() {
-                            state.placeholder_hint.clear();
-                            unsafe {
-                                InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
-                            }
-                        }
-                    }
-                    unsafe {
-                        KillTimer(hwnd, TIMER_PLACEHOLDER_HINT);
-                    }
-                }
                 0
             }
             WM_CLOSE => {
@@ -1357,7 +1330,6 @@ mod imp {
                 unsafe {
                     KillTimer(hwnd, TIMER_HELP_HOVER);
                     KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
-                    KillTimer(hwnd, TIMER_PLACEHOLDER_HINT);
                 }
                 let state_ptr =
                     unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
@@ -2669,7 +2641,6 @@ mod imp {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
-            KillTimer(hwnd, TIMER_PLACEHOLDER_HINT);
             SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }

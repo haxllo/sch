@@ -37,7 +37,7 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - no results panel shown when query is empty
    - results panel expands downward when query has matches
    - no-match searches show a single non-launchable `No results` row in the results area
-   - empty-query `Enter` keeps compact state and shows `Start typing to search` as a transient input placeholder hint
+   - empty-query `Enter` keeps compact state and shows `Start typing to search` in the input placeholder until input changes
    - panel background `#272727` with border `#424242`
    - structured two-line result rows (`title` + `path`) with native Windows/file-type icons
    - rounded results panel; top edge flush to input section
