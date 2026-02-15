@@ -8,7 +8,7 @@ use crate::overlay_state::{HotkeyAction, OverlayState};
 #[cfg(target_os = "windows")]
 use crate::windows_overlay::{
     is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
-    NativeOverlayShell, OverlayEvent, OverlayRow,
+    NativeOverlayShell, OverlayEvent, OverlayRow, OverlayRowRole,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -805,15 +805,81 @@ fn runtime_mode() -> &'static str {
 
 #[cfg(target_os = "windows")]
 fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
-    results
-        .iter()
-        .map(|item| OverlayRow {
-            kind: item.kind.clone(),
-            title: item.title.clone(),
-            path: overlay_subtitle(item),
-            icon_path: item.path.clone(),
-        })
-        .collect()
+    if results.is_empty() {
+        return Vec::new();
+    }
+
+    let mut rows = Vec::new();
+    rows.push(section_header_row("Top Hit"));
+    rows.push(result_row(&results[0], 0, OverlayRowRole::TopHit));
+
+    let mut app_indices = Vec::new();
+    let mut file_indices = Vec::new();
+    let mut action_indices = Vec::new();
+    let mut other_indices = Vec::new();
+
+    for (index, item) in results.iter().enumerate().skip(1) {
+        if item.kind.eq_ignore_ascii_case("app") {
+            app_indices.push(index);
+        } else if item.kind.eq_ignore_ascii_case("file") || item.kind.eq_ignore_ascii_case("folder")
+        {
+            file_indices.push(index);
+        } else if item.kind.eq_ignore_ascii_case("action") {
+            action_indices.push(index);
+        } else {
+            other_indices.push(index);
+        }
+    }
+
+    append_group_rows(&mut rows, "Applications", &app_indices, results);
+    append_group_rows(&mut rows, "Files", &file_indices, results);
+    append_group_rows(&mut rows, "Actions", &action_indices, results);
+    append_group_rows(&mut rows, "Other", &other_indices, results);
+    rows
+}
+
+#[cfg(target_os = "windows")]
+fn append_group_rows(
+    rows: &mut Vec<OverlayRow>,
+    header: &str,
+    indices: &[usize],
+    results: &[crate::model::SearchItem],
+) {
+    if indices.is_empty() {
+        return;
+    }
+    rows.push(section_header_row(header));
+    for index in indices {
+        rows.push(result_row(
+            &results[*index],
+            *index,
+            OverlayRowRole::Item,
+        ));
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn section_header_row(title: &str) -> OverlayRow {
+    OverlayRow {
+        role: OverlayRowRole::Header,
+        result_index: -1,
+        kind: "section".to_string(),
+        title: title.to_string(),
+        path: String::new(),
+        icon_path: String::new(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn result_row(item: &crate::model::SearchItem, result_index: usize, role: OverlayRowRole) -> OverlayRow {
+    OverlayRow {
+        role,
+        result_index: result_index as i32,
+        kind: item.kind.clone(),
+        title: item.title.clone(),
+        path: overlay_subtitle(item),
+        icon_path: item.path.clone(),
+    }
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -951,6 +1017,8 @@ fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
 fn set_status_row_overlay_state(overlay: &NativeOverlayShell, message: &str) {
     overlay.clear_placeholder_hint();
     let rows = [OverlayRow {
+        role: OverlayRowRole::Status,
+        result_index: -1,
         kind: "status".to_string(),
         title: message.to_string(),
         path: String::new(),
