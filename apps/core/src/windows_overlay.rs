@@ -1818,12 +1818,7 @@ mod imp {
                 DeleteObject(region as _);
             }
 
-            let row_title_font = if top_hit_row {
-                state.top_hit_font
-            } else {
-                state.title_font
-            };
-            let old_font = SelectObject(dis.hDC, row_title_font as _);
+            let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             let primary_text = COLOR_TEXT_PRIMARY;
             let secondary_text = COLOR_TEXT_SECONDARY;
@@ -1833,7 +1828,7 @@ mod imp {
             let has_meta = !row.path.trim().is_empty();
             let text_right = dis.rcItem.right - ROW_INSET_X;
             let text_left = if status_row {
-                dis.rcItem.left + ROW_INSET_X + ROW_ICON_SIZE + ROW_ICON_GAP
+                dis.rcItem.left + ROW_INSET_X
             } else {
                 let text_top = if has_meta {
                     let total_height =
