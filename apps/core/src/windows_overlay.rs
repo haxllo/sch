@@ -1707,7 +1707,7 @@ mod imp {
                     to_wide(&row.title).as_ptr(),
                     -1,
                     &mut title_rect,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
                 );
             } else {
                 draw_highlighted_title(

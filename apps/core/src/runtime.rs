@@ -13,6 +13,10 @@ use crate::windows_overlay::{
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
+#[cfg(target_os = "windows")]
+const STATUS_ROW_NO_RESULTS: &str = "No results";
+#[cfg(target_os = "windows")]
+const STATUS_ROW_TYPE_TO_SEARCH: &str = "Type to search";
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
@@ -310,7 +314,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             current_results = results;
                             selected_index = 0;
                             if current_results.is_empty() {
-                                set_no_results_overlay_state(&overlay);
+                                set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
                             } else {
                                 let rows = overlay_rows(&current_results);
                                 overlay.set_results(&rows, selected_index);
@@ -335,7 +339,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 }
                 OverlayEvent::Submit => {
                     if current_results.is_empty() {
-                        set_no_results_overlay_state(&overlay);
+                        let status_text = if overlay.query_text().trim().is_empty() {
+                            STATUS_ROW_TYPE_TO_SEARCH
+                        } else {
+                            STATUS_ROW_NO_RESULTS
+                        };
+                        set_status_row_overlay_state(&overlay, status_text);
                         return;
                     }
 
@@ -938,10 +947,10 @@ fn set_idle_overlay_state(overlay: &NativeOverlayShell) {
 }
 
 #[cfg(target_os = "windows")]
-fn set_no_results_overlay_state(overlay: &NativeOverlayShell) {
+fn set_status_row_overlay_state(overlay: &NativeOverlayShell, message: &str) {
     let rows = [OverlayRow {
         kind: "status".to_string(),
-        title: "No results".to_string(),
+        title: message.to_string(),
         path: String::new(),
         icon_path: String::new(),
     }];
