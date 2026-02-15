@@ -80,6 +80,7 @@ pub enum RuntimeCommand {
     Restart,
     EnsureConfig,
     SyncStartup,
+    DiagnosticsBundle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,9 +109,10 @@ pub fn parse_cli_args(args: &[String]) -> Result<RuntimeOptions, String> {
             "--restart" => options.command = RuntimeCommand::Restart,
             "--ensure-config" => options.command = RuntimeCommand::EnsureConfig,
             "--sync-startup" => options.command = RuntimeCommand::SyncStartup,
+            "--diagnostics-bundle" => options.command = RuntimeCommand::DiagnosticsBundle,
             "--help" | "-h" => {
                 return Err(
-                    "usage: swiftfind-core [--background|--foreground] [--status|--quit|--restart|--ensure-config|--sync-startup]".to_string(),
+                    "usage: swiftfind-core [--background|--foreground] [--status|--quit|--restart|--ensure-config|--sync-startup|--diagnostics-bundle]".to_string(),
                 )
             }
             unknown => return Err(format!("unknown argument: {unknown}")),
@@ -146,6 +148,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         RuntimeCommand::Restart => return command_restart(),
         RuntimeCommand::EnsureConfig => return command_ensure_config(),
         RuntimeCommand::SyncStartup => return command_sync_startup(),
+        RuntimeCommand::DiagnosticsBundle => return command_diagnostics_bundle(),
         RuntimeCommand::Run => {}
     }
 
@@ -409,11 +412,24 @@ fn command_sync_startup() -> Result<(), RuntimeError> {
 fn command_status() -> Result<(), RuntimeError> {
     #[cfg(target_os = "windows")]
     {
-        let running = is_instance_window_present();
+        let state = inspect_runtime_process_state();
+        let running = state.has_overlay_window;
         log_info(&format!(
             "[swiftfind-core] status: {}",
-            if running { "running" } else { "stopped" }
+            if running {
+                "running"
+            } else if !state.other_runtime_pids.is_empty() {
+                "degraded (process without overlay window)"
+            } else {
+                "stopped"
+            }
         ));
+        if !state.other_runtime_pids.is_empty() {
+            log_warn(&format!(
+                "[swiftfind-core] status detected runtime_pids_without_window={:?} recommendation=run --restart",
+                state.other_runtime_pids
+            ));
+        }
         if let Some(snapshot) = load_status_diagnostics_snapshot() {
             if let Some(line) = snapshot.startup_index_line {
                 log_info(&format!("[swiftfind-core] status last_indexing {line}"));
@@ -433,6 +449,16 @@ fn command_status() -> Result<(), RuntimeError> {
         log_info("[swiftfind-core] status: unsupported on this platform");
         Ok(())
     }
+}
+
+fn command_diagnostics_bundle() -> Result<(), RuntimeError> {
+    let cfg = config::load(None)?;
+    let output_dir = write_diagnostics_bundle(&cfg)?;
+    log_info(&format!(
+        "[swiftfind-core] diagnostics bundle written to {}",
+        output_dir.display()
+    ));
+    Ok(())
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -480,16 +506,24 @@ fn latest_line_with_token(content: &str, token: &str) -> Option<String> {
 fn command_quit() -> Result<(), RuntimeError> {
     #[cfg(target_os = "windows")]
     {
-        let signaled = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
-        log_info(&format!(
-            "[swiftfind-core] quit signal {}",
-            if signaled {
-                "sent"
-            } else {
-                "skipped (not running)"
+        match stop_runtime_instance(std::time::Duration::from_secs(3))? {
+            StopRuntimeOutcome::AlreadyStopped => {
+                log_info("[swiftfind-core] quit skipped (not running)");
+                Ok(())
             }
-        ));
-        return Ok(());
+            StopRuntimeOutcome::Graceful => {
+                log_info("[swiftfind-core] quit completed (graceful)");
+                Ok(())
+            }
+            StopRuntimeOutcome::Forced => {
+                log_warn("[swiftfind-core] quit required forced process termination");
+                Ok(())
+            }
+            StopRuntimeOutcome::Failed => Err(RuntimeError::Overlay(
+                "quit failed: runtime is still active after graceful and forced attempts"
+                    .to_string(),
+            )),
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -502,17 +536,232 @@ fn command_quit() -> Result<(), RuntimeError> {
 fn command_restart() -> Result<(), RuntimeError> {
     #[cfg(target_os = "windows")]
     {
-        let _ = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
-        let start = std::time::Instant::now();
-        while is_instance_window_present() && start.elapsed() < std::time::Duration::from_secs(3) {
-            std::thread::sleep(std::time::Duration::from_millis(120));
+        match stop_runtime_instance(std::time::Duration::from_secs(3))? {
+            StopRuntimeOutcome::Failed => {
+                return Err(RuntimeError::Overlay(
+                    "restart failed: existing runtime could not be stopped".to_string(),
+                ));
+            }
+            StopRuntimeOutcome::Forced => {
+                log_warn("[swiftfind-core] restart required forced process termination");
+            }
+            StopRuntimeOutcome::Graceful | StopRuntimeOutcome::AlreadyStopped => {}
         }
-        return run_with_options(RuntimeOptions::default());
+        run_with_options(RuntimeOptions::default())
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         run_with_options(RuntimeOptions::default())
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeProcessState {
+    has_overlay_window: bool,
+    other_runtime_pids: Vec<u32>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StopRuntimeOutcome {
+    AlreadyStopped,
+    Graceful,
+    Forced,
+    Failed,
+}
+
+#[cfg(target_os = "windows")]
+fn inspect_runtime_process_state() -> RuntimeProcessState {
+    RuntimeProcessState {
+        has_overlay_window: is_instance_window_present(),
+        other_runtime_pids: runtime_process_pids_excluding_current().unwrap_or_default(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn stop_runtime_instance(timeout: std::time::Duration) -> Result<StopRuntimeOutcome, RuntimeError> {
+    let mut state = inspect_runtime_process_state();
+    if !state.has_overlay_window && state.other_runtime_pids.is_empty() {
+        return Ok(StopRuntimeOutcome::AlreadyStopped);
+    }
+
+    if state.has_overlay_window {
+        let _ = signal_existing_instance_quit().map_err(RuntimeError::Overlay)?;
+        if wait_until_overlay_window_closed(timeout) {
+            state = inspect_runtime_process_state();
+            if state.other_runtime_pids.is_empty() {
+                return Ok(StopRuntimeOutcome::Graceful);
+            }
+        }
+    }
+
+    let forced = force_terminate_other_runtime_processes()?;
+    std::thread::sleep(std::time::Duration::from_millis(250));
+    let post = inspect_runtime_process_state();
+    if !post.has_overlay_window && post.other_runtime_pids.is_empty() {
+        if forced {
+            Ok(StopRuntimeOutcome::Forced)
+        } else {
+            Ok(StopRuntimeOutcome::Graceful)
+        }
+    } else {
+        Ok(StopRuntimeOutcome::Failed)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn wait_until_overlay_window_closed(timeout: std::time::Duration) -> bool {
+    let start = std::time::Instant::now();
+    while start.elapsed() < timeout {
+        if !is_instance_window_present() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    }
+    !is_instance_window_present()
+}
+
+#[cfg(target_os = "windows")]
+fn force_terminate_other_runtime_processes() -> Result<bool, RuntimeError> {
+    let current_pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() };
+    let command = format!(
+        "taskkill /F /T /FI \"IMAGENAME eq swiftfind-core.exe\" /FI \"PID ne {}\" >NUL 2>&1",
+        current_pid
+    );
+    let status = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg(command)
+        .status()
+        .map_err(RuntimeError::Io)?;
+    Ok(status.success())
+}
+
+#[cfg(target_os = "windows")]
+fn runtime_process_pids_excluding_current() -> Result<Vec<u32>, RuntimeError> {
+    let current_pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() };
+    let output = std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("tasklist /FI \"IMAGENAME eq swiftfind-core.exe\" /FO LIST /NH")
+        .output()
+        .map_err(RuntimeError::Io)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut pids = parse_tasklist_pid_lines(&stdout);
+    pids.retain(|pid| *pid != current_pid);
+    Ok(pids)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_tasklist_pid_lines(content: &str) -> Vec<u32> {
+    content
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if !trimmed.to_ascii_lowercase().starts_with("pid:") {
+                return None;
+            }
+            let value = trimmed.split(':').nth(1)?.trim();
+            value.parse::<u32>().ok()
+        })
+        .collect()
+}
+
+fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, RuntimeError> {
+    let support_dir = config::stable_app_data_dir().join("support");
+    std::fs::create_dir_all(&support_dir)?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bundle_dir = support_dir.join(format!("diagnostics-{stamp}"));
+    std::fs::create_dir_all(&bundle_dir)?;
+
+    let running_state = runtime_state_summary();
+    let summary = format!(
+        "swiftfind diagnostics bundle\ngenerated_epoch_secs={stamp}\nruntime_state={running_state}\nconfig_path={}\nindex_db_path={}\nlogs_dir={}\n",
+        cfg.config_path.display(),
+        cfg.index_db_path.display(),
+        crate::logging::logs_dir().display()
+    );
+    std::fs::write(bundle_dir.join("summary.txt"), summary)?;
+
+    if cfg.config_path.exists() {
+        let _ = std::fs::copy(&cfg.config_path, bundle_dir.join("config.raw.jsonc"));
+    }
+
+    let sanitized_cfg = serde_json::json!({
+        "version": cfg.version,
+        "max_results": cfg.max_results,
+        "hotkey": cfg.hotkey,
+        "launch_at_startup": cfg.launch_at_startup,
+        "discovery_roots_count": cfg.discovery_roots.len(),
+        "discovery_exclude_roots_count": cfg.discovery_exclude_roots.len()
+    });
+    let encoded = serde_json::to_string_pretty(&sanitized_cfg)
+        .map_err(|e| RuntimeError::Args(format!("failed to encode sanitized config: {e}")))?;
+    std::fs::write(bundle_dir.join("config.sanitized.json"), encoded)?;
+
+    copy_recent_logs_to_bundle(&crate::logging::logs_dir(), &bundle_dir.join("logs"))?;
+
+    Ok(bundle_dir)
+}
+
+fn copy_recent_logs_to_bundle(
+    source_logs_dir: &std::path::Path,
+    target_logs_dir: &std::path::Path,
+) -> Result<(), RuntimeError> {
+    std::fs::create_dir_all(target_logs_dir)?;
+    if !source_logs_dir.exists() {
+        return Ok(());
+    }
+
+    let mut entries = std::fs::read_dir(source_logs_dir)?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.ends_with(".log"))
+                .unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    entries.sort_by_key(|path| {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    entries.reverse();
+
+    for path in entries.into_iter().take(5) {
+        if let Some(name) = path.file_name() {
+            let _ = std::fs::copy(&path, target_logs_dir.join(name));
+        }
+    }
+
+    Ok(())
+}
+
+fn runtime_state_summary() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let state = inspect_runtime_process_state();
+        if state.has_overlay_window {
+            return "running".to_string();
+        }
+        if !state.other_runtime_pids.is_empty() {
+            return format!(
+                "degraded(process_without_overlay_window pids={:?})",
+                state.other_runtime_pids
+            );
+        }
+        "stopped".to_string()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        "unsupported_platform".to_string()
     }
 }
 
@@ -837,8 +1086,8 @@ fn log_warn(message: &str) {
 mod tests {
     use super::{
         dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
-        parse_status_diagnostics_snapshot, prepend_runtime_actions, search_overlay_results,
-        RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
+        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, prepend_runtime_actions,
+        search_overlay_results, RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
     };
     use crate::config::Config;
     use crate::core_service::CoreService;
@@ -983,6 +1232,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_diagnostics_bundle_command() {
+        let args = vec!["--diagnostics-bundle".to_string()];
+        let options = parse_cli_args(&args).expect("diagnostics command should parse");
+        assert_eq!(options.command, RuntimeCommand::DiagnosticsBundle);
+        assert!(!options.background);
+    }
+
+    #[test]
     fn rejects_background_with_non_run_commands() {
         let args = vec!["--quit".to_string(), "--background".to_string()];
         let error = parse_cli_args(&args).expect_err("invalid combination should fail");
@@ -1066,5 +1323,20 @@ mod tests {
     fn returns_none_for_status_snapshot_without_diagnostics_tokens() {
         let content = "[1] [INFO] [swiftfind-core] status: running\n";
         assert!(parse_status_diagnostics_snapshot(content).is_none());
+    }
+
+    #[test]
+    fn parses_tasklist_pid_lines_from_list_output() {
+        let content = "\
+Image Name:   swiftfind-core.exe
+PID:          1124
+Session Name: Console
+
+Image Name:   swiftfind-core.exe
+PID:          2208
+Session Name: Console
+";
+        let pids = parse_tasklist_pid_lines(content);
+        assert_eq!(pids, vec![1124, 2208]);
     }
 }

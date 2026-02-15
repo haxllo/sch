@@ -53,6 +53,22 @@ Acceptance criteria:
 - No ghost `swiftfind-core.exe` process remains after uninstall.
 - `--status` reflects real process state after quit/restart flows.
 
+Task breakdown (implementation):
+1. Installer lifecycle lock hardening:
+   - pre-install runtime stop hook in setup flow
+   - explicit kill fallback to avoid overwrite lock hangs
+2. Runtime self-heal lifecycle commands:
+   - improve `--status` to report degraded process-without-window state
+   - harden `--quit` and `--restart` with graceful stop + forced fallback path
+3. Diagnostics bundle export:
+   - add `--diagnostics-bundle` command
+   - write bundle with summary, sanitized config snapshot, and recent logs
+
+Current status:
+- [x] Task 1 implemented
+- [x] Task 2 implemented
+- [x] Task 3 implemented
+
 ### v1.1.0 (Indexing and Relevance Hardening)
 
 Goal:
@@ -173,4 +189,3 @@ For each milestone:
 2. `v1.1.0` incremental indexing + ranking v2.
 3. `v1.2.0` updater + rollback infrastructure.
 4. `v1.3.0` optional quality expansion.
-
