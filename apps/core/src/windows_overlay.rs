@@ -1877,37 +1877,11 @@ mod imp {
             } else {
                 dis.rcItem.top + ((ROW_HEIGHT - ROW_TITLE_BLOCK_HEIGHT).max(0) / 2) + offset_y
             };
-            if top_hit_row {
-                let mut badge_rect = RECT {
-                    left: text_left,
-                    top: text_top - 1,
-                    right: text_right,
-                    bottom: text_top + HEADER_ROW_LABEL_HEIGHT - 2,
-                };
-                let old_title_font = SelectObject(dis.hDC, state.header_font as _);
-                SetTextColor(dis.hDC, COLOR_TEXT_SECTION);
-                DrawTextW(
-                    dis.hDC,
-                    to_wide("TOP HIT").as_ptr(),
-                    -1,
-                    &mut badge_rect,
-                    DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
-                );
-                SelectObject(dis.hDC, old_title_font);
-            }
             let mut title_rect = RECT {
                 left: text_left,
-                top: if top_hit_row {
-                    text_top + HEADER_ROW_LABEL_HEIGHT - 3
-                } else {
-                    text_top
-                },
+                top: text_top,
                 right: text_right,
-                bottom: if top_hit_row {
-                    text_top + HEADER_ROW_LABEL_HEIGHT - 3 + ROW_TITLE_BLOCK_HEIGHT
-                } else {
-                    text_top + ROW_TITLE_BLOCK_HEIGHT
-                },
+                bottom: text_top + ROW_TITLE_BLOCK_HEIGHT,
             };
             if status_row {
                 SetTextColor(dis.hDC, secondary_text);
