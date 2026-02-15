@@ -1,5 +1,7 @@
 param(
   [string]$Version,
+  [ValidateSet("stable", "beta")]
+  [string]$Channel = "stable",
   [string]$OutputRoot = "artifacts/windows",
   [string]$InnoCompiler = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 )
@@ -60,7 +62,7 @@ if (-not (Test-Path $setupIconPath)) {
 
 if (-not (Test-Path $stageDir)) {
   Write-Host "Staged artifact not found. Building package stage first..." -ForegroundColor Yellow
-  & (Join-Path $repoRoot "scripts/windows/package-windows-artifact.ps1") -Version $Version -OutputRoot $outputRootAbs
+  & (Join-Path $repoRoot "scripts/windows/package-windows-artifact.ps1") -Version $Version -Channel $Channel -OutputRoot $outputRootAbs
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to build staged artifact."
   }
@@ -79,6 +81,24 @@ if ($LASTEXITCODE -ne 0) {
 $setupPath = Join-Path $outputRootAbs "swiftfind-$Version-windows-x64-setup.exe"
 if (-not (Test-Path $setupPath)) {
   throw "Expected installer was not generated at '$setupPath'."
+}
+
+$manifestPath = Join-Path $outputRootAbs "$artifactName-manifest.json"
+if (Test-Path $manifestPath) {
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 10
+  if (-not $manifest.artifacts) {
+    $manifest | Add-Member -NotePropertyName artifacts -NotePropertyValue ([PSCustomObject]@{})
+  }
+  if (-not $manifest.artifacts.setup) {
+    $manifest.artifacts | Add-Member -NotePropertyName setup -NotePropertyValue ([PSCustomObject]@{})
+  }
+
+  $manifest.channel = $Channel
+  $manifest.artifacts.setup.name = [System.IO.Path]::GetFileName($setupPath)
+  $manifest.artifacts.setup.size_bytes = (Get-Item -LiteralPath $setupPath).Length
+  $manifest.artifacts.setup.sha256 = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  $manifest | ConvertTo-Json -Depth 10 | Set-Content -Encoding UTF8 -LiteralPath $manifestPath
+  Write-Host "Updated manifest with setup hash: $manifestPath" -ForegroundColor Green
 }
 
 Write-Host "Created installer: $setupPath" -ForegroundColor Green

@@ -81,14 +81,22 @@ Expected:
 - Expected: runtime restarts cleanly and hotkey registration remains valid.
 - Expected: config file in `%APPDATA%\SwiftFind\config.json` is preserved.
 
-14. Uninstall + reinstall checks.
+14. Channel updater checks.
+- Run `scripts/windows/update-swiftfind.ps1 -Channel stable`.
+- Expected: manifest and installer are downloaded.
+- Expected: installer checksum is verified before apply.
+- Expected: update applies cleanly and runtime can be started.
+- Run `scripts/windows/update-swiftfind.ps1 -Channel beta` (on beta tag availability).
+- Expected: beta channel resolves beta-tagged release only.
+
+15. Uninstall + reinstall checks.
 - Uninstall from Windows Apps settings or installer uninstaller.
 - Expected: runtime process is no longer present in Task Manager.
 - Expected: hotkey no longer triggers launcher.
 - Reinstall latest setup.
 - Expected: launcher works again and startup registration can be applied.
 
-15. Rollback checks.
+16. Rollback checks.
 - After installing a newer build, reinstall the previous known-good build.
 - Expected: older runtime starts successfully.
 - Expected: no stuck background process from replaced version.

@@ -66,6 +66,24 @@ Notes:
 - `--sync-startup` applies `launch_at_startup` from config to HKCU Run.
 - `--diagnostics-bundle` writes a support bundle with summary, sanitized config, and recent logs.
 
+## Update Commands
+
+Channel-aware updater (user-triggered, no background updater service):
+
+```powershell
+scripts/windows/update-swiftfind.ps1 -Channel stable
+scripts/windows/update-swiftfind.ps1 -Channel beta
+scripts/windows/update-swiftfind.ps1 -Channel stable -Version "1.2.0"
+```
+
+Updater behavior:
+
+- Downloads release `manifest.json` + `setup.exe` from GitHub release assets.
+- Verifies installer SHA256 from manifest before apply.
+- Stops runtime and snapshots current install folder for rollback.
+- Applies installer silently.
+- Restores previous snapshot automatically if update fails.
+
 ## Default Hotkey and Config
 
 - Default hotkey: `Ctrl+Shift+Space`
@@ -288,8 +306,9 @@ Run these on a Windows host before publishing a release.
    - verify launcher starts and hotkey works without Rust/Cargo installed.
 
 2. Upgrade-over-existing:
-   - install a newer setup over an existing install.
-   - verify no manual cleanup needed and `%APPDATA%\SwiftFind\config.json` remains intact.
+   - run `scripts/windows/update-swiftfind.ps1 -Channel stable -Version "<newer-version>"`.
+   - verify checksum verification passes and install completes without manual cleanup.
+   - verify `%APPDATA%\SwiftFind\config.json` remains intact.
 
 3. Uninstall + reinstall:
    - uninstall from Windows Apps settings (or uninstaller).
@@ -297,7 +316,9 @@ Run these on a Windows host before publishing a release.
    - reinstall and verify normal runtime behavior returns.
 
 4. Rollback:
-   - reinstall previous known-good setup over the newer one.
+   - force a failed update path (or reinstall previous known-good setup).
+   - verify updater restores previous snapshot automatically when apply fails.
+   - verify manual reinstall rollback still works as fallback path.
    - verify runtime starts and open/query/launch/close flow still works.
 
 Release-channel/update policy reference:

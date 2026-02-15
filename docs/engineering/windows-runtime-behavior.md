@@ -54,6 +54,12 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
 - `--sync-startup`: applies `launch_at_startup` from config to Windows Run key.
 - `--diagnostics-bundle`: writes support bundle under `%APPDATA%\SwiftFind\support`.
 
+Update operations:
+
+- runtime does not run a background auto-updater.
+- channel-aware updates are user-triggered via `scripts/windows/update-swiftfind.ps1`.
+- updater verifies installer checksum from release manifest and performs rollback restore on failed apply.
+
 Single-instance behavior:
 
 - Mutex guard enforces one active runtime.

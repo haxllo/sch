@@ -10,6 +10,9 @@ Use this checklist before publishing any Windows release (`stable` or `beta`).
   - `swiftfind-<version>-windows-x64.zip`
   - `swiftfind-<version>-windows-x64-manifest.json`
   - `swiftfind-<version>-windows-x64-setup.exe`
+- Manifest includes integrity data:
+  - `artifacts.zip.sha256`
+  - `artifacts.setup.sha256`
 
 ## 2. Runtime Safety Verification
 
@@ -51,7 +54,8 @@ Security-focused checks:
 
 Current posture:
 
-- Unsiged binaries are allowed for current phase, with expected SmartScreen warnings.
+- Unsigned binaries are allowed for current phase, with expected SmartScreen warnings.
+- Integrity minimum bar still applies: updater must verify manifest checksum before apply.
 
 If signing is enabled for a release:
 

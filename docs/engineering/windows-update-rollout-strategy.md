@@ -10,12 +10,16 @@ This document defines SwiftFind Windows update behavior for Phase 3.
 
 ## Current Update Model
 
-Current behavior is manual update:
+Current behavior is operator-driven update (no always-on updater service):
 
-1. User installs new `swiftfind-<version>-windows-x64-setup.exe`.
-2. Installer upgrades in place under `%LOCALAPPDATA%\Programs\SwiftFind`.
-3. Existing `%APPDATA%\SwiftFind\config.json` and index are preserved.
-4. Runtime is restarted cleanly through installer/uninstall lifecycle rules.
+1. Run `scripts/windows/update-swiftfind.ps1` with channel `stable` or `beta`.
+2. Script resolves the target GitHub release and downloads:
+   - `swiftfind-<version>-windows-x64-manifest.json`
+   - `swiftfind-<version>-windows-x64-setup.exe`
+3. Script verifies installer SHA256 against manifest before installation.
+4. Script snapshots current install directory for rollback safety.
+5. Installer applies update in place under `%LOCALAPPDATA%\Programs\SwiftFind`.
+6. On failure, script restores previous snapshot automatically.
 
 No background update polling is performed by `swiftfind-core.exe`.
 
@@ -31,7 +35,7 @@ Two channels are supported at release-management level:
 - Early testers.
 - Can ship faster, but still requires core runtime and lifecycle checks.
 
-Channel is communicated in release notes/tag naming; runtime binary remains the same architecture.
+Channel is communicated in release tags/notes and consumed by `update-swiftfind.ps1`.
 
 ## Versioning and Publishing
 
@@ -41,9 +45,12 @@ Publishing baseline:
 - `artifacts/windows/swiftfind-<version>-windows-x64.zip`
 - `artifacts/windows/swiftfind-<version>-windows-x64-manifest.json`
 - `artifacts/windows/swiftfind-<version>-windows-x64-setup.exe`
-
-2. Publish GitHub release with clear channel label.
-3. Attach validation evidence summary and known limitations.
+2. Ensure manifest contains:
+- `channel`
+- `artifacts.zip.sha256`
+- `artifacts.setup.sha256`
+3. Publish GitHub release with clear channel label.
+4. Attach validation evidence summary and known limitations.
 
 Recommended tag style:
 
@@ -54,23 +61,25 @@ Recommended tag style:
 
 Upgrade:
 
-- Supported path is in-place install of newer setup over existing installation.
-- Upgrade must preserve config and keep launcher startup behavior functional.
+- Supported path is `update-swiftfind.ps1` channel/version update.
+- Update must preserve `%APPDATA%\SwiftFind` config/index/logs.
+- Installer apply is blocked if manifest checksum verification fails.
 
 Rollback:
 
-- Reinstall previous known-good setup version.
+- Automatic rollback occurs when update apply/verify fails.
+- Manual rollback remains available by reinstalling previous known-good setup.
 - Verify runtime process, hotkey, query/launch/close flow immediately after rollback.
 
-Rollback is required for every release candidate before broad stable rollout.
+Rollback validation is required for every release candidate before broad stable rollout.
 
 ## Future Auto-Update Direction (Not Implemented Yet)
 
-Future auto-update can be considered only if all constraints are met:
+Future background auto-update can be considered only if all constraints are met:
 
 - no persistent always-on updater process in idle runtime path
 - explicit user consent and clear channel selection
 - signed payload verification before install
 - rollback-safe failure behavior
 
-Until then, manual setup-based updates remain the official update path.
+Until then, script-driven, user-triggered updates remain the official update path.

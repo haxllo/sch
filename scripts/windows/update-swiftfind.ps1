@@ -1,0 +1,279 @@
+param(
+  [ValidateSet("stable", "beta")]
+  [string]$Channel = "stable",
+  [string]$Version,
+  [string]$Repo = "haxllo/sch",
+  [switch]$StartAfterUpdate = $true,
+  [switch]$KeepBackup,
+  [string]$InstallRoot = "$env:LOCALAPPDATA\Programs\SwiftFind",
+  [string]$CacheRoot = "$env:LOCALAPPDATA\SwiftFind\updates"
+)
+
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+function Normalize-Version([string]$TagOrVersion) {
+  if (-not $TagOrVersion) {
+    return ""
+  }
+  $value = $TagOrVersion.Trim()
+  if ($value.StartsWith("v")) {
+    return $value.Substring(1)
+  }
+  return $value
+}
+
+function Is-BetaRelease($release) {
+  if ($release.prerelease) {
+    return $true
+  }
+  $tag = [string]$release.tag_name
+  return $tag -match "-beta(\.|-|$)"
+}
+
+function Resolve-TargetRelease {
+  param(
+    [array]$Releases,
+    [string]$ChannelName,
+    [string]$RequestedVersion
+  )
+
+  if ($RequestedVersion -and $RequestedVersion.Trim().Length -gt 0) {
+    $normalized = Normalize-Version $RequestedVersion
+    $release = $Releases | Where-Object {
+      $tag = Normalize-Version ([string]$_.tag_name)
+      $tag -eq $normalized
+    } | Select-Object -First 1
+    if (-not $release) {
+      throw "Version '$RequestedVersion' was not found in repo '$Repo' releases."
+    }
+
+    $isBeta = Is-BetaRelease $release
+    if ($ChannelName -eq "stable" -and $isBeta) {
+      throw "Requested version '$RequestedVersion' is a beta release but channel is stable."
+    }
+    if ($ChannelName -eq "beta" -and -not $isBeta) {
+      throw "Requested version '$RequestedVersion' is not a beta release."
+    }
+    return $release
+  }
+
+  $filtered = $Releases | Where-Object {
+    if ($ChannelName -eq "stable") {
+      return -not (Is-BetaRelease $_)
+    }
+    return (Is-BetaRelease $_)
+  }
+
+  $selected = $filtered | Select-Object -First 1
+  if (-not $selected) {
+    throw "No '$ChannelName' release found in repo '$Repo'."
+  }
+  return $selected
+}
+
+function Resolve-ReleaseAsset {
+  param(
+    $Release,
+    [string]$AssetName
+  )
+
+  $asset = $Release.assets | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+  if (-not $asset) {
+    throw "Release '$($Release.tag_name)' is missing asset '$AssetName'."
+  }
+  return $asset
+}
+
+function Download-ReleaseAsset {
+  param(
+    $Asset,
+    [string]$OutFile
+  )
+  Invoke-WebRequest `
+    -Uri $Asset.browser_download_url `
+    -Headers @{ "User-Agent" = "SwiftFind-Updater"; "Accept" = "application/octet-stream" } `
+    -OutFile $OutFile
+}
+
+function Stop-Runtime {
+  param([string]$InstalledExePath)
+
+  if (Test-Path -LiteralPath $InstalledExePath) {
+    try {
+      & $InstalledExePath --quit | Out-Null
+    }
+    catch {
+      Write-Host "Warning: graceful quit failed; using hard stop fallback." -ForegroundColor Yellow
+    }
+    Start-Sleep -Milliseconds 400
+  }
+
+  cmd /c "taskkill /IM swiftfind-core.exe /F /T >NUL 2>&1" | Out-Null
+  Start-Sleep -Milliseconds 200
+}
+
+function Verify-ManifestAndInstaller {
+  param(
+    $Manifest,
+    [string]$ExpectedVersion,
+    [string]$ExpectedArtifact,
+    [string]$ExpectedChannel,
+    [string]$SetupPath
+  )
+
+  if (-not $Manifest.artifact) {
+    throw "Manifest is missing 'artifact'."
+  }
+  if (-not $Manifest.version) {
+    throw "Manifest is missing 'version'."
+  }
+
+  if ([string]$Manifest.artifact -ne $ExpectedArtifact) {
+    throw "Manifest artifact mismatch. Expected '$ExpectedArtifact', got '$($Manifest.artifact)'."
+  }
+
+  $manifestVersion = Normalize-Version ([string]$Manifest.version)
+  if ($manifestVersion -ne $ExpectedVersion) {
+    throw "Manifest version mismatch. Expected '$ExpectedVersion', got '$manifestVersion'."
+  }
+
+  if ($Manifest.channel) {
+    $manifestChannel = ([string]$Manifest.channel).ToLowerInvariant()
+    if ($manifestChannel -ne $ExpectedChannel.ToLowerInvariant()) {
+      throw "Manifest channel mismatch. Expected '$ExpectedChannel', got '$manifestChannel'."
+    }
+  }
+
+  if (-not $Manifest.artifacts -or -not $Manifest.artifacts.setup) {
+    throw "Manifest is missing artifacts.setup integrity data."
+  }
+
+  $setupSha = [string]$Manifest.artifacts.setup.sha256
+  if (-not $setupSha -or $setupSha.Trim().Length -eq 0) {
+    throw "Manifest artifacts.setup.sha256 is missing."
+  }
+
+  $actualSha = (Get-FileHash -LiteralPath $SetupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actualSha -ne $setupSha.ToLowerInvariant()) {
+    throw "Installer checksum mismatch. Expected '$setupSha', got '$actualSha'."
+  }
+}
+
+Write-Host "== SwiftFind Update ==" -ForegroundColor Cyan
+Write-Host "Channel: $Channel"
+if ($Version) {
+  Write-Host "Requested version: $Version"
+}
+Write-Host "Repo: $Repo"
+Write-Host "Install root: $InstallRoot"
+
+$apiUrl = "https://api.github.com/repos/$Repo/releases?per_page=40"
+$releases = @(Invoke-RestMethod -Uri $apiUrl -Headers @{ "User-Agent" = "SwiftFind-Updater" })
+if ($releases.Count -eq 0) {
+  throw "No releases were returned for '$Repo'."
+}
+
+$targetRelease = Resolve-TargetRelease -Releases $releases -ChannelName $Channel -RequestedVersion $Version
+$resolvedVersion = Normalize-Version ([string]$targetRelease.tag_name)
+$artifactBase = "swiftfind-$resolvedVersion-windows-x64"
+$setupName = "$artifactBase-setup.exe"
+$manifestName = "$artifactBase-manifest.json"
+
+Write-Host "Target release: $($targetRelease.tag_name)" -ForegroundColor Green
+
+$setupAsset = Resolve-ReleaseAsset -Release $targetRelease -AssetName $setupName
+$manifestAsset = Resolve-ReleaseAsset -Release $targetRelease -AssetName $manifestName
+
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$workDir = Join-Path $CacheRoot "$artifactBase-update-$stamp"
+New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+
+$setupPath = Join-Path $workDir $setupName
+$manifestPath = Join-Path $workDir $manifestName
+
+Write-Host "[1/5] Downloading manifest and installer..." -ForegroundColor Yellow
+Download-ReleaseAsset -Asset $manifestAsset -OutFile $manifestPath
+Download-ReleaseAsset -Asset $setupAsset -OutFile $setupPath
+
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 12
+Write-Host "[2/5] Verifying integrity..." -ForegroundColor Yellow
+Verify-ManifestAndInstaller `
+  -Manifest $manifest `
+  -ExpectedVersion $resolvedVersion `
+  -ExpectedArtifact $artifactBase `
+  -ExpectedChannel $Channel `
+  -SetupPath $setupPath
+
+$installedExe = Join-Path $InstallRoot "bin\swiftfind-core.exe"
+$backupDir = $null
+
+try {
+  Write-Host "[3/5] Stopping active runtime and preparing rollback snapshot..." -ForegroundColor Yellow
+  Stop-Runtime -InstalledExePath $installedExe
+
+  if (Test-Path -LiteralPath $InstallRoot) {
+    $backupRoot = Join-Path $CacheRoot "backups"
+    New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+    $backupDir = Join-Path $backupRoot "swiftfind-backup-$stamp"
+    Move-Item -LiteralPath $InstallRoot -Destination $backupDir
+    Write-Host "Backup created: $backupDir"
+  }
+
+  Write-Host "[4/5] Installing update..." -ForegroundColor Yellow
+  $args = @("/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES", "/SP-")
+  $proc = Start-Process -FilePath $setupPath -ArgumentList $args -PassThru -Wait
+  if ($proc.ExitCode -ne 0) {
+    throw "Installer exited with code $($proc.ExitCode)."
+  }
+
+  $newExe = Join-Path $InstallRoot "bin\swiftfind-core.exe"
+  if (-not (Test-Path -LiteralPath $newExe)) {
+    throw "Updated runtime executable not found at '$newExe'."
+  }
+
+  & $newExe --ensure-config | Out-Null
+  & $newExe --sync-startup | Out-Null
+
+  if ($StartAfterUpdate) {
+    Start-Process -FilePath $newExe -ArgumentList "--background" -WindowStyle Hidden
+  }
+
+  if ($backupDir -and (Test-Path -LiteralPath $backupDir) -and -not $KeepBackup) {
+    Remove-Item -LiteralPath $backupDir -Recurse -Force
+    $backupDir = $null
+  }
+
+  Write-Host "[5/5] Update complete." -ForegroundColor Green
+  Write-Host "Installed version: $resolvedVersion"
+  if ($backupDir) {
+    Write-Host "Rollback snapshot retained: $backupDir"
+  }
+}
+catch {
+  Write-Host "Update failed: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host "Attempting rollback..." -ForegroundColor Yellow
+
+  try {
+    Stop-Runtime -InstalledExePath (Join-Path $InstallRoot "bin\swiftfind-core.exe")
+    if (Test-Path -LiteralPath $InstallRoot) {
+      Remove-Item -LiteralPath $InstallRoot -Recurse -Force
+    }
+    if ($backupDir -and (Test-Path -LiteralPath $backupDir)) {
+      Move-Item -LiteralPath $backupDir -Destination $InstallRoot
+      $restoredExe = Join-Path $InstallRoot "bin\swiftfind-core.exe"
+      if ($StartAfterUpdate -and (Test-Path -LiteralPath $restoredExe)) {
+        Start-Process -FilePath $restoredExe -ArgumentList "--background" -WindowStyle Hidden
+      }
+      Write-Host "Rollback complete: restored previous installation." -ForegroundColor Green
+    }
+    else {
+      Write-Host "No backup snapshot available for rollback." -ForegroundColor Yellow
+    }
+  }
+  catch {
+    Write-Host "Rollback failed: $($_.Exception.Message)" -ForegroundColor Red
+  }
+
+  throw
+}

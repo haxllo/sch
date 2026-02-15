@@ -18,13 +18,13 @@
 Run on Windows PowerShell:
 
 ```powershell
-scripts/windows/package-windows-artifact.ps1 -Version "0.5.0"
+scripts/windows/package-windows-artifact.ps1 -Version "0.5.0" -Channel "stable"
 ```
 
 Build Windows `Setup.exe` (Inno Setup) from the staged artifact:
 
 ```powershell
-scripts/windows/package-windows-installer.ps1 -Version "0.5.0"
+scripts/windows/package-windows-installer.ps1 -Version "0.5.0" -Channel "stable"
 ```
 
 Signed packaging (PFX):
@@ -52,6 +52,7 @@ Expected outputs:
 - `docs/release-notes-template.md`
 - `scripts/install-swiftfind.ps1`
 - `scripts/uninstall-swiftfind.ps1`
+- `scripts/update-swiftfind.ps1`
 
 ## Signing Requirements
 
@@ -70,6 +71,7 @@ If any of these fail, packaging fails.
 ## Installer-Prep Notes
 
 - This milestone prepares a deterministic zip payload and manifest.
+- Manifest includes channel and SHA256 integrity data for zip/setup artifacts.
 - Inno Setup consumes the staging directory directly via `scripts/windows/swiftfind.iss`.
 - Keep staging layout stable to avoid installer script churn.
 - Inno `[UninstallRun]` entries include `RunOnceId` values to prevent duplicate execution/warnings.

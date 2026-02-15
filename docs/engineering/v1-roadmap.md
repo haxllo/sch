@@ -133,6 +133,22 @@ Acceptance criteria:
 - Rollback path is validated in operator checklist.
 - No data-loss for `%APPDATA%\SwiftFind` config/index/logs.
 
+Task breakdown (implementation):
+1. Channel-aware updater flow:
+   - add Windows update script with `stable`/`beta` channel selection
+   - resolve release assets by channel and version
+2. Integrity checks before apply:
+   - ship manifest with artifact checksums
+   - verify downloaded installer checksum against manifest before install
+3. Rollback-safe apply:
+   - snapshot current install directory before update
+   - restore previous snapshot automatically if installer apply/verify fails
+
+Current status:
+- [x] Task 1 implemented
+- [x] Task 2 implemented
+- [x] Task 3 implemented
+
 ### v1.3.0 (Quality Expansion, No Performance Regressions)
 
 Goal:

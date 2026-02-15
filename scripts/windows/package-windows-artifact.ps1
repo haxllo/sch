@@ -1,5 +1,7 @@
 param(
   [string]$Version,
+  [ValidateSet("stable", "beta")]
+  [string]$Channel = "stable",
   [string]$OutputRoot = "artifacts/windows",
   [switch]$Sign,
   [string]$CertPath,
@@ -98,26 +100,60 @@ Copy-Item "docs/engineering/windows-runtime-validation-checklist.md" (Join-Path 
 Copy-Item "docs/releases/windows-milestone-release-notes-template.md" (Join-Path $stageDir "docs/release-notes-template.md") -Force
 Copy-Item "scripts/windows/install-swiftfind.ps1" (Join-Path $stageDir "scripts/install-swiftfind.ps1") -Force
 Copy-Item "scripts/windows/uninstall-swiftfind.ps1" (Join-Path $stageDir "scripts/uninstall-swiftfind.ps1") -Force
+Copy-Item "scripts/windows/update-swiftfind.ps1" (Join-Path $stageDir "scripts/update-swiftfind.ps1") -Force
+
+Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $zipPath
+
+$zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$zipSize = (Get-Item -LiteralPath $zipPath).Length
+$exePath = Join-Path $stageDir "bin/swiftfind-core.exe"
+$exeHash = (Get-FileHash -LiteralPath $exePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$exeSize = (Get-Item -LiteralPath $exePath).Length
+
+$stageDirPrefix = (Resolve-Path -LiteralPath $stageDir).Path
+if (-not $stageDirPrefix.EndsWith("\") -and -not $stageDirPrefix.EndsWith("/")) {
+  $stageDirPrefix = "$stageDirPrefix\"
+}
+
+$stageFiles = Get-ChildItem -LiteralPath $stageDir -Recurse -File | ForEach-Object {
+  $fullPath = $_.FullName
+  $relative = $fullPath.Substring($stageDirPrefix.Length).Replace('\', '/')
+  [ordered]@{
+    path = $relative
+    size_bytes = $_.Length
+    sha256 = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
+}
 
 $manifest = [ordered]@{
   artifact = $artifactName
   version = $Version
+  channel = $Channel
   built_utc = (Get-Date).ToUniversalTime().ToString('o')
   build_stamp = $stamp
   os = "windows-x64"
   signed = [bool]$Sign
-  files = @(
-    "bin/swiftfind-core.exe",
-    "assets/swiftfinder.svg",
-    "docs/windows-runtime-validation-checklist.md",
-    "docs/release-notes-template.md",
-    "scripts/install-swiftfind.ps1",
-    "scripts/uninstall-swiftfind.ps1"
-  )
+  artifacts = [ordered]@{
+    zip = [ordered]@{
+      name = "$artifactName.zip"
+      size_bytes = $zipSize
+      sha256 = $zipHash
+    }
+    setup = [ordered]@{
+      name = "$artifactName-setup.exe"
+      size_bytes = $null
+      sha256 = $null
+    }
+    core_exe = [ordered]@{
+      path = "bin/swiftfind-core.exe"
+      size_bytes = $exeSize
+      sha256 = $exeHash
+    }
+  }
+  files = $stageFiles
 }
 
-$manifest | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $manifestPath
-Compress-Archive -Path (Join-Path $stageDir "*") -DestinationPath $zipPath
+$manifest | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 $manifestPath
 
 Write-Host "Created artifact: $zipPath" -ForegroundColor Green
 Write-Host "Created manifest: $manifestPath" -ForegroundColor Green
