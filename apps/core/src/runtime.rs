@@ -175,7 +175,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
     ));
 
     let service = CoreService::new(config.clone())?.with_runtime_providers();
-    let index_report = service.rebuild_index_with_report()?;
+    let index_report = service.rebuild_index_incremental_with_report()?;
     log_info(&format!(
         "[swiftfind-core] startup indexed_items={} discovered={} upserted={} removed={}",
         index_report.indexed_total,
@@ -185,11 +185,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
     ));
     for provider in &index_report.providers {
         log_info(&format!(
-            "[swiftfind-core] index_provider name={} discovered={} upserted={} removed={} elapsed_ms={}",
+            "[swiftfind-core] index_provider name={} discovered={} upserted={} removed={} skipped={} elapsed_ms={}",
             provider.provider,
             provider.discovered,
             provider.upserted,
             provider.removed,
+            provider.skipped,
             provider.elapsed_ms,
         ));
     }

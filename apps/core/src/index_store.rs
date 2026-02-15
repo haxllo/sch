@@ -134,12 +134,38 @@ pub fn delete_item(db: &Connection, id: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
+pub fn get_meta(db: &Connection, key: &str) -> Result<Option<String>, StoreError> {
+    let mut stmt = db.prepare("SELECT value FROM index_meta WHERE key = ?1")?;
+    let mut rows = stmt.query(params![key])?;
+    if let Some(row) = rows.next()? {
+        let value: String = row.get(0)?;
+        Ok(Some(value))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn set_meta(db: &Connection, key: &str, value: &str) -> Result<(), StoreError> {
+    db.execute(
+        "INSERT INTO index_meta (key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
 fn init_schema(conn: &Connection) -> Result<(), StoreError> {
     let current_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
     if current_version < 1 {
         migration_v1(conn)?;
-        conn.pragma_update(None, "user_version", 1_i64)?;
+    }
+    if current_version < 2 {
+        migration_v2(conn)?;
+    }
+
+    if current_version < 2 {
+        conn.pragma_update(None, "user_version", 2_i64)?;
     }
 
     Ok(())
@@ -158,5 +184,16 @@ fn migration_v1(conn: &Connection) -> Result<(), StoreError> {
         [],
     )?;
 
+    Ok(())
+}
+
+fn migration_v2(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS index_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
     Ok(())
 }

@@ -253,7 +253,7 @@ fn incremental_rebuild_prunes_missing_provider_items() {
             provider_items.clone(),
         ))]);
 
-    let first = service.rebuild_index_with_report().unwrap();
+    let first = service.rebuild_index_incremental_with_report().unwrap();
     assert_eq!(first.indexed_total, 2);
     assert_eq!(first.discovered_total, 2);
     assert_eq!(first.upserted_total, 2);
@@ -263,6 +263,7 @@ fn incremental_rebuild_prunes_missing_provider_items() {
     assert_eq!(first.providers[0].discovered, 2);
     assert_eq!(first.providers[0].upserted, 2);
     assert_eq!(first.providers[0].removed, 0);
+    assert!(!first.providers[0].skipped);
 
     *provider_items.lock().unwrap() = vec![
         SearchItem::new(
@@ -279,7 +280,7 @@ fn incremental_rebuild_prunes_missing_provider_items() {
         ),
     ];
 
-    let second = service.rebuild_index_with_report().unwrap();
+    let second = service.rebuild_index_incremental_with_report().unwrap();
     assert_eq!(second.indexed_total, 2);
     assert_eq!(second.discovered_total, 2);
     assert_eq!(second.upserted_total, 1);
@@ -289,6 +290,7 @@ fn incremental_rebuild_prunes_missing_provider_items() {
     assert_eq!(second.providers[0].discovered, 2);
     assert_eq!(second.providers[0].upserted, 1);
     assert_eq!(second.providers[0].removed, 1);
+    assert!(!second.providers[0].skipped);
 
     let stale_launch = service.launch(LaunchTarget::Id("file:initial"));
     match stale_launch {
@@ -342,4 +344,73 @@ fn service_search_order_is_deterministic_for_mixed_ties() {
 
     std::fs::remove_file(app_path).unwrap();
     std::fs::remove_file(file_path).unwrap();
+}
+
+struct StampedProvider {
+    name: &'static str,
+    stamp: String,
+    items: Vec<SearchItem>,
+}
+
+impl StampedProvider {
+    fn new(name: &'static str, stamp: &str, items: Vec<SearchItem>) -> Self {
+        Self {
+            name,
+            stamp: stamp.to_string(),
+            items,
+        }
+    }
+}
+
+impl DiscoveryProvider for StampedProvider {
+    fn provider_name(&self) -> &'static str {
+        self.name
+    }
+
+    fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
+        Ok(self.items.clone())
+    }
+
+    fn change_stamp(&self) -> Option<String> {
+        Some(self.stamp.clone())
+    }
+}
+
+#[test]
+fn incremental_rebuild_skips_unchanged_provider_with_stamp() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let stable_path = std::env::temp_dir().join(format!("swiftfind-inc-skip-{unique}.tmp"));
+    std::fs::write(&stable_path, b"a").unwrap();
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db)
+        .unwrap()
+        .with_providers(vec![Box::new(StampedProvider::new(
+            "filesystem",
+            "stable-stamp",
+            vec![SearchItem::new(
+                "file:stable",
+                "file",
+                "Stable",
+                stable_path.to_string_lossy().as_ref(),
+            )],
+        ))]);
+
+    let first = service.rebuild_index_incremental_with_report().unwrap();
+    assert_eq!(first.discovered_total, 1);
+    assert_eq!(first.upserted_total, 1);
+    assert_eq!(first.removed_total, 0);
+    assert!(!first.providers[0].skipped);
+
+    let second = service.rebuild_index_incremental_with_report().unwrap();
+    assert_eq!(second.discovered_total, 0);
+    assert_eq!(second.upserted_total, 0);
+    assert_eq!(second.removed_total, 0);
+    assert!(second.providers[0].skipped);
+
+    std::fs::remove_file(stable_path).unwrap();
 }

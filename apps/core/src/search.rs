@@ -1,5 +1,14 @@
 use crate::model::{normalize_for_search, SearchItem};
 use std::cmp::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const SCORE_EXACT: i64 = 30_000;
+const SCORE_PREFIX: i64 = 24_000;
+const SCORE_SUBSTRING: i64 = 18_000;
+const SCORE_FUZZY: i64 = 12_000;
+
+const SOURCE_APP_BONUS: i64 = 700;
+const SOURCE_LOCAL_FS_BONUS: i64 = 420;
 
 pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem> {
     if limit == 0 || items.is_empty() {
@@ -11,12 +20,16 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         return Vec::new();
     }
 
-    let mut scored: Vec<(u8, i64, usize, &SearchItem)> = items
+    let now_epoch_secs = now_epoch_secs();
+    let mut scored: Vec<ScoredItem<'_>> = items
         .iter()
-        .enumerate()
-        .filter_map(|(index, item)| {
-            score_item(item, &normalized_query)
-                .map(|score| (category_priority(item), score, index, item))
+        .filter_map(|item| {
+            score_item(item, &normalized_query, now_epoch_secs).map(|score| ScoredItem {
+                source_rank: source_rank(item),
+                score,
+                title_len: item.normalized_title().len(),
+                item,
+            })
         })
         .collect();
 
@@ -24,45 +37,92 @@ pub fn search(items: &[SearchItem], query: &str, limit: usize) -> Vec<SearchItem
         scored.select_nth_unstable_by(limit, compare_scored);
         scored.truncate(limit);
     }
-    scored.sort_by(compare_scored);
+    scored.sort_unstable_by(compare_scored);
 
     scored
         .into_iter()
         .take(limit)
-        .map(|(_, _, _, item)| item.clone())
+        .map(|scored| scored.item.clone())
         .collect()
 }
 
-fn compare_scored(
-    a: &(u8, i64, usize, &SearchItem),
-    b: &(u8, i64, usize, &SearchItem),
-) -> Ordering {
-    a.0.cmp(&b.0)
-        .then_with(|| b.1.cmp(&a.1))
-        .then_with(|| a.2.cmp(&b.2))
+#[derive(Debug, Clone, Copy)]
+struct ScoredItem<'a> {
+    source_rank: u8,
+    score: i64,
+    title_len: usize,
+    item: &'a SearchItem,
 }
 
-fn score_item(item: &SearchItem, normalized_query: &str) -> Option<i64> {
-    let text_score = score_normalized_title(item.normalized_title(), normalized_query)?;
-    let recency_bonus = recency_bonus(item.last_accessed_epoch_secs);
+fn compare_scored(a: &ScoredItem<'_>, b: &ScoredItem<'_>) -> Ordering {
+    b.score
+        .cmp(&a.score)
+        .then_with(|| a.source_rank.cmp(&b.source_rank))
+        .then_with(|| a.title_len.cmp(&b.title_len))
+        .then_with(|| a.item.normalized_title().cmp(b.item.normalized_title()))
+        .then_with(|| a.item.id.cmp(&b.item.id))
+}
+
+fn score_item(item: &SearchItem, normalized_query: &str, now_epoch_secs: i64) -> Option<i64> {
+    let text_score = score_text(item.normalized_title(), normalized_query)?;
+    let source_bonus = source_bonus(item);
+    let recency_bonus = recency_bonus(item.last_accessed_epoch_secs, now_epoch_secs);
     let frequency_bonus = frequency_bonus(item.use_count);
 
-    Some(text_score + recency_bonus + frequency_bonus)
+    Some(text_score + source_bonus + recency_bonus + frequency_bonus)
 }
 
-fn recency_bonus(last_accessed_epoch_secs: i64) -> i64 {
-    if last_accessed_epoch_secs <= 0 {
+fn score_text(normalized_title: &str, query: &str) -> Option<i64> {
+    if normalized_title.is_empty() || query.is_empty() {
+        return None;
+    }
+
+    let length_penalty = (normalized_title.len() as i64 - query.len() as i64).abs();
+    let compact_bonus = (query.len() as i64) * 45;
+
+    if normalized_title == query {
+        return Some(SCORE_EXACT + compact_bonus - length_penalty);
+    }
+
+    if normalized_title.starts_with(query) {
+        return Some(SCORE_PREFIX + compact_bonus - length_penalty);
+    }
+
+    if let Some(position) = normalized_title.find(query) {
+        let position_penalty = (position as i64) * 3;
+        return Some(SCORE_SUBSTRING + compact_bonus - position_penalty - length_penalty);
+    }
+
+    let (start_penalty, gap_penalty) = subsequence_penalties(normalized_title, query)?;
+    Some(SCORE_FUZZY + compact_bonus - gap_penalty * 8 - start_penalty - length_penalty)
+}
+
+fn recency_bonus(last_accessed_epoch_secs: i64, now_epoch_secs: i64) -> i64 {
+    if last_accessed_epoch_secs <= 0 || now_epoch_secs <= 0 {
         return 0;
     }
 
-    (last_accessed_epoch_secs / 86_400).clamp(0, 400)
+    let age_secs = if last_accessed_epoch_secs >= now_epoch_secs {
+        0
+    } else {
+        now_epoch_secs - last_accessed_epoch_secs
+    };
+    match age_secs {
+        0..=3_600 => 260,              // within 1 hour
+        3_601..=86_400 => 220,         // within 1 day
+        86_401..=604_800 => 170,       // within 7 days
+        604_801..=2_592_000 => 110,    // within 30 days
+        2_592_001..=7_776_000 => 60,   // within 90 days
+        7_776_001..=31_536_000 => 25,  // within 1 year
+        _ => 0,
+    }
 }
 
 fn frequency_bonus(use_count: u32) -> i64 {
-    ((use_count as i64) * 12).clamp(0, 400)
+    ((use_count as i64) * 18).clamp(0, 220)
 }
 
-fn category_priority(item: &SearchItem) -> u8 {
+fn source_rank(item: &SearchItem) -> u8 {
     if item.kind.eq_ignore_ascii_case("app") {
         return 0;
     }
@@ -74,6 +134,14 @@ fn category_priority(item: &SearchItem) -> u8 {
     }
 
     2
+}
+
+fn source_bonus(item: &SearchItem) -> i64 {
+    match source_rank(item) {
+        0 => SOURCE_APP_BONUS,
+        1 => SOURCE_LOCAL_FS_BONUS,
+        _ => 0,
+    }
 }
 
 fn is_local_path(path: &str) -> bool {
@@ -88,33 +156,12 @@ fn is_local_path(path: &str) -> bool {
         return false;
     }
 
-    // Windows drive path, e.g. C:\...
     let bytes = trimmed.as_bytes();
     if bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
         return true;
     }
 
-    // Unix absolute path.
     trimmed.starts_with('/')
-}
-
-fn score_normalized_title(normalized_title: &str, query: &str) -> Option<i64> {
-    if normalized_title.is_empty() || query.is_empty() {
-        return None;
-    }
-
-    if let Some(position) = normalized_title.find(query) {
-        let prefix_bonus = if position == 0 { 400 } else { 0 };
-        let compact_bonus = (query.len() as i64) * 40;
-        let position_penalty = position as i64;
-        let length_penalty = (normalized_title.len() as i64 - query.len() as i64).abs();
-        return Some(10_000 + prefix_bonus + compact_bonus - position_penalty - length_penalty);
-    }
-
-    let (start_penalty, gap_penalty) = subsequence_penalties(normalized_title, query)?;
-    let length_penalty = (normalized_title.len() as i64 - query.len() as i64).max(0);
-
-    Some(5_000 + (query.len() as i64) * 30 - gap_penalty * 6 - start_penalty - length_penalty)
 }
 
 fn subsequence_penalties(haystack: &str, needle: &str) -> Option<(i64, i64)> {
@@ -145,4 +192,11 @@ fn subsequence_penalties(haystack: &str, needle: &str) -> Option<(i64, i64)> {
     }
 
     Some((start_penalty.unwrap_or(0), gap_penalty))
+}
+
+fn now_epoch_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0)
 }

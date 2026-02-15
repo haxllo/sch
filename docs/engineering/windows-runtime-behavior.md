@@ -4,6 +4,8 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
 
 1. Start runtime with `cargo run -p swiftfind-core`.
 2. Runtime loads config (JSON/JSON5 with comments), logs startup mode/hotkey/paths, builds or opens index.
+   - indexing path is incremental-first: unchanged providers can be skipped using provider change stamps
+   - periodic reconcile scan still runs after the configured interval to prevent drift
 3. Runtime registers global hotkey from config (default `Ctrl+Shift+Space`).
 4. Runtime creates a native borderless top-most launcher window (hidden by default).
 5. Hotkey behavior:
@@ -29,6 +31,7 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
 9. Runtime diagnostics:
    - runtime writes local logs to `%APPDATA%\SwiftFind\logs`
    - panic hook records crash context in log file
+   - provider indexing logs include `skipped=true/false` for incremental visibility
 10. Visual/UX polish:
    - compact Spotlight/Wofi-like default bar state
    - no results panel shown when query is empty
@@ -72,6 +75,7 @@ SwiftFind now tracks a Spotlight-like architecture direction while staying perfo
 - keep overlay UI thin and move heavy work to background indexing paths
 - prefer incremental updates over full rebuilds in normal runtime
 - merge and rank multi-provider results in one deterministic list
+- ranking uses explicit weighted match tiers (exact/prefix/substring/fuzzy) plus source and usage signals
 - preserve hard latency and memory guardrails
 
 See:

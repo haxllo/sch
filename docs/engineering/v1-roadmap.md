@@ -92,6 +92,24 @@ Acceptance criteria:
 - Warm-query latency gate remains green.
 - No startup penalty compared to v1.0.0 baseline.
 
+Task breakdown (implementation):
+1. Incremental indexing hardening:
+   - add provider change-stamp support
+   - skip unchanged provider scans with periodic reconcile guard
+   - persist provider incremental metadata in SQLite
+2. Ranking v2 formalization:
+   - explicit weighted tiers for exact/prefix/substring/fuzzy match quality
+   - explicit source-priority + recency/frequency bonuses
+   - deterministic tie-break ordering independent of input order
+3. Stale launch target hygiene:
+   - carry structured launch failure code from shell launch path
+   - prune entries immediately on known missing-target failures (`2` / `3`)
+
+Current status:
+- [x] Task 1 implemented
+- [x] Task 2 implemented
+- [x] Task 3 implemented
+
 ### v1.2.0 (Update and Operations Maturity)
 
 Goal:

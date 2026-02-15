@@ -35,7 +35,7 @@ Expected startup logs include:
 - index db path
 - indexed item count
 - indexing totals (`discovered`, `upserted`, `removed`)
-- per-provider indexing diagnostics (`name`, `discovered`, `upserted`, `removed`, `elapsed_ms`)
+- per-provider indexing diagnostics (`name`, `discovered`, `upserted`, `removed`, `skipped`, `elapsed_ms`)
 
 ## Process Visibility
 

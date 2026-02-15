@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
+use std::time::UNIX_EPOCH;
 
 use crate::model::SearchItem;
 
@@ -27,6 +28,9 @@ impl std::error::Error for ProviderError {}
 pub trait DiscoveryProvider: Send + Sync {
     fn provider_name(&self) -> &'static str;
     fn discover(&self) -> Result<Vec<SearchItem>, ProviderError>;
+    fn change_stamp(&self) -> Option<String> {
+        None
+    }
 }
 
 pub struct AppProvider {
@@ -146,6 +150,10 @@ impl DiscoveryProvider for StartMenuAppDiscoveryProvider {
             Ok(items)
         }
     }
+
+    fn change_stamp(&self) -> Option<String> {
+        Some(roots_change_stamp(&self.roots))
+    }
 }
 
 pub struct FileSystemDiscoveryProvider {
@@ -226,6 +234,63 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
 
         Ok(out)
     }
+
+    fn change_stamp(&self) -> Option<String> {
+        let mut stamp = String::new();
+        stamp.push_str("roots=");
+        stamp.push_str(&roots_change_stamp(&self.roots));
+        stamp.push_str(";exclude=");
+        stamp.push_str(&roots_change_stamp(&self.excluded_roots));
+        stamp.push_str(";depth=");
+        stamp.push_str(&self.max_depth.to_string());
+        Some(stamp)
+    }
+}
+
+fn roots_change_stamp(roots: &[PathBuf]) -> String {
+    let mut parts = Vec::with_capacity(roots.len());
+    for root in roots {
+        let normalized = normalize_root_for_stamp(root);
+        let (exists, modified_secs, child_count, child_latest_secs) = quick_path_fingerprint(root);
+        parts.push(format!(
+            "{normalized}:{exists}:{modified_secs}:{child_count}:{child_latest_secs}"
+        ));
+    }
+    parts.join("|")
+}
+
+fn normalize_root_for_stamp(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+}
+
+fn quick_path_fingerprint(path: &Path) -> (u8, u64, usize, u64) {
+    let Ok(meta) = std::fs::metadata(path) else {
+        return (0, 0, 0, 0);
+    };
+    let root_modified_secs = modified_secs(&meta);
+    let mut child_count = 0_usize;
+    let mut child_latest_secs = 0_u64;
+
+    if meta.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(path) {
+            for entry in entries.flatten() {
+                child_count += 1;
+                if let Ok(child_meta) = entry.metadata() {
+                    child_latest_secs = child_latest_secs.max(modified_secs(&child_meta));
+                }
+            }
+        }
+    }
+
+    (1, root_modified_secs, child_count, child_latest_secs)
+}
+
+fn modified_secs(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_secs())
+        .unwrap_or(0)
 }
 
 fn normalized_exclusion_roots(excluded_roots: &[PathBuf]) -> Vec<String> {

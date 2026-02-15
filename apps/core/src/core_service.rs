@@ -11,9 +11,10 @@ use crate::model::SearchItem;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STALE_PRUNE_INTERVAL: Duration = Duration::from_secs(15);
+const PROVIDER_RECONCILE_INTERVAL_SECS: i64 = 30 * 60;
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -77,6 +78,7 @@ pub struct ProviderRefreshReport {
     pub discovered: usize,
     pub upserted: usize,
     pub removed: usize,
+    pub skipped: bool,
     pub elapsed_ms: u128,
 }
 
@@ -155,7 +157,7 @@ impl CoreService {
                     .ok_or_else(|| ServiceError::ItemNotFound(id.to_string()))?;
                 match launch_path(&item.path) {
                     Ok(()) => Ok(()),
-                    Err(error @ LaunchError::MissingPath(_)) => {
+                    Err(error) if should_prune_after_launch_error(&item, &error) => {
                         index_store::delete_item(&self.db, &item.id)?;
                         self.remove_cached_item_by_id(&item.id);
                         Err(ServiceError::from(error))
@@ -167,11 +169,19 @@ impl CoreService {
     }
 
     pub fn rebuild_index(&self) -> Result<usize, ServiceError> {
-        let report = self.rebuild_index_with_report()?;
+        let report = self.rebuild_index_incremental_with_report()?;
         Ok(report.indexed_total)
     }
 
     pub fn rebuild_index_with_report(&self) -> Result<IndexRefreshReport, ServiceError> {
+        self.rebuild_index_internal(false)
+    }
+
+    pub fn rebuild_index_incremental_with_report(&self) -> Result<IndexRefreshReport, ServiceError> {
+        self.rebuild_index_internal(true)
+    }
+
+    fn rebuild_index_internal(&self, incremental_mode: bool) -> Result<IndexRefreshReport, ServiceError> {
         if self.providers.is_empty() {
             self.refresh_cache_from_store()?;
             return Ok(IndexRefreshReport {
@@ -193,9 +203,35 @@ impl CoreService {
         let mut upserted_total = 0_usize;
         let mut removed_total = 0_usize;
         let mut provider_reports = Vec::with_capacity(self.providers.len());
+        let now_epoch_secs = now_epoch_secs();
 
         for provider in &self.providers {
             let started = Instant::now();
+            let provider_name = provider.provider_name().to_string();
+            let provider_stamp = if incremental_mode {
+                provider.change_stamp()
+            } else {
+                None
+            };
+            if incremental_mode
+                && should_skip_provider_discovery(
+                    &self.db,
+                    &provider_name,
+                    provider_stamp.as_deref(),
+                    now_epoch_secs,
+                )?
+            {
+                provider_reports.push(ProviderRefreshReport {
+                    provider: provider_name,
+                    discovered: 0,
+                    upserted: 0,
+                    removed: 0,
+                    skipped: true,
+                    elapsed_ms: started.elapsed().as_millis(),
+                });
+                continue;
+            }
+
             let discovered = provider.discover()?;
             let discovered_count = discovered.len();
             discovered_total += discovered_count;
@@ -233,12 +269,22 @@ impl CoreService {
 
             removed_total += removable_ids.len();
             provider_reports.push(ProviderRefreshReport {
-                provider: provider.provider_name().to_string(),
+                provider: provider_name.clone(),
                 discovered: discovered_count,
                 upserted,
                 removed: removable_ids.len(),
+                skipped: false,
                 elapsed_ms: started.elapsed().as_millis(),
             });
+
+            if incremental_mode {
+                persist_provider_discovery_state(
+                    &self.db,
+                    &provider_name,
+                    provider_stamp.as_deref(),
+                    now_epoch_secs,
+                )?;
+            }
         }
 
         self.refresh_cache_from_store()?;
@@ -253,7 +299,7 @@ impl CoreService {
     }
 
     pub fn rebuild_index_incremental(&self) -> Result<usize, ServiceError> {
-        let report = self.rebuild_index_with_report()?;
+        let report = self.rebuild_index_incremental_with_report()?;
         Ok(report.indexed_total)
     }
 
@@ -440,4 +486,76 @@ fn provider_manages_kind(provider_name: &str, kind: &str) -> bool {
         "filesystem" | "file" => kind == "file" || kind == "folder",
         _ => false,
     }
+}
+
+fn should_prune_after_launch_error(item: &SearchItem, error: &LaunchError) -> bool {
+    match error {
+        LaunchError::MissingPath(_) => true,
+        LaunchError::LaunchFailed { code: Some(code), .. } => {
+            // ShellExecute missing-file/path errors: remove stale entries immediately.
+            (*code == 2 || *code == 3)
+                && (item.kind.eq_ignore_ascii_case("app")
+                    || item.kind.eq_ignore_ascii_case("file")
+                    || item.kind.eq_ignore_ascii_case("folder"))
+        }
+        LaunchError::LaunchFailed { .. } | LaunchError::EmptyPath => false,
+    }
+}
+
+fn should_skip_provider_discovery(
+    db: &Connection,
+    provider_name: &str,
+    stamp: Option<&str>,
+    now_epoch_secs: i64,
+) -> Result<bool, ServiceError> {
+    let Some(stamp) = stamp else {
+        return Ok(false);
+    };
+
+    let stamp_key = provider_stamp_meta_key(provider_name);
+    let previous_stamp = index_store::get_meta(db, &stamp_key)?;
+    if previous_stamp.as_deref() != Some(stamp) {
+        return Ok(false);
+    }
+
+    let last_scan_key = provider_last_scan_meta_key(provider_name);
+    let last_scan_epoch = index_store::get_meta(db, &last_scan_key)?
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0);
+    if last_scan_epoch <= 0 {
+        return Ok(false);
+    }
+
+    Ok(now_epoch_secs.saturating_sub(last_scan_epoch) < PROVIDER_RECONCILE_INTERVAL_SECS)
+}
+
+fn persist_provider_discovery_state(
+    db: &Connection,
+    provider_name: &str,
+    stamp: Option<&str>,
+    now_epoch_secs: i64,
+) -> Result<(), ServiceError> {
+    if let Some(stamp) = stamp {
+        let stamp_key = provider_stamp_meta_key(provider_name);
+        index_store::set_meta(db, &stamp_key, stamp)?;
+    }
+
+    let last_scan_key = provider_last_scan_meta_key(provider_name);
+    index_store::set_meta(db, &last_scan_key, &now_epoch_secs.to_string())?;
+    Ok(())
+}
+
+fn provider_stamp_meta_key(provider_name: &str) -> String {
+    format!("provider_stamp:{provider_name}")
+}
+
+fn provider_last_scan_meta_key(provider_name: &str) -> String {
+    format!("provider_last_scan_epoch:{provider_name}")
+}
+
+fn now_epoch_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0)
 }

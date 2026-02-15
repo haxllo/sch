@@ -50,3 +50,28 @@ fn persists_items_across_reopen() {
     drop(reopened);
     std::fs::remove_file(&db_path).unwrap();
 }
+
+#[test]
+fn persists_meta_values_across_reopen() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let db_path = std::env::temp_dir()
+        .join("swiftfind")
+        .join(format!("meta-test-{unique}.sqlite3"));
+
+    {
+        let db = swiftfind_core::index_store::open_file(&db_path).unwrap();
+        swiftfind_core::index_store::set_meta(&db, "provider_stamp:filesystem", "abc123").unwrap();
+    }
+
+    let reopened = swiftfind_core::index_store::open_file(&db_path).unwrap();
+    let value = swiftfind_core::index_store::get_meta(&reopened, "provider_stamp:filesystem")
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, "abc123");
+
+    drop(reopened);
+    std::fs::remove_file(&db_path).unwrap();
+}

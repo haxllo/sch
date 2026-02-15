@@ -116,3 +116,40 @@ fn local_file_outranks_network_file_in_same_kind() {
 
     assert_eq!(ids, vec!["local", "network"]);
 }
+
+#[test]
+fn exact_match_outranks_prefix_and_substring() {
+    let items = vec![
+        SearchItem::new("exact", "app", "Code", "C:\\Code.exe"),
+        SearchItem::new("prefix", "app", "CodeRunner", "C:\\CodeRunner.exe"),
+        SearchItem::new("substring", "app", "Decode Tool", "C:\\Decode.exe"),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "code", 10);
+    let ids: Vec<&str> = results.iter().map(|i| i.id.as_str()).collect();
+
+    assert_eq!(ids[0], "exact");
+}
+
+#[test]
+fn deterministic_order_does_not_depend_on_input_order() {
+    let forward = vec![
+        SearchItem::new("b-id", "app", "Terminal", "C:\\term-b.exe"),
+        SearchItem::new("a-id", "app", "Terminal", "C:\\term-a.exe"),
+        SearchItem::new("c-id", "app", "Terminal", "C:\\term-c.exe"),
+    ];
+    let mut reversed = forward.clone();
+    reversed.reverse();
+
+    let forward_ids: Vec<String> = swiftfind_core::search::search(&forward, "term", 10)
+        .into_iter()
+        .map(|item| item.id)
+        .collect();
+    let reversed_ids: Vec<String> = swiftfind_core::search::search(&reversed, "term", 10)
+        .into_iter()
+        .map(|item| item.id)
+        .collect();
+
+    assert_eq!(forward_ids, vec!["a-id", "b-id", "c-id"]);
+    assert_eq!(reversed_ids, forward_ids);
+}

@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 pub enum LaunchError {
     EmptyPath,
     MissingPath(PathBuf),
-    LaunchFailed(String),
+    LaunchFailed {
+        message: String,
+        code: Option<i32>,
+    },
 }
 
 impl Display for LaunchError {
@@ -13,7 +16,13 @@ impl Display for LaunchError {
         match self {
             Self::EmptyPath => write!(f, "empty path"),
             Self::MissingPath(path) => write!(f, "path does not exist: {}", path.display()),
-            Self::LaunchFailed(message) => write!(f, "launch failed: {message}"),
+            Self::LaunchFailed { message, code } => {
+                if let Some(code) = code {
+                    write!(f, "launch failed: {message} (code {code})")
+                } else {
+                    write!(f, "launch failed: {message}")
+                }
+            }
         }
     }
 }
@@ -55,9 +64,10 @@ fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
     } as isize;
 
     if result <= 32 {
-        return Err(LaunchError::LaunchFailed(format!(
-            "ShellExecuteW failed for '{target}' with code {result}"
-        )));
+        return Err(LaunchError::LaunchFailed {
+            message: format!("ShellExecuteW failed for '{target}'"),
+            code: Some(result as i32),
+        });
     }
 
     Ok(())
