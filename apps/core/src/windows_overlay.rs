@@ -160,7 +160,7 @@ mod imp {
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
-    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -24;
+    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -28;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -170,7 +170,7 @@ mod imp {
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
-    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 500;
+    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 600;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
     const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe UI Variable Text";
@@ -180,9 +180,9 @@ mod imp {
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
     const COMMAND_PREFIX_TEXT: &str = "›";
-    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 24;
-    const COMMAND_PREFIX_GAP: i32 = 8;
-    const COMMAND_PREFIX_LEFT_SHIFT: i32 = 14;
+    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 32;
+    const COMMAND_PREFIX_GAP: i32 = 10;
+    const COMMAND_PREFIX_LEFT_SHIFT: i32 = 24;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -2039,13 +2039,9 @@ mod imp {
             return;
         }
 
-        let mut client: RECT = unsafe { std::mem::zeroed() };
-        unsafe {
-            GetClientRect(edit_hwnd, &mut client);
-        }
         let mut prefix_rect = text_rect;
-        prefix_rect.top = client.top;
-        prefix_rect.bottom = client.bottom;
+        prefix_rect.top = text_rect.top;
+        prefix_rect.bottom = text_rect.bottom;
         let reserved = COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP + COMMAND_PREFIX_LEFT_SHIFT;
         prefix_rect.left = (text_rect.left - reserved).max(0);
         prefix_rect.right = (prefix_rect.left + COMMAND_PREFIX_RESERVED_WIDTH)
@@ -2071,7 +2067,7 @@ mod imp {
                 prefix.as_ptr(),
                 -1,
                 &mut prefix_rect,
-                DT_RIGHT | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
+                DT_CENTER | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
             );
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
