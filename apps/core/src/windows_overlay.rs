@@ -16,13 +16,13 @@ mod imp {
         DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        AddFontResourceExW, BeginPaint, CreateFontW, CreatePen, CreateRoundRectRgn,
-        CreateSolidBrush, DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, FillRgn, FrameRgn,
-        GetDC, GetStockObject, GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, LineTo,
-        MoveToEx, Rectangle, ReleaseDC, SelectObject, SetBkColor, SetBkMode, SetTextColor,
-        SetWindowRgn, TextOutW, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL,
-        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC,
-        NULL_BRUSH, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, TEXTMETRICW, TRANSPARENT,
+        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
+        DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
+        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
+        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
+        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+        TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -159,6 +159,7 @@ mod imp {
     const FONT_TOP_HIT_HEIGHT: i32 = -16;
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
+    const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -167,6 +168,9 @@ mod imp {
     const FONT_WEIGHT_TOP_HIT: i32 = 600;
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
+    const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
+    const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe MDL2 Assets";
+    const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe Fluent Icons";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
@@ -357,6 +361,8 @@ mod imp {
         top_hit_font: isize,
         hint_font: isize,
         help_tip_font: isize,
+        command_icon_font: isize,
+        command_icon_fallback_font: isize,
 
         panel_brush: isize,
         border_brush: isize,
@@ -430,6 +436,8 @@ mod imp {
                 top_hit_font: 0,
                 hint_font: 0,
                 help_tip_font: 0,
+                command_icon_font: 0,
+                command_icon_fallback_font: 0,
                 panel_brush: 0,
                 border_brush: 0,
                 input_brush: 0,
@@ -1198,6 +1206,16 @@ mod imp {
                     state.top_hit_font = create_font(FONT_TOP_HIT_HEIGHT, FONT_WEIGHT_TOP_HIT);
                     state.hint_font = create_font(FONT_HINT_HEIGHT, FONT_WEIGHT_HINT);
                     state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FONT_WEIGHT_HELP_TIP);
+                    state.command_icon_font = create_font_with_family(
+                        FONT_COMMAND_ICON_HEIGHT,
+                        FONT_WEIGHT_COMMAND_ICON,
+                        icon_font_family_primary_wide(),
+                    );
+                    state.command_icon_fallback_font = create_font_with_family(
+                        FONT_COMMAND_ICON_HEIGHT,
+                        FONT_WEIGHT_COMMAND_ICON,
+                        icon_font_family_fallback_wide(),
+                    );
 
                     state.edit_hwnd = unsafe {
                         CreateWindowExW(
@@ -2098,7 +2116,7 @@ mod imp {
                     FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
                     let icon_tint =
                         blend_color(palette.results_bg, palette.icon_text, content_progress);
-                    if !draw_action_icon(dis.hDC, &icon_rect, &row, icon_tint) {
+                    if !draw_action_icon(dis.hDC, &icon_rect, &row, state, icon_tint) {
                         let mut icon_text_rect = icon_rect;
                         SetTextColor(dis.hDC, icon_tint);
                         DrawTextW(
@@ -2514,92 +2532,72 @@ mod imp {
         }
     }
 
-    fn draw_icon_line(hdc: HDC, from_x: i32, from_y: i32, to_x: i32, to_y: i32) {
-        unsafe {
-            MoveToEx(hdc, from_x, from_y, std::ptr::null_mut());
-            LineTo(hdc, to_x, to_y);
+    fn action_icon_codepoint(kind: ActionIconKind) -> u32 {
+        match kind {
+            ActionIconKind::WebSearch => 0xE721,   // Search
+            ActionIconKind::Clipboard => 0xE8C8,   // Clipboard List
+            ActionIconKind::Settings => 0xE713,    // Settings
+            ActionIconKind::Diagnostics => 0xE8A5, // Page/Report
+            ActionIconKind::Logs => 0xE8A5,        // Page
+            ActionIconKind::Rebuild => 0xE895,     // Sync
+            ActionIconKind::Generic => 0xE756,     // Command Prompt
         }
     }
 
-    fn draw_action_icon(hdc: HDC, icon_rect: &RECT, row: &OverlayRow, color: u32) -> bool {
+    fn draw_action_icon(
+        hdc: HDC,
+        icon_rect: &RECT,
+        row: &OverlayRow,
+        state: &OverlayShellState,
+        color: u32,
+    ) -> bool {
         if !row.kind.eq_ignore_ascii_case("action") {
             return false;
         }
-        let kind = action_icon_kind_for_title(&row.title);
+        let codepoint = action_icon_codepoint(action_icon_kind_for_title(&row.title));
+        let Some(glyph) = char::from_u32(codepoint) else {
+            return false;
+        };
+        let glyph_text = glyph.to_string();
+        let glyph_wide = to_wide(&glyph_text);
+        let mut glyph_rect = *icon_rect;
+        glyph_rect.top += 1;
+
         unsafe {
-            let pen = CreatePen(PS_SOLID, 2, color);
-            if pen.is_null() {
-                return false;
-            }
-            let old_pen = SelectObject(hdc, pen as _);
-            let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+            SetBkMode(hdc, TRANSPARENT as i32);
+            SetTextColor(hdc, color);
 
-            let left = icon_rect.left + 7;
-            let right = icon_rect.right - 7;
-            let top = icon_rect.top + 7;
-            let bottom = icon_rect.bottom - 7;
-            let center_x = (left + right) / 2;
-            let center_y = (top + bottom) / 2;
-
-            match kind {
-                ActionIconKind::WebSearch => {
-                    Ellipse(hdc, left, top, center_x + 3, center_y + 3);
-                    draw_icon_line(hdc, center_x + 1, center_y + 1, right, bottom);
-                }
-                ActionIconKind::Clipboard => {
-                    Rectangle(hdc, left + 2, top + 2, right, bottom);
-                    draw_icon_line(hdc, left + 6, top, right - 6, top);
-                    draw_icon_line(hdc, left + 6, top, left + 6, top + 2);
-                    draw_icon_line(hdc, right - 6, top, right - 6, top + 2);
-                    draw_icon_line(hdc, left + 6, center_y, right - 4, center_y);
-                    draw_icon_line(hdc, left + 6, center_y + 4, right - 7, center_y + 4);
-                }
-                ActionIconKind::Settings => {
-                    draw_icon_line(hdc, left, top + 2, right, top + 2);
-                    draw_icon_line(hdc, left, center_y, right, center_y);
-                    draw_icon_line(hdc, left, bottom - 2, right, bottom - 2);
-                    Ellipse(hdc, left + 3, top, left + 9, top + 6);
-                    Ellipse(hdc, center_x + 1, center_y - 3, center_x + 7, center_y + 3);
-                    Ellipse(hdc, right - 9, bottom - 5, right - 3, bottom + 1);
-                }
-                ActionIconKind::Diagnostics => {
-                    Rectangle(hdc, left + 1, top + 1, right, bottom);
-                    draw_icon_line(hdc, left + 3, center_y, left + 6, center_y);
-                    draw_icon_line(hdc, left + 6, center_y, left + 8, center_y + 3);
-                    draw_icon_line(hdc, left + 8, center_y + 3, left + 10, center_y - 4);
-                    draw_icon_line(hdc, left + 10, center_y - 4, left + 13, center_y + 4);
-                    draw_icon_line(hdc, left + 13, center_y + 4, left + 16, center_y);
-                    draw_icon_line(hdc, left + 16, center_y, right - 3, center_y);
-                }
-                ActionIconKind::Logs => {
-                    Rectangle(hdc, left + 2, top + 1, right - 1, bottom);
-                    draw_icon_line(hdc, right - 7, top + 1, right - 1, top + 7);
-                    draw_icon_line(hdc, right - 7, top + 1, right - 7, top + 7);
-                    draw_icon_line(hdc, right - 7, top + 7, right - 1, top + 7);
-                    draw_icon_line(hdc, left + 5, center_y - 1, right - 9, center_y - 1);
-                    draw_icon_line(hdc, left + 5, center_y + 3, right - 11, center_y + 3);
-                }
-                ActionIconKind::Rebuild => {
-                    draw_icon_line(hdc, left + 2, top + 3, right - 6, top + 3);
-                    draw_icon_line(hdc, right - 6, top + 3, right - 9, top + 1);
-                    draw_icon_line(hdc, right - 6, top + 3, right - 9, top + 5);
-                    draw_icon_line(hdc, right - 2, bottom - 3, left + 6, bottom - 3);
-                    draw_icon_line(hdc, left + 6, bottom - 3, left + 9, bottom - 1);
-                    draw_icon_line(hdc, left + 6, bottom - 3, left + 9, bottom - 5);
-                    draw_icon_line(hdc, right - 2, top + 3, right - 2, center_y);
-                    draw_icon_line(hdc, left + 2, bottom - 3, left + 2, center_y);
-                }
-                ActionIconKind::Generic => {
-                    draw_icon_line(hdc, left + 4, top + 2, right - 5, center_y);
-                    draw_icon_line(hdc, left + 4, bottom - 2, right - 5, center_y);
+            if state.command_icon_font != 0 {
+                let old_font = SelectObject(hdc, state.command_icon_font as _);
+                let drawn = DrawTextW(
+                    hdc,
+                    glyph_wide.as_ptr(),
+                    -1,
+                    &mut glyph_rect,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                ) != 0;
+                SelectObject(hdc, old_font);
+                if drawn {
+                    return true;
                 }
             }
 
-            SelectObject(hdc, old_pen);
-            SelectObject(hdc, old_brush);
-            DeleteObject(pen as _);
+            if state.command_icon_fallback_font != 0 {
+                let old_font = SelectObject(hdc, state.command_icon_fallback_font as _);
+                let drawn = DrawTextW(
+                    hdc,
+                    glyph_wide.as_ptr(),
+                    -1,
+                    &mut glyph_rect,
+                    DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                ) != 0;
+                SelectObject(hdc, old_font);
+                if drawn {
+                    return true;
+                }
+            }
         }
-        true
+        false
     }
 
     fn draw_row_icon(
@@ -4089,6 +4087,12 @@ mod imp {
             if state.help_tip_font != 0 {
                 DeleteObject(state.help_tip_font as _);
             }
+            if state.command_icon_font != 0 {
+                DeleteObject(state.command_icon_font as _);
+            }
+            if state.command_icon_fallback_font != 0 {
+                DeleteObject(state.command_icon_fallback_font as _);
+            }
             if state.panel_brush != 0 {
                 DeleteObject(state.panel_brush as _);
             }
@@ -4155,6 +4159,20 @@ mod imp {
                 );
                 to_wide(&family)
             })
+            .as_slice()
+    }
+
+    fn icon_font_family_primary_wide() -> &'static [u16] {
+        static ICON_FONT_PRIMARY_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
+        ICON_FONT_PRIMARY_WIDE
+            .get_or_init(|| to_wide(ICON_FONT_FAMILY_PRIMARY))
+            .as_slice()
+    }
+
+    fn icon_font_family_fallback_wide() -> &'static [u16] {
+        static ICON_FONT_FALLBACK_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
+        ICON_FONT_FALLBACK_WIDE
+            .get_or_init(|| to_wide(ICON_FONT_FAMILY_FALLBACK))
             .as_slice()
     }
 
@@ -4232,6 +4250,10 @@ mod imp {
     }
 
     fn create_font(height: i32, weight: i32) -> isize {
+        create_font_with_family(height, weight, font_family_wide())
+    }
+
+    fn create_font_with_family(height: i32, weight: i32, family_wide: &[u16]) -> isize {
         (unsafe {
             CreateFontW(
                 height,
@@ -4247,7 +4269,7 @@ mod imp {
                 0,
                 DEFAULT_QUALITY as u32,
                 FF_DONTCARE as u32,
-                font_family_wide().as_ptr(),
+                family_wide.as_ptr(),
             )
         }) as isize
     }
