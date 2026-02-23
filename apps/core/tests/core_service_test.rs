@@ -79,6 +79,40 @@ fn service_launch_by_id_uses_indexed_path() {
 }
 
 #[test]
+fn service_launch_by_id_records_usage_signals() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let launch_path = std::env::temp_dir().join(format!("swiftfind-launch-usage-{unique}.tmp"));
+    std::fs::write(&launch_path, b"ok").unwrap();
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db).unwrap();
+
+    service
+        .upsert_item(&swiftfind_core::model::SearchItem::new(
+            "usage-id",
+            "file",
+            "Usage Target",
+            launch_path.to_str().unwrap(),
+        ))
+        .unwrap();
+
+    service.launch(LaunchTarget::Id("usage-id")).unwrap();
+    let snapshot = service.cached_items_snapshot();
+    let updated = snapshot
+        .iter()
+        .find(|item| item.id == "usage-id")
+        .expect("updated item should exist");
+    assert_eq!(updated.use_count, 1);
+    assert!(updated.last_accessed_epoch_secs > 0);
+
+    std::fs::remove_file(&launch_path).unwrap();
+}
+
+#[test]
 fn service_launch_by_missing_id_returns_typed_error() {
     let config = test_config();
     let db = swiftfind_core::index_store::open_memory().unwrap();
@@ -301,6 +335,56 @@ fn incremental_rebuild_prunes_missing_provider_items() {
     std::fs::remove_file(initial_path).unwrap();
     std::fs::remove_file(stable_path).unwrap();
     std::fs::remove_file(replacement_path).unwrap();
+}
+
+#[test]
+fn incremental_rebuild_preserves_usage_metrics() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("swiftfind-inc-usage-{unique}.tmp"));
+    std::fs::write(&path, b"ok").unwrap();
+
+    let provider_items = Arc::new(Mutex::new(vec![SearchItem::new(
+        "file:usage",
+        "file",
+        "Usage App",
+        path.to_string_lossy().as_ref(),
+    )]));
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db)
+        .unwrap()
+        .with_providers(vec![Box::new(MutableProvider::new(
+            "filesystem",
+            provider_items.clone(),
+        ))]);
+
+    service.rebuild_index_incremental_with_report().unwrap();
+    service.launch(LaunchTarget::Id("file:usage")).unwrap();
+
+    {
+        let mut guard = provider_items.lock().unwrap();
+        guard[0] = SearchItem::new(
+            "file:usage",
+            "file",
+            "Usage App Updated",
+            path.to_string_lossy().as_ref(),
+        );
+    }
+
+    service.rebuild_index_incremental_with_report().unwrap();
+    let snapshot = service.cached_items_snapshot();
+    let updated = snapshot
+        .iter()
+        .find(|item| item.id == "file:usage")
+        .expect("reindexed item should exist");
+    assert!(updated.use_count >= 1);
+    assert!(updated.last_accessed_epoch_secs > 0);
+
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]

@@ -15,6 +15,45 @@ const SOURCE_LOCAL_FS_BONUS: i64 = 420;
 const SOURCE_ACTION_BONUS: i64 = 350;
 const SOURCE_CLIPBOARD_BONUS: i64 = 300;
 
+const WORD_PREFIX_PRIMARY_BOOST: i64 = 210;
+const WORD_PREFIX_SECONDARY_BOOST: i64 = 140;
+const ACRONYM_EXACT_BOOST: i64 = 290;
+const ACRONYM_PREFIX_BOOST: i64 = 190;
+const MAX_LEXICAL_SIGNAL_BOOST: i64 = 520;
+
+const APP_INTENT_SHORT_QUERY_BONUS: i64 = 320;
+const APP_INTENT_MEDIUM_QUERY_BONUS: i64 = 160;
+const NON_APP_SHORT_QUERY_PENALTY: i64 = 120;
+
+const TOP_HIT_CONFIDENCE_DELTA: i64 = 28;
+const TOP_HIT_APP_PREFERENCE_DELTA_SHORT: i64 = 7_000;
+const TOP_HIT_APP_PREFERENCE_DELTA_MEDIUM: i64 = 2_100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextMatchKind {
+    Exact,
+    Prefix,
+    Substring,
+    Fuzzy,
+}
+
+impl TextMatchKind {
+    fn rank(self) -> u8 {
+        match self {
+            Self::Exact => 0,
+            Self::Prefix => 1,
+            Self::Substring => 2,
+            Self::Fuzzy => 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextScore {
+    score: i64,
+    kind: TextMatchKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchFilter {
     pub mode: SearchMode,
@@ -57,18 +96,26 @@ pub fn search_with_filter(
 
     let normalized_query = normalize_for_search(query);
     let fast_path = is_default_filter(filter) && !normalized_query.is_empty();
+    let app_intent_query = looks_like_app_intent_query(query, &normalized_query, filter.mode);
     let now_epoch_secs = now_epoch_secs();
     let mut scored: Vec<ScoredItem<'_>> = items
         .iter()
         .filter_map(|item| {
             let score = if fast_path {
-                score_item_fast(item, &normalized_query, now_epoch_secs)
+                score_item_fast(item, &normalized_query, now_epoch_secs, app_intent_query)
             } else {
-                score_item(item, &normalized_query, now_epoch_secs, filter)
+                score_item(
+                    item,
+                    &normalized_query,
+                    now_epoch_secs,
+                    filter,
+                    app_intent_query,
+                )
             };
             score.map(|score| ScoredItem {
                 source_rank: source_rank(item),
-                score,
+                score: score.score,
+                match_kind: score.kind,
                 title_len: item.normalized_title().len(),
                 item,
             })
@@ -80,6 +127,7 @@ pub fn search_with_filter(
         scored.truncate(limit);
     }
     scored.sort_unstable_by(compare_scored);
+    apply_top_hit_confidence_guard(&mut scored, &normalized_query, app_intent_query);
 
     scored
         .into_iter()
@@ -92,6 +140,7 @@ pub fn search_with_filter(
 struct ScoredItem<'a> {
     source_rank: u8,
     score: i64,
+    match_kind: TextMatchKind,
     title_len: usize,
     item: &'a SearchItem,
 }
@@ -99,19 +148,35 @@ struct ScoredItem<'a> {
 fn compare_scored(a: &ScoredItem<'_>, b: &ScoredItem<'_>) -> Ordering {
     b.score
         .cmp(&a.score)
+        .then_with(|| a.match_kind.rank().cmp(&b.match_kind.rank()))
         .then_with(|| a.source_rank.cmp(&b.source_rank))
         .then_with(|| a.title_len.cmp(&b.title_len))
         .then_with(|| a.item.normalized_title().cmp(b.item.normalized_title()))
         .then_with(|| a.item.id.cmp(&b.item.id))
 }
 
-fn score_item_fast(item: &SearchItem, normalized_query: &str, now_epoch_secs: i64) -> Option<i64> {
+fn score_item_fast(
+    item: &SearchItem,
+    normalized_query: &str,
+    now_epoch_secs: i64,
+    app_intent_query: bool,
+) -> Option<TextScore> {
     let text_score = score_text(item.normalized_title(), normalized_query)?;
+    let lexical_signal_bonus = word_boundary_and_acronym_bonus(&item.title, normalized_query);
+    let app_intent_bonus = app_intent_bonus(item, app_intent_query, normalized_query.len());
     let source_bonus = source_bonus(item);
     let recency_bonus = recency_bonus(item.last_accessed_epoch_secs, now_epoch_secs);
     let frequency_bonus = frequency_bonus(item.use_count);
 
-    Some(text_score + source_bonus + recency_bonus + frequency_bonus)
+    Some(TextScore {
+        score: text_score.score
+            + lexical_signal_bonus
+            + app_intent_bonus
+            + source_bonus
+            + recency_bonus
+            + frequency_bonus,
+        kind: text_score.kind,
+    })
 }
 
 fn score_item(
@@ -119,7 +184,8 @@ fn score_item(
     normalized_query: &str,
     now_epoch_secs: i64,
     filter: &SearchFilter,
-) -> Option<i64> {
+    app_intent_query: bool,
+) -> Option<TextScore> {
     if !matches_mode(item, filter.mode) {
         return None;
     }
@@ -136,21 +202,40 @@ fn score_item(
     }
 
     let text_score = if normalized_query.is_empty() {
-        0
+        TextScore {
+            score: 0,
+            kind: TextMatchKind::Substring,
+        }
     } else {
         score_text(item.normalized_title(), normalized_query).or_else(|| {
-            score_text(item.normalized_search_text(), normalized_query).map(|s| s - 1_500)
+            score_text(item.normalized_search_text(), normalized_query).map(|text_score| {
+                TextScore {
+                    score: text_score.score - 1_500,
+                    kind: text_score.kind,
+                }
+            })
         })?
     };
+    let lexical_signal_bonus = word_boundary_and_acronym_bonus(&item.title, normalized_query);
+    let app_intent_bonus = app_intent_bonus(item, app_intent_query, normalized_query.len());
     let source_bonus = source_bonus(item);
     let mode_bonus = mode_bonus(item, filter.mode);
     let recency_bonus = recency_bonus(item.last_accessed_epoch_secs, now_epoch_secs);
     let frequency_bonus = frequency_bonus(item.use_count);
 
-    Some(text_score + source_bonus + mode_bonus + recency_bonus + frequency_bonus)
+    Some(TextScore {
+        score: text_score.score
+            + lexical_signal_bonus
+            + app_intent_bonus
+            + source_bonus
+            + mode_bonus
+            + recency_bonus
+            + frequency_bonus,
+        kind: text_score.kind,
+    })
 }
 
-fn score_text(normalized_title: &str, query: &str) -> Option<i64> {
+fn score_text(normalized_title: &str, query: &str) -> Option<TextScore> {
     if normalized_title.is_empty() || query.is_empty() {
         return None;
     }
@@ -159,20 +244,32 @@ fn score_text(normalized_title: &str, query: &str) -> Option<i64> {
     let compact_bonus = (query.len() as i64) * 45;
 
     if normalized_title == query {
-        return Some(SCORE_EXACT + compact_bonus - length_penalty);
+        return Some(TextScore {
+            score: SCORE_EXACT + compact_bonus - length_penalty,
+            kind: TextMatchKind::Exact,
+        });
     }
 
     if normalized_title.starts_with(query) {
-        return Some(SCORE_PREFIX + compact_bonus - length_penalty);
+        return Some(TextScore {
+            score: SCORE_PREFIX + compact_bonus - length_penalty,
+            kind: TextMatchKind::Prefix,
+        });
     }
 
     if let Some(position) = normalized_title.find(query) {
         let position_penalty = (position as i64) * 3;
-        return Some(SCORE_SUBSTRING + compact_bonus - position_penalty - length_penalty);
+        return Some(TextScore {
+            score: SCORE_SUBSTRING + compact_bonus - position_penalty - length_penalty,
+            kind: TextMatchKind::Substring,
+        });
     }
 
     let (start_penalty, gap_penalty) = subsequence_penalties(normalized_title, query)?;
-    Some(SCORE_FUZZY + compact_bonus - gap_penalty * 8 - start_penalty - length_penalty)
+    Some(TextScore {
+        score: SCORE_FUZZY + compact_bonus - gap_penalty * 8 - start_penalty - length_penalty,
+        kind: TextMatchKind::Fuzzy,
+    })
 }
 
 fn recency_bonus(last_accessed_epoch_secs: i64, now_epoch_secs: i64) -> i64 {
@@ -246,6 +343,148 @@ fn source_bonus(item: &SearchItem) -> i64 {
         3 => SOURCE_CLIPBOARD_BONUS,
         _ => 0,
     }
+}
+
+fn apply_top_hit_confidence_guard(
+    scored: &mut [ScoredItem<'_>],
+    normalized_query: &str,
+    app_intent_query: bool,
+) {
+    if scored.len() < 2 || normalized_query.is_empty() {
+        return;
+    }
+
+    let lead = scored[0];
+    let runner_up = scored[1];
+    let score_delta = lead.score.saturating_sub(runner_up.score);
+
+    let stronger_runner_up_match = runner_up.match_kind.rank() < lead.match_kind.rank()
+        && score_delta <= TOP_HIT_CONFIDENCE_DELTA;
+
+    let app_runner_up_preferred = app_intent_query
+        && !lead.item.kind.eq_ignore_ascii_case("app")
+        && runner_up.item.kind.eq_ignore_ascii_case("app")
+        && score_delta
+            <= if normalized_query.len() <= 2 {
+                TOP_HIT_APP_PREFERENCE_DELTA_SHORT
+            } else {
+                TOP_HIT_APP_PREFERENCE_DELTA_MEDIUM
+            };
+
+    if stronger_runner_up_match || app_runner_up_preferred {
+        scored.swap(0, 1);
+    }
+}
+
+fn word_boundary_and_acronym_bonus(title: &str, normalized_query: &str) -> i64 {
+    if title.trim().is_empty() || normalized_query.is_empty() {
+        return 0;
+    }
+
+    let words = normalized_word_tokens(title);
+    if words.is_empty() {
+        return 0;
+    }
+
+    let mut bonus = 0_i64;
+    if words
+        .first()
+        .is_some_and(|word| word.starts_with(normalized_query))
+    {
+        bonus += WORD_PREFIX_PRIMARY_BOOST;
+    } else if words
+        .iter()
+        .skip(1)
+        .any(|word| word.starts_with(normalized_query))
+    {
+        bonus += WORD_PREFIX_SECONDARY_BOOST;
+    }
+
+    let acronym: String = words
+        .iter()
+        .filter_map(|word| word.chars().next())
+        .collect();
+    if normalized_query.len() >= 2 {
+        if acronym == normalized_query {
+            bonus += ACRONYM_EXACT_BOOST;
+        } else if acronym.starts_with(normalized_query) {
+            bonus += ACRONYM_PREFIX_BOOST;
+        }
+    }
+
+    bonus.clamp(0, MAX_LEXICAL_SIGNAL_BOOST)
+}
+
+fn normalized_word_tokens(title: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut current = String::new();
+    let mut previous_was_lower = false;
+
+    for ch in title.chars() {
+        if !ch.is_alphanumeric() {
+            if !current.is_empty() {
+                words.push(std::mem::take(&mut current));
+            }
+            previous_was_lower = false;
+            continue;
+        }
+
+        let is_upper = ch.is_uppercase();
+        if !current.is_empty() && is_upper && previous_was_lower {
+            words.push(std::mem::take(&mut current));
+        }
+
+        for lower in ch.to_lowercase() {
+            current.push(lower);
+        }
+        previous_was_lower = ch.is_lowercase();
+    }
+
+    if !current.is_empty() {
+        words.push(current);
+    }
+
+    words
+}
+
+fn app_intent_bonus(item: &SearchItem, app_intent_query: bool, normalized_query_len: usize) -> i64 {
+    if !app_intent_query || normalized_query_len == 0 {
+        return 0;
+    }
+
+    if item.kind.eq_ignore_ascii_case("app") {
+        if normalized_query_len <= 2 {
+            APP_INTENT_SHORT_QUERY_BONUS
+        } else if normalized_query_len <= 4 {
+            APP_INTENT_MEDIUM_QUERY_BONUS
+        } else {
+            0
+        }
+    } else if (item.kind.eq_ignore_ascii_case("file") || item.kind.eq_ignore_ascii_case("folder"))
+        && normalized_query_len <= 2
+    {
+        -NON_APP_SHORT_QUERY_PENALTY
+    } else {
+        0
+    }
+}
+
+fn looks_like_app_intent_query(raw_query: &str, normalized_query: &str, mode: SearchMode) -> bool {
+    if normalized_query.is_empty() || matches!(mode, SearchMode::Files) {
+        return false;
+    }
+
+    let trimmed = raw_query.trim();
+    if trimmed.is_empty() || trimmed.starts_with('>') {
+        return false;
+    }
+
+    !(trimmed.contains('\\')
+        || trimmed.contains('/')
+        || trimmed.contains(':')
+        || trimmed.contains('.')
+        || trimmed.contains('*')
+        || trimmed.contains('?'))
 }
 
 fn is_default_filter(filter: &SearchFilter) -> bool {

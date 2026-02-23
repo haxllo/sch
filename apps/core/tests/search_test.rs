@@ -153,3 +153,41 @@ fn deterministic_order_does_not_depend_on_input_order() {
     assert_eq!(forward_ids, vec!["a-id", "b-id", "c-id"]);
     assert_eq!(reversed_ids, forward_ids);
 }
+
+#[test]
+fn word_boundary_boost_promotes_whole_word_match() {
+    let items = vec![
+        SearchItem::new("compact", "app", "Superstudio", "C:\\Superstudio.exe"),
+        SearchItem::new("spaced", "app", "Visual Studio Code", "C:\\VSCode.exe"),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "studio", 10);
+    assert_eq!(results[0].id, "spaced");
+}
+
+#[test]
+fn acronym_boost_promotes_expected_match() {
+    let items = vec![
+        SearchItem::new("acronym", "app", "Git Kraken", "C:\\GitKraken.exe"),
+        SearchItem::new("fuzzy", "app", "Gecko", "C:\\Gecko.exe"),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "gk", 10);
+    assert_eq!(results[0].id, "acronym");
+}
+
+#[test]
+fn short_plain_query_prefers_app_top_hit() {
+    let items = vec![
+        SearchItem::new("file-exact", "file", "V", "C:\\Users\\Admin\\v.txt"),
+        SearchItem::new(
+            "app-prefix",
+            "app",
+            "Vivaldi",
+            "C:\\Program Files\\Vivaldi\\vivaldi.exe",
+        ),
+    ];
+
+    let results = swiftfind_core::search::search(&items, "v", 10);
+    assert_eq!(results[0].id, "app-prefix");
+}

@@ -179,7 +179,10 @@ impl CoreService {
                 let item = index_store::get_item(&self.db, id)?
                     .ok_or_else(|| ServiceError::ItemNotFound(id.to_string()))?;
                 match launch_path(&item.path) {
-                    Ok(()) => Ok(()),
+                    Ok(()) => {
+                        self.record_successful_launch(&item)?;
+                        Ok(())
+                    }
                     Err(error) if should_prune_after_launch_error(&item, &error) => {
                         index_store::delete_item(&self.db, &item.id)?;
                         self.remove_cached_item_by_id(&item.id);
@@ -267,7 +270,18 @@ impl CoreService {
             let mut upserted = 0_usize;
             let mut discovered_ids = HashSet::with_capacity(discovered_count);
 
-            for item in discovered {
+            for mut item in discovered {
+                if let Some(previous) = existing_by_id.get(&item.id) {
+                    // Discovery providers do not carry usage metrics; preserve learned
+                    // launch signals across incremental/full refreshes.
+                    if item.use_count == 0 {
+                        item.use_count = previous.use_count;
+                    }
+                    if item.last_accessed_epoch_secs <= 0 {
+                        item.last_accessed_epoch_secs = previous.last_accessed_epoch_secs;
+                    }
+                }
+
                 discovered_ids.insert(item.id.clone());
                 let changed = existing_by_id
                     .get(&item.id)
@@ -415,6 +429,17 @@ impl CoreService {
                 guard.retain(|entry| entry.id != id);
             }
         }
+    }
+
+    fn record_successful_launch(&self, item: &SearchItem) -> Result<(), ServiceError> {
+        let now = now_epoch_secs();
+        let mut updated = item.clone();
+        updated.use_count = updated.use_count.saturating_add(1);
+        updated.last_accessed_epoch_secs = now.max(updated.last_accessed_epoch_secs);
+
+        index_store::upsert_item(&self.db, &updated)?;
+        self.upsert_cached_item(updated);
+        Ok(())
     }
 
     fn prune_stale_items_if_due(&self) -> Result<(), ServiceError> {
