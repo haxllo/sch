@@ -50,6 +50,29 @@ pub fn launch_open_target(target: &str) -> Result<(), LaunchError> {
     launch_open(trimmed)
 }
 
+pub fn launch_browser_default_search(
+    query: &str,
+    fallback_url: Option<&str>,
+) -> Result<(), LaunchError> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Err(LaunchError::EmptyPath);
+    }
+
+    if launch_open(trimmed).is_ok() {
+        return Ok(());
+    }
+
+    if let Some(url) = fallback_url {
+        let fallback = url.trim();
+        if !fallback.is_empty() {
+            return launch_open(fallback);
+        }
+    }
+
+    launch_open(trimmed)
+}
+
 #[cfg(target_os = "windows")]
 fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
     let target = candidate.to_string_lossy().into_owned();

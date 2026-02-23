@@ -19,6 +19,11 @@ fn accepts_default_config() {
     assert!(!cfg.launch_at_startup);
     assert!(!cfg.hotkey_help.trim().is_empty());
     assert!(!cfg.hotkey_recommended.is_empty());
+    assert_eq!(
+        cfg.web_search_provider,
+        swiftfind_core::config::WebSearchProvider::Duckduckgo
+    );
+    assert!(cfg.web_search_browser_default_enabled);
     assert!(
         cfg.index_db_path.to_string_lossy().contains("swiftfind")
             || cfg.index_db_path.to_string_lossy().contains("SwiftFind")
@@ -159,6 +164,8 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
     assert!(raw.contains("\"discovery_exclude_roots\":"));
+    assert!(raw.contains("\"web_search_provider\": \"duckduckgo\""));
+    assert!(raw.contains("\"web_search_browser_default_enabled\": true"));
     if cfg.discovery_exclude_roots.is_empty() {
         assert!(raw.contains("\"discovery_exclude_roots\": []"));
     } else {
@@ -178,6 +185,15 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert_eq!(loaded.discovery_exclude_roots, cfg.discovery_exclude_roots);
 
     std::fs::remove_file(&config_path).unwrap();
+}
+
+#[test]
+fn rejects_custom_web_provider_without_query_placeholder() {
+    let mut cfg = swiftfind_core::config::Config::default();
+    cfg.web_search_provider = swiftfind_core::config::WebSearchProvider::Custom;
+    cfg.web_search_custom_template = "https://example.com/search".to_string();
+    let err = swiftfind_core::config::validate(&cfg).expect_err("custom template should fail");
+    assert!(err.contains("{query}"));
 }
 
 #[test]

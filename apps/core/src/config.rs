@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 2;
+pub const CURRENT_CONFIG_VERSION: u32 = 3;
 const LEGACY_IDLE_CACHE_TRIM_MS_V1: u32 = 1200;
 const LEGACY_ACTIVE_MEMORY_TARGET_MB_V1: u16 = 80;
 const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
@@ -15,6 +15,9 @@ const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
     "discovery_exclude_roots",
     "search_mode_default",
     "search_dsl_enabled",
+    "web_search_provider",
+    "web_search_custom_template",
+    "web_search_browser_default_enabled",
     "clipboard_enabled",
     "clipboard_retention_minutes",
     "clipboard_exclude_sensitive_patterns",
@@ -50,6 +53,35 @@ impl SearchMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WebSearchProvider {
+    #[default]
+    Duckduckgo,
+    Google,
+    Bing,
+    Brave,
+    Startpage,
+    Ecosia,
+    Yahoo,
+    Custom,
+}
+
+impl WebSearchProvider {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Duckduckgo => "DuckDuckGo",
+            Self::Google => "Google",
+            Self::Bing => "Bing",
+            Self::Brave => "Brave",
+            Self::Startpage => "Startpage",
+            Self::Ecosia => "Ecosia",
+            Self::Yahoo => "Yahoo",
+            Self::Custom => "Custom",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
@@ -65,6 +97,9 @@ pub struct Config {
     pub hotkey_recommended: Vec<String>,
     pub search_mode_default: SearchMode,
     pub search_dsl_enabled: bool,
+    pub web_search_provider: WebSearchProvider,
+    pub web_search_custom_template: String,
+    pub web_search_browser_default_enabled: bool,
     pub clipboard_enabled: bool,
     pub clipboard_retention_minutes: u32,
     pub clipboard_exclude_sensitive_patterns: Vec<String>,
@@ -100,6 +135,9 @@ impl Default for Config {
             ],
             search_mode_default: SearchMode::All,
             search_dsl_enabled: true,
+            web_search_provider: WebSearchProvider::Duckduckgo,
+            web_search_custom_template: String::new(),
+            web_search_browser_default_enabled: true,
             clipboard_enabled: true,
             clipboard_retention_minutes: 8 * 60,
             clipboard_exclude_sensitive_patterns: vec![
@@ -311,6 +349,34 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         "false"
     });
     text.push_str(",\n\n");
+    text.push_str("  // Web search command actions\n");
+    text.push_str(
+        "  // Provider: duckduckgo | google | bing | brave | startpage | ecosia | yahoo | custom\n",
+    );
+    text.push_str("  \"web_search_provider\": ");
+    text.push_str(&json_string(match cfg.web_search_provider {
+        WebSearchProvider::Duckduckgo => "duckduckgo",
+        WebSearchProvider::Google => "google",
+        WebSearchProvider::Bing => "bing",
+        WebSearchProvider::Brave => "brave",
+        WebSearchProvider::Startpage => "startpage",
+        WebSearchProvider::Ecosia => "ecosia",
+        WebSearchProvider::Yahoo => "yahoo",
+        WebSearchProvider::Custom => "custom",
+    }));
+    text.push_str(",\n");
+    text.push_str("  // Used only when provider is custom. Must include {query}.\n");
+    text.push_str("  \"web_search_custom_template\": ");
+    text.push_str(&json_string(&cfg.web_search_custom_template));
+    text.push_str(",\n");
+    text.push_str("  // Show a browser-default web search action in command mode\n");
+    text.push_str("  \"web_search_browser_default_enabled\": ");
+    text.push_str(if cfg.web_search_browser_default_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n\n");
 
     text.push_str("  // Clipboard history provider settings\n");
     text.push_str("  \"clipboard_enabled\": ");
@@ -403,6 +469,18 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
 
     if cfg.active_memory_target_mb < 20 || cfg.active_memory_target_mb > 512 {
         return Err("active_memory_target_mb out of range".into());
+    }
+
+    if cfg.web_search_provider == WebSearchProvider::Custom {
+        let template = cfg.web_search_custom_template.trim();
+        if template.is_empty() {
+            return Err(
+                "web_search_custom_template is required when web_search_provider=custom".into(),
+            );
+        }
+        if !template.contains("{query}") {
+            return Err("web_search_custom_template must include {query} placeholder".into());
+        }
     }
 
     if cfg
@@ -578,6 +656,22 @@ fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
         }
         if !had_active_mem_key || cfg.active_memory_target_mb == LEGACY_ACTIVE_MEMORY_TARGET_MB_V1 {
             cfg.active_memory_target_mb = Config::default().active_memory_target_mb;
+            changed = true;
+        }
+    }
+
+    if source_version < 3 {
+        if !raw_has_key(raw, "web_search_provider") {
+            cfg.web_search_provider = Config::default().web_search_provider;
+            changed = true;
+        }
+        if !raw_has_key(raw, "web_search_custom_template") {
+            cfg.web_search_custom_template = Config::default().web_search_custom_template;
+            changed = true;
+        }
+        if !raw_has_key(raw, "web_search_browser_default_enabled") {
+            cfg.web_search_browser_default_enabled =
+                Config::default().web_search_browser_default_enabled;
             changed = true;
         }
     }

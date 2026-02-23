@@ -1,3 +1,4 @@
+use crate::config::{Config, WebSearchProvider};
 use crate::model::{normalize_for_search, SearchItem};
 
 pub const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
@@ -6,6 +7,7 @@ pub const ACTION_CLEAR_CLIPBOARD_ID: &str = "__swiftfind_action_clear_clipboard_
 pub const ACTION_OPEN_CONFIG_ID: &str = "__swiftfind_action_open_config__";
 pub const ACTION_DIAGNOSTICS_BUNDLE_ID: &str = "__swiftfind_action_diagnostics_bundle__";
 pub const ACTION_WEB_SEARCH_PREFIX: &str = "__swiftfind_action_web_search__:";
+pub const ACTION_WEB_SEARCH_BROWSER_PREFIX: &str = "__swiftfind_action_web_search_browser__:";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltInAction {
@@ -51,10 +53,15 @@ pub fn built_in_actions() -> &'static [BuiltInAction] {
 }
 
 pub fn search_actions(query: &str, limit: usize) -> Vec<SearchItem> {
-    search_actions_with_mode(query, limit, false)
+    search_actions_with_mode(query, limit, false, &Config::default())
 }
 
-pub fn search_actions_with_mode(query: &str, limit: usize, command_mode: bool) -> Vec<SearchItem> {
+pub fn search_actions_with_mode(
+    query: &str,
+    limit: usize,
+    command_mode: bool,
+    cfg: &Config,
+) -> Vec<SearchItem> {
     if limit == 0 {
         return Vec::new();
     }
@@ -63,8 +70,17 @@ pub fn search_actions_with_mode(query: &str, limit: usize, command_mode: bool) -
     let mut out = Vec::new();
 
     if command_mode {
-        if let Some(web_action) = dynamic_web_search_action(trimmed_query) {
-            out.push(web_action);
+        if cfg.web_search_browser_default_enabled {
+            if let Some(browser_action) = dynamic_browser_web_search_action(trimmed_query) {
+                out.push(browser_action);
+            }
+            if out.len() >= limit {
+                return out;
+            }
+        }
+
+        if let Some(provider_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
+            out.push(provider_action);
             if out.len() >= limit {
                 return out;
             }
@@ -96,18 +112,57 @@ pub fn search_actions_with_mode(query: &str, limit: usize, command_mode: bool) -
     out
 }
 
-fn dynamic_web_search_action(query: &str) -> Option<SearchItem> {
+pub fn provider_web_search_url(cfg: &Config, query: &str) -> Option<String> {
+    let encoded = url_encode_component(query.trim());
+    let url = match cfg.web_search_provider {
+        WebSearchProvider::Duckduckgo => format!("https://duckduckgo.com/?q={encoded}"),
+        WebSearchProvider::Google => format!("https://www.google.com/search?q={encoded}"),
+        WebSearchProvider::Bing => format!("https://www.bing.com/search?q={encoded}"),
+        WebSearchProvider::Brave => format!("https://search.brave.com/search?q={encoded}"),
+        WebSearchProvider::Startpage => {
+            format!("https://www.startpage.com/sp/search?query={encoded}")
+        }
+        WebSearchProvider::Ecosia => format!("https://www.ecosia.org/search?q={encoded}"),
+        WebSearchProvider::Yahoo => format!("https://search.yahoo.com/search?p={encoded}"),
+        WebSearchProvider::Custom => {
+            let template = cfg.web_search_custom_template.trim();
+            if template.is_empty() || !template.contains("{query}") {
+                return None;
+            }
+            template.replace("{query}", &encoded)
+        }
+    };
+    Some(url)
+}
+
+fn dynamic_browser_web_search_action(query: &str) -> Option<SearchItem> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
         return None;
     }
-    let encoded = url_encode_component(trimmed);
-    let url = format!("https://duckduckgo.com/?q={encoded}");
+    let id = format!("{ACTION_WEB_SEARCH_BROWSER_PREFIX}{trimmed}");
+    Some(SearchItem::new(
+        &id,
+        "action",
+        &format!("Search Web (Browser Default) for \"{trimmed}\""),
+        "Use browser default search engine",
+    ))
+}
+
+fn dynamic_provider_web_search_action(query: &str, cfg: &Config) -> Option<SearchItem> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let url = provider_web_search_url(cfg, trimmed)?;
     let id = format!("{ACTION_WEB_SEARCH_PREFIX}{trimmed}");
     Some(SearchItem::new(
         &id,
         "action",
-        &format!("Search Web for \"{trimmed}\""),
+        &format!(
+            "Search {} for \"{trimmed}\"",
+            cfg.web_search_provider.label()
+        ),
         &url,
     ))
 }
@@ -129,7 +184,11 @@ fn url_encode_component(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{search_actions, search_actions_with_mode, ACTION_WEB_SEARCH_PREFIX};
+    use super::{
+        search_actions, search_actions_with_mode, ACTION_WEB_SEARCH_BROWSER_PREFIX,
+        ACTION_WEB_SEARCH_PREFIX,
+    };
+    use crate::config::{Config, WebSearchProvider};
 
     #[test]
     fn filters_actions_by_query() {
@@ -141,17 +200,42 @@ mod tests {
 
     #[test]
     fn command_mode_includes_web_search_action() {
-        let actions = search_actions_with_mode("rust icons", 10, true);
+        let cfg = Config::default();
+        let actions = search_actions_with_mode("rust icons", 10, true, &cfg);
         assert!(actions
             .iter()
             .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
+        assert!(actions
+            .iter()
+            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 
     #[test]
     fn non_command_mode_omits_web_search_action() {
-        let actions = search_actions_with_mode("rust icons", 10, false);
+        let cfg = Config::default();
+        let actions = search_actions_with_mode("rust icons", 10, false, &cfg);
         assert!(!actions
             .iter()
             .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
+        assert!(!actions
+            .iter()
+            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
+    }
+
+    #[test]
+    fn command_mode_respects_configured_provider_and_browser_toggle() {
+        let mut cfg = Config::default();
+        cfg.web_search_provider = WebSearchProvider::Google;
+        cfg.web_search_browser_default_enabled = false;
+
+        let actions = search_actions_with_mode("rust icons", 10, true, &cfg);
+        let provider = actions
+            .iter()
+            .find(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX))
+            .expect("provider web action should exist");
+        assert!(provider.path.contains("google.com/search?q="));
+        assert!(!actions
+            .iter()
+            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 }
