@@ -126,6 +126,8 @@ fn runtime_providers_use_configured_roots() {
 
     let mut config = swiftfind_core::config::Config::default();
     config.discovery_roots = vec![root.clone()];
+    // Ensure this test root is not filtered by default exclude roots (which may include %TEMP%).
+    config.discovery_exclude_roots = vec![];
 
     let db = swiftfind_core::index_store::open_memory().unwrap();
     let service = CoreService::with_connection(config, db)
