@@ -20,9 +20,9 @@ mod imp {
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
         GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
         SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
-        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-        TEXTMETRICW, TRANSPARENT,
+        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT,
+        DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS,
+        PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -176,6 +176,9 @@ mod imp {
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
+    const COMMAND_PREFIX_TEXT: &str = ">";
+    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 16;
+    const COMMAND_PREFIX_GAP: i32 = 4;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -389,6 +392,7 @@ mod imp {
         dwm_rounded_enabled: bool,
         help_config_path: String,
         active_query: String,
+        command_mode_input: bool,
         expanded_rows: i32,
         placeholder_hint: String,
         mode_strip_text: String,
@@ -462,6 +466,7 @@ mod imp {
                 dwm_rounded_enabled: false,
                 help_config_path: String::new(),
                 active_query: String::new(),
+                command_mode_input: false,
                 expanded_rows: 0,
                 placeholder_hint: String::new(),
                 mode_strip_text: MODE_STRIP_DEFAULT_TEXT.to_string(),
@@ -603,15 +608,20 @@ mod imp {
             };
 
             let length = unsafe { GetWindowTextLengthW(state.edit_hwnd) };
-            if length <= 0 {
-                return String::new();
-            }
-
-            let mut buffer = vec![0_u16; (length as usize) + 1];
-            let copied = unsafe {
-                GetWindowTextW(state.edit_hwnd, buffer.as_mut_ptr(), buffer.len() as i32)
+            let mut text = if length <= 0 {
+                String::new()
+            } else {
+                let mut buffer = vec![0_u16; (length as usize) + 1];
+                let copied = unsafe {
+                    GetWindowTextW(state.edit_hwnd, buffer.as_mut_ptr(), buffer.len() as i32)
+                };
+                String::from_utf16_lossy(&buffer[..(copied as usize)])
             };
-            String::from_utf16_lossy(&buffer[..(copied as usize)])
+
+            if state.command_mode_input {
+                text.insert(0, '>');
+            }
+            text
         }
 
         pub fn set_status_text(&self, message: &str) {
@@ -708,9 +718,11 @@ mod imp {
 
         pub fn clear_query_text(&self) {
             if let Some(state) = state_for(self.hwnd) {
+                state.command_mode_input = false;
                 unsafe {
                     SetWindowTextW(state.edit_hwnd, to_wide("").as_ptr());
                 }
+                apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
             }
         }
 
@@ -724,7 +736,12 @@ mod imp {
                 {
                     complete_window_animation_if_running(self.hwnd, state);
                 }
-                state.active_query = self.query_text().trim().to_string();
+                state.active_query = self
+                    .query_text()
+                    .trim()
+                    .trim_start_matches('>')
+                    .trim()
+                    .to_string();
                 state.hover_index = -1;
                 state.wheel_delta_remainder = 0;
                 state.pending_wheel_delta = 0;
@@ -1728,6 +1745,19 @@ mod imp {
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_CHAR
                 && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
             {
+                if hwnd == state.edit_hwnd && wparam as u32 == '>' as u32 {
+                    let edit_empty = unsafe { GetWindowTextLengthW(state.edit_hwnd) } <= 0;
+                    state.command_mode_input = !(state.command_mode_input && edit_empty);
+                    if state.command_mode_input && !state.placeholder_hint.is_empty() {
+                        state.placeholder_hint.clear();
+                    }
+                    apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+                    unsafe {
+                        InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+                        PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
+                    }
+                    return 0;
+                }
                 // Suppress default control beep for handled launcher keys.
                 // Enter submits through WM_KEYDOWN -> SWIFTFIND_WM_SUBMIT.
                 match wparam as u32 {
@@ -1898,6 +1928,7 @@ mod imp {
         let result = unsafe { CallWindowProcW(prev_proc, hwnd, message, wparam, lparam) };
         if hwnd == state.edit_hwnd && message == WM_PAINT {
             paint_edit_placeholder(hwnd, state);
+            paint_edit_command_prefix(hwnd, state);
         }
         result
     }
@@ -1927,6 +1958,7 @@ mod imp {
                 client.right - client.left,
                 client.bottom - client.top,
                 line_height,
+                state.command_mode_input,
             );
         }
         if text_rect.right <= text_rect.left {
@@ -1954,6 +1986,64 @@ mod imp {
                 -1,
                 &mut text_rect,
                 DT_LEFT | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER | DT_END_ELLIPSIS,
+            );
+            SelectObject(hdc, old_font);
+            ReleaseDC(edit_hwnd, hdc);
+        }
+    }
+
+    fn paint_edit_command_prefix(edit_hwnd: HWND, state: &OverlayShellState) {
+        if !state.command_mode_input {
+            return;
+        }
+
+        let mut text_rect: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            SendMessageW(
+                edit_hwnd,
+                EM_GETRECT,
+                0,
+                &mut text_rect as *mut RECT as LPARAM,
+            );
+        }
+        if text_rect.right <= text_rect.left || text_rect.bottom <= text_rect.top {
+            let mut client: RECT = unsafe { std::mem::zeroed() };
+            unsafe {
+                GetClientRect(edit_hwnd, &mut client);
+            }
+            let line_height = input_line_height_for_edit(edit_hwnd, state.input_font);
+            text_rect = compute_input_text_rect(
+                client.right - client.left,
+                client.bottom - client.top,
+                line_height,
+                true,
+            );
+        }
+        if text_rect.right <= text_rect.left {
+            return;
+        }
+
+        let mut prefix_rect = text_rect;
+        prefix_rect.left =
+            (text_rect.left - (COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP)).max(0);
+        prefix_rect.right = (text_rect.left - COMMAND_PREFIX_GAP).max(prefix_rect.left + 1);
+
+        let hdc = unsafe { GetDC(edit_hwnd) };
+        if hdc.is_null() {
+            return;
+        }
+
+        unsafe {
+            let old_font = SelectObject(hdc, state.input_font as _);
+            SetBkMode(hdc, TRANSPARENT as i32);
+            SetTextColor(hdc, state.palette.text_hint);
+            let prefix = to_wide(COMMAND_PREFIX_TEXT);
+            DrawTextW(
+                hdc,
+                prefix.as_ptr(),
+                -1,
+                &mut prefix_rect,
+                DT_RIGHT | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
             );
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
@@ -3361,8 +3451,10 @@ mod imp {
             state.help_hovered = false;
             state.suppress_next_hover_sync = false;
             state.results_content_anim_start = None;
+            state.command_mode_input = false;
             state.placeholder_hint.clear();
             unsafe {
+                apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
                 ShowWindow(state.help_tip_hwnd, SW_HIDE);
                 InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
             }
@@ -3442,7 +3534,7 @@ mod imp {
                 INPUT_HEIGHT,
                 1,
             );
-            apply_edit_text_rect(state.edit_hwnd);
+            apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
             if status_visible {
                 update_status_alignment(state, no_results_inline);
                 let (status_left, status_width) = if no_results_inline {
@@ -3540,7 +3632,7 @@ mod imp {
         }
     }
 
-    fn apply_edit_text_rect(edit_hwnd: HWND) {
+    fn apply_edit_text_rect(edit_hwnd: HWND, command_mode_input: bool) {
         let mut client: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(edit_hwnd, &mut client);
@@ -3552,7 +3644,7 @@ mod imp {
         }
 
         let line_height = input_line_height_for_edit(edit_hwnd, 0);
-        let text_rect = compute_input_text_rect(width, height, line_height);
+        let text_rect = compute_input_text_rect(width, height, line_height, command_mode_input);
 
         unsafe {
             SendMessageW(
@@ -3584,13 +3676,23 @@ mod imp {
         state.status_center_aligned = centered;
     }
 
-    fn compute_input_text_rect(width: i32, height: i32, line_height: i32) -> RECT {
+    fn compute_input_text_rect(
+        width: i32,
+        height: i32,
+        line_height: i32,
+        command_mode_input: bool,
+    ) -> RECT {
         let line_height = line_height.clamp(14, (height - 2).max(14));
         let centered_top = ((height - line_height) / 2).max(0) + INPUT_TEXT_SHIFT_Y;
         let max_top = (height - line_height).max(0);
         let top = centered_top.clamp(0, max_top);
+        let prefix_left_pad = if command_mode_input {
+            COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP
+        } else {
+            0
+        };
         let mut text_rect = RECT {
-            left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X,
+            left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X + prefix_left_pad,
             top,
             right: width - INPUT_TEXT_RIGHT_INSET + INPUT_TEXT_SHIFT_X,
             bottom: top + line_height,
