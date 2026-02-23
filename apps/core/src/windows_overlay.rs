@@ -160,6 +160,7 @@ mod imp {
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
+    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -24;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -169,6 +170,7 @@ mod imp {
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
+    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 500;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
@@ -177,8 +179,9 @@ mod imp {
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
     const COMMAND_PREFIX_TEXT: &str = ">";
-    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 16;
-    const COMMAND_PREFIX_GAP: i32 = 4;
+    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 24;
+    const COMMAND_PREFIX_GAP: i32 = 8;
+    const COMMAND_PREFIX_LEFT_SHIFT: i32 = 14;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -276,6 +279,7 @@ mod imp {
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
     const NO_RESULTS_STATUS_TEXT: &str = "No results";
     const INPUT_PLACEHOLDER_TEXT: &str = "Type to search";
+    const COMMAND_INPUT_PLACEHOLDER_TEXT: &str = "Search the web or run a command";
     const FOOTER_HINT_TEXT: &str = "Enter Open  •  ↑↓ Move  •  Esc Close";
     const MODE_STRIP_DEFAULT_TEXT: &str = "All   Apps   Files   Actions   Clipboard";
 
@@ -364,6 +368,7 @@ mod imp {
         top_hit_font: isize,
         hint_font: isize,
         help_tip_font: isize,
+        command_prefix_font: isize,
         command_icon_font: isize,
         command_icon_fallback_font: isize,
 
@@ -440,6 +445,7 @@ mod imp {
                 top_hit_font: 0,
                 hint_font: 0,
                 help_tip_font: 0,
+                command_prefix_font: 0,
                 command_icon_font: 0,
                 command_icon_fallback_font: 0,
                 panel_brush: 0,
@@ -1223,6 +1229,8 @@ mod imp {
                     state.top_hit_font = create_font(FONT_TOP_HIT_HEIGHT, FONT_WEIGHT_TOP_HIT);
                     state.hint_font = create_font(FONT_HINT_HEIGHT, FONT_WEIGHT_HINT);
                     state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FONT_WEIGHT_HELP_TIP);
+                    state.command_prefix_font =
+                        create_font(FONT_COMMAND_PREFIX_HEIGHT, FONT_WEIGHT_COMMAND_PREFIX);
                     state.command_icon_font = create_font_with_family(
                         FONT_COMMAND_ICON_HEIGHT,
                         FONT_WEIGHT_COMMAND_ICON,
@@ -1975,7 +1983,11 @@ mod imp {
             SetBkMode(hdc, TRANSPARENT as i32);
             SetTextColor(hdc, state.palette.text_secondary);
             let placeholder_text = if state.placeholder_hint.is_empty() {
-                INPUT_PLACEHOLDER_TEXT
+                if state.command_mode_input {
+                    COMMAND_INPUT_PLACEHOLDER_TEXT
+                } else {
+                    INPUT_PLACEHOLDER_TEXT
+                }
             } else {
                 state.placeholder_hint.as_str()
             };
@@ -2023,10 +2035,17 @@ mod imp {
             return;
         }
 
+        let mut client: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(edit_hwnd, &mut client);
+        }
         let mut prefix_rect = text_rect;
-        prefix_rect.left =
-            (text_rect.left - (COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP)).max(0);
-        prefix_rect.right = (text_rect.left - COMMAND_PREFIX_GAP).max(prefix_rect.left + 1);
+        prefix_rect.top = client.top;
+        prefix_rect.bottom = client.bottom;
+        let reserved = COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP + COMMAND_PREFIX_LEFT_SHIFT;
+        prefix_rect.left = (text_rect.left - reserved).max(0);
+        prefix_rect.right = (prefix_rect.left + COMMAND_PREFIX_RESERVED_WIDTH)
+            .min((text_rect.left - COMMAND_PREFIX_GAP).max(prefix_rect.left + 1));
 
         let hdc = unsafe { GetDC(edit_hwnd) };
         if hdc.is_null() {
@@ -2034,7 +2053,12 @@ mod imp {
         }
 
         unsafe {
-            let old_font = SelectObject(hdc, state.input_font as _);
+            let prefix_font = if state.command_prefix_font != 0 {
+                state.command_prefix_font
+            } else {
+                state.input_font
+            };
+            let old_font = SelectObject(hdc, prefix_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
             SetTextColor(hdc, state.palette.text_hint);
             let prefix = to_wide(COMMAND_PREFIX_TEXT);
@@ -4188,6 +4212,9 @@ mod imp {
             }
             if state.help_tip_font != 0 {
                 DeleteObject(state.help_tip_font as _);
+            }
+            if state.command_prefix_font != 0 {
+                DeleteObject(state.command_prefix_font as _);
             }
             if state.command_icon_font != 0 {
                 DeleteObject(state.command_icon_font as _);
