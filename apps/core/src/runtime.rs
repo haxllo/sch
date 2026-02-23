@@ -34,6 +34,7 @@ const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 2;
 const INDEXED_PREFIX_CACHE_MIN_QUERY_LEN: usize = 1;
 const INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT: usize = 120;
 const INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT: usize = 480;
+const QUERY_PROFILE_STATUS_SAMPLE_WINDOW: usize = 400;
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Default)]
@@ -552,6 +553,16 @@ fn command_status() -> Result<(), RuntimeError> {
             if let Some(line) = snapshot.last_icon_cache_line {
                 log_info(&format!("[swiftfind-core] status last_icon_cache {line}"));
             }
+            if let Some(line) = snapshot.last_overlay_tuning_line {
+                log_info(&format!(
+                    "[swiftfind-core] status last_overlay_tuning {line}"
+                ));
+            }
+            if let Some(line) = snapshot.last_memory_snapshot_line {
+                log_info(&format!(
+                    "[swiftfind-core] status last_memory_snapshot {line}"
+                ));
+            }
         }
         if let Some(summary) = load_query_profile_summary() {
             log_info(&format!(
@@ -594,6 +605,8 @@ struct StatusDiagnosticsSnapshot {
     startup_index_line: Option<String>,
     last_provider_line: Option<String>,
     last_icon_cache_line: Option<String>,
+    last_overlay_tuning_line: Option<String>,
+    last_memory_snapshot_line: Option<String>,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -639,10 +652,14 @@ fn parse_status_diagnostics_snapshot(content: &str) -> Option<StatusDiagnosticsS
     let startup_index_line = latest_line_with_token(content, "startup indexed_items=");
     let last_provider_line = latest_line_with_token(content, "index_provider name=");
     let last_icon_cache_line = latest_line_with_token(content, "overlay_icon_cache reason=");
+    let last_overlay_tuning_line = latest_line_with_token(content, "overlay_tuning ");
+    let last_memory_snapshot_line = latest_line_with_token(content, "memory_snapshot reason=");
 
     if startup_index_line.is_none()
         && last_provider_line.is_none()
         && last_icon_cache_line.is_none()
+        && last_overlay_tuning_line.is_none()
+        && last_memory_snapshot_line.is_none()
     {
         return None;
     }
@@ -651,6 +668,8 @@ fn parse_status_diagnostics_snapshot(content: &str) -> Option<StatusDiagnosticsS
         startup_index_line,
         last_provider_line,
         last_icon_cache_line,
+        last_overlay_tuning_line,
+        last_memory_snapshot_line,
     })
 }
 
@@ -665,7 +684,10 @@ fn latest_line_with_token(content: &str, token: &str) -> Option<String> {
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
-    let samples = parse_query_profile_samples(content);
+    let mut samples = parse_recent_query_profile_samples(content);
+    if samples.len() > QUERY_PROFILE_STATUS_SAMPLE_WINDOW {
+        samples.drain(0..(samples.len() - QUERY_PROFILE_STATUS_SAMPLE_WINDOW));
+    }
     if samples.is_empty() {
         return None;
     }
@@ -712,6 +734,19 @@ fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
         short_query_p95_total_ms,
         short_query_app_bias_rate_pct,
     })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_recent_query_profile_samples(content: &str) -> Vec<QueryProfileSample> {
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.is_empty() {
+        return Vec::new();
+    }
+    let start_index = lines
+        .iter()
+        .rposition(|line| line.contains("[swiftfind-core] startup mode="))
+        .unwrap_or(0);
+    parse_query_profile_samples(&lines[start_index..].join("\n"))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -1502,6 +1537,7 @@ fn should_show_indexing_status(state: &BackgroundIndexRefresh) -> bool {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg_attr(not(test), allow(dead_code))]
 fn search_overlay_results(
     service: &CoreService,
     cfg: &Config,
