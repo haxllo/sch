@@ -2829,7 +2829,7 @@ mod imp {
         let ok = unsafe {
             GetProcessMemoryInfo(
                 process,
-                &mut counters as *mut PROCESS_MEMORY_COUNTERS as *mut c_void,
+                &mut counters as *mut PROCESS_MEMORY_COUNTERS,
                 std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
             )
         };
