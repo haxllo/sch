@@ -159,6 +159,7 @@ mod imp {
     const FONT_TOP_HIT_HEIGHT: i32 = -16;
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
+    const FONT_HELP_ICON_HEIGHT: i32 = -14;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
     const FONT_COMMAND_PREFIX_HEIGHT: i32 = -22;
     const FONT_WEIGHT_INPUT: i32 = 400;
@@ -169,6 +170,7 @@ mod imp {
     const FONT_WEIGHT_TOP_HIT: i32 = 600;
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
+    const FONT_WEIGHT_HELP_ICON: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
     const FONT_WEIGHT_COMMAND_PREFIX: i32 = 800;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
@@ -282,6 +284,7 @@ mod imp {
     const DEFAULT_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const GEIST_FONT_FAMILY: &str = "Geist";
     const HOTKEY_HELP_TEXT_FALLBACK: &str = "Click to change hotkey";
+    const HELP_ICON_TEXT: &str = "\u{E946}";
     const NO_RESULTS_STATUS_TEXT: &str = "No results";
     const INPUT_PLACEHOLDER_TEXT: &str = "Type to search";
     const COMMAND_INPUT_PLACEHOLDER_TEXT: &str = "Search the web or run a command";
@@ -373,6 +376,7 @@ mod imp {
         top_hit_font: isize,
         hint_font: isize,
         help_tip_font: isize,
+        help_icon_font: isize,
         command_prefix_font: isize,
         command_icon_font: isize,
         command_icon_fallback_font: isize,
@@ -450,6 +454,7 @@ mod imp {
                 top_hit_font: 0,
                 hint_font: 0,
                 help_tip_font: 0,
+                help_icon_font: 0,
                 command_prefix_font: 0,
                 command_icon_font: 0,
                 command_icon_fallback_font: 0,
@@ -1234,6 +1239,11 @@ mod imp {
                     state.top_hit_font = create_font(FONT_TOP_HIT_HEIGHT, FONT_WEIGHT_TOP_HIT);
                     state.hint_font = create_font(FONT_HINT_HEIGHT, FONT_WEIGHT_HINT);
                     state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FONT_WEIGHT_HELP_TIP);
+                    state.help_icon_font = create_font_with_family(
+                        FONT_HELP_ICON_HEIGHT,
+                        FONT_WEIGHT_HELP_ICON,
+                        icon_font_family_primary_wide(),
+                    );
                     state.command_prefix_font = create_font_with_family(
                         FONT_COMMAND_PREFIX_HEIGHT,
                         FONT_WEIGHT_COMMAND_PREFIX,
@@ -1313,7 +1323,7 @@ mod imp {
                         CreateWindowExW(
                             0,
                             to_wide(STATUS_CLASS).as_ptr(),
-                            to_wide("?").as_ptr(),
+                            to_wide(HELP_ICON_TEXT).as_ptr(),
                             WS_CHILD | WS_VISIBLE | STATIC_NOTIFY_STYLE,
                             0,
                             0,
@@ -1378,7 +1388,16 @@ mod imp {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
                         SendMessageW(state.list_hwnd, WM_SETFONT, state.meta_font as usize, 1);
                         SendMessageW(state.status_hwnd, WM_SETFONT, state.status_font as usize, 1);
-                        SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
+                        SendMessageW(
+                            state.help_hwnd,
+                            WM_SETFONT,
+                            if state.help_icon_font != 0 {
+                                state.help_icon_font as usize
+                            } else {
+                                state.status_font as usize
+                            },
+                            1,
+                        );
                         SendMessageW(
                             state.footer_hint_hwnd,
                             WM_SETFONT,
@@ -4251,6 +4270,9 @@ mod imp {
             }
             if state.help_tip_font != 0 {
                 DeleteObject(state.help_tip_font as _);
+            }
+            if state.help_icon_font != 0 {
+                DeleteObject(state.help_icon_font as _);
             }
             if state.command_prefix_font != 0 {
                 DeleteObject(state.command_prefix_font as _);
