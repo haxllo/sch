@@ -3,7 +3,10 @@ mod imp {
     use std::collections::{HashMap, HashSet, VecDeque};
     use std::ffi::c_void;
     use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
+    use std::sync::{
+        atomic::{AtomicU32, AtomicUsize, Ordering},
+        OnceLock,
+    };
     use std::time::Instant;
 
     use windows_sys::Win32::Foundation::{
@@ -132,9 +135,12 @@ mod imp {
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const MAX_PENDING_WHEEL_DELTA: i32 = 120 * 8;
     const HELP_HOVER_POLL_MS: u32 = 33;
-    const ICON_CACHE_IDLE_MS: u32 = 90_000;
-    const ICON_CACHE_MAX_ENTRIES: usize = 96;
+    const DEFAULT_ICON_CACHE_IDLE_MS: u32 = 90_000;
+    const DEFAULT_ICON_CACHE_MAX_ENTRIES: usize = 96;
     const NO_RESULTS_FADE_MS: u32 = 85;
+    static ICON_CACHE_IDLE_MS_RUNTIME: AtomicU32 = AtomicU32::new(DEFAULT_ICON_CACHE_IDLE_MS);
+    static ICON_CACHE_MAX_ENTRIES_RUNTIME: AtomicUsize =
+        AtomicUsize::new(DEFAULT_ICON_CACHE_MAX_ENTRIES);
 
     // Typography tokens.
     const FONT_INPUT_HEIGHT: i32 = -19;
@@ -531,6 +537,14 @@ mod imp {
 
         pub fn set_hotkey_hint(&self, _hotkey: &str) {
             self.set_status_text("");
+        }
+
+        pub fn set_performance_tuning(
+            &self,
+            idle_cache_trim_ms: u32,
+            active_memory_target_mb: u16,
+        ) {
+            configure_runtime_performance_tuning(idle_cache_trim_ms, active_memory_target_mb);
         }
 
         pub fn set_mode_strip_text(&self, text: &str) {
@@ -2705,7 +2719,7 @@ mod imp {
             }
         }
         touch_icon_cache_key(state, &key);
-        while state.icon_cache.len() > ICON_CACHE_MAX_ENTRIES {
+        while state.icon_cache.len() > runtime_icon_cache_max_entries() {
             let Some(oldest_key) = state.icon_cache_lru.pop_front() else {
                 break;
             };
@@ -2746,10 +2760,36 @@ mod imp {
         state.icon_cache_metrics = IconCacheMetrics::default();
     }
 
+    fn configure_runtime_performance_tuning(idle_cache_trim_ms: u32, active_memory_target_mb: u16) {
+        let idle_ms = idle_cache_trim_ms.clamp(250, 120_000);
+        ICON_CACHE_IDLE_MS_RUNTIME.store(idle_ms, Ordering::Relaxed);
+
+        // Keep icon-cache size proportional to active-memory target without unbounded growth.
+        let max_entries = ((active_memory_target_mb as usize).saturating_mul(2)).clamp(48, 384);
+        ICON_CACHE_MAX_ENTRIES_RUNTIME.store(max_entries, Ordering::Relaxed);
+    }
+
+    fn runtime_icon_cache_idle_ms() -> u32 {
+        ICON_CACHE_IDLE_MS_RUNTIME
+            .load(Ordering::Relaxed)
+            .clamp(250, 120_000)
+    }
+
+    fn runtime_icon_cache_max_entries() -> usize {
+        ICON_CACHE_MAX_ENTRIES_RUNTIME
+            .load(Ordering::Relaxed)
+            .clamp(48, 384)
+    }
+
     fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {
         unsafe {
             KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
-            SetTimer(hwnd, TIMER_ICON_CACHE_IDLE, ICON_CACHE_IDLE_MS, None);
+            SetTimer(
+                hwnd,
+                TIMER_ICON_CACHE_IDLE,
+                runtime_icon_cache_idle_ms(),
+                None,
+            );
         }
     }
 

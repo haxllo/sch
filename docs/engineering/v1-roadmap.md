@@ -1,6 +1,6 @@
 # SwiftFind V1 Robustness Roadmap
 
-Last updated: 2026-02-15
+Last updated: 2026-02-23
 
 ## Purpose
 
@@ -186,6 +186,24 @@ Priority C (power-user controls):
 - `max_visible_rows`
 - `ranking_profile`
 - `diagnostics_level`
+
+## Post-v1.0.x Runtime Hardening Snapshot (2026-02-23)
+
+Completed in current pass:
+- [x] Adaptive query candidate limits by query length/mode to reduce broad-query compute spikes.
+- [x] Indexed prefix-cache reuse for incremental typing (`v` -> `vi` -> `viv`) to reduce repeated full index scoring.
+- [x] Stage-level slow-query profiling (`query_profile`) expanded with candidate/seed/cache-hit dimensions.
+- [x] Config-to-runtime tuning hookup for overlay cache behavior:
+  - `idle_cache_trim_ms` now controls icon-cache idle cleanup timer.
+  - `active_memory_target_mb` now controls icon-cache budget envelope.
+
+Next recommended tasks:
+1. Startup responsiveness hardening:
+   - move first-run heavy indexing off the critical startup path while preserving deterministic query behavior.
+2. Field performance validation:
+   - capture and compare `query_profile` p95 timings on large real-user indexes.
+3. Memory profile validation:
+   - verify active/idle RAM behavior across low/high `active_memory_target_mb` values on Windows.
 
 ## Required Gates (Every Milestone)
 

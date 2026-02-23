@@ -27,7 +27,28 @@ const STATUS_ROW_NO_RESULTS: &str = "No results";
 const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
 const QUERY_PROFILE_LOG_THRESHOLD_MS: u128 = 35;
 const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 1;
+const INDEXED_PREFIX_CACHE_MIN_QUERY_LEN: usize = 1;
+const INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT: usize = 120;
+const INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT: usize = 480;
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
+
+#[derive(Debug, Clone, Default)]
+struct OverlaySearchSession {
+    indexed_prefix_cache: Option<IndexedPrefixCache>,
+}
+
+impl OverlaySearchSession {
+    fn clear(&mut self) {
+        self.indexed_prefix_cache = None;
+    }
+}
+
+#[derive(Debug, Clone)]
+struct IndexedPrefixCache {
+    normalized_query: String,
+    indexed_filter: SearchFilter,
+    seed_items: Vec<crate::model::SearchItem>,
+}
 
 #[derive(Debug)]
 pub enum RuntimeError {
@@ -245,6 +266,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
         overlay.set_help_config_path(config.config_path.to_string_lossy().as_ref());
         overlay.set_hotkey_hint(&config.hotkey);
+        overlay.set_performance_tuning(config.idle_cache_trim_ms, config.active_memory_target_mb);
         log_info("[swiftfind-core] native overlay shell initialized (hidden)");
 
         let mut registrar = default_hotkey_registrar();
@@ -256,6 +278,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
         let mut selected_index = 0_usize;
         let mut last_query = String::new();
+        let mut search_session = OverlaySearchSession::default();
 
         overlay
             .run_message_loop_with_events(|event| match event {
@@ -281,6 +304,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut selected_index,
                             );
                             last_query.clear();
+                            search_session.clear();
                         }
                     }
                 }
@@ -297,6 +321,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 OverlayEvent::ExternalQuit => {
                     overlay.hide_now();
                     last_query.clear();
+                    search_session.clear();
                     unsafe {
                         windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
                     }
@@ -306,6 +331,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         overlay.hide_now();
                         reset_overlay_session(&overlay, &mut current_results, &mut selected_index);
                         last_query.clear();
+                        search_session.clear();
                     }
                 }
                 OverlayEvent::QueryChanged(query) => {
@@ -314,6 +340,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         current_results.clear();
                         selected_index = 0;
                         last_query.clear();
+                        search_session.clear();
                         set_idle_overlay_state(&overlay);
                         return;
                     }
@@ -323,12 +350,13 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     last_query = trimmed.to_string();
                     let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
 
-                    match search_overlay_results(
+                    match search_overlay_results_with_session(
                         &service,
                         &config,
                         &plugin_registry,
                         &parsed_query,
                         max_results,
+                        &mut search_session,
                     ) {
                         Ok(mut results) => {
                             dedupe_overlay_results(&mut results);
@@ -344,6 +372,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         Err(error) => {
                             current_results.clear();
                             selected_index = 0;
+                            search_session.clear();
                             overlay.set_results(&[], 0);
                             overlay.set_status_text(&format!("Search error: {error}"));
                         }
@@ -390,6 +419,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut selected_index,
                             );
                             last_query.clear();
+                            search_session.clear();
                         }
                         Err(error) => {
                             overlay.set_status_text(&format!("Launch error: {error}"));
@@ -1167,6 +1197,26 @@ fn search_overlay_results(
     parsed_query: &ParsedQuery,
     result_limit: usize,
 ) -> Result<Vec<crate::model::SearchItem>, String> {
+    let mut session = OverlaySearchSession::default();
+    search_overlay_results_with_session(
+        service,
+        cfg,
+        plugins,
+        parsed_query,
+        result_limit,
+        &mut session,
+    )
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn search_overlay_results_with_session(
+    service: &CoreService,
+    cfg: &Config,
+    plugins: &PluginRegistry,
+    parsed_query: &ParsedQuery,
+    result_limit: usize,
+    session: &mut OverlaySearchSession,
+) -> Result<Vec<crate::model::SearchItem>, String> {
     if result_limit == 0 {
         return Ok(Vec::new());
     }
@@ -1174,7 +1224,13 @@ fn search_overlay_results(
     let filter = build_search_filter(cfg, parsed_query);
     let text_query = parsed_query.free_text.trim();
     let normalized_query = crate::model::normalize_for_search(text_query);
-    let candidate_limit = result_limit.saturating_mul(6).max(60);
+    let candidate_limit = candidate_limit_for_query(
+        result_limit,
+        &filter,
+        &normalized_query,
+        parsed_query.command_mode,
+    );
+    let indexed_seed_limit = indexed_seed_limit(candidate_limit, normalized_query.len());
     let short_query_app_bias =
         should_use_short_query_app_mode(parsed_query, &filter, &normalized_query);
     let mut indexed_filter = filter.clone();
@@ -1185,12 +1241,36 @@ fn search_overlay_results(
     let search_started = Instant::now();
     let mut merged = Vec::new();
     let indexed_started = Instant::now();
-    let indexed_results = service
-        .search_with_filter(text_query, candidate_limit, &indexed_filter)
-        .map_err(|error| format!("indexed search failed: {error}"))?;
+    let mut indexed_cache_hit = false;
+    let indexed_seed_items = if let Some(cache) = session
+        .indexed_prefix_cache
+        .as_ref()
+        .filter(|cache| can_use_indexed_prefix_cache(cache, &normalized_query, &indexed_filter))
+    {
+        indexed_cache_hit = true;
+        crate::search::search_with_filter(
+            &cache.seed_items,
+            text_query,
+            indexed_seed_limit,
+            &indexed_filter,
+        )
+    } else {
+        service
+            .search_with_filter(text_query, indexed_seed_limit, &indexed_filter)
+            .map_err(|error| format!("indexed search failed: {error}"))?
+    };
     let indexed_ms = indexed_started.elapsed().as_millis();
-    let indexed_count = indexed_results.len();
-    merged.extend(indexed_results);
+    let indexed_count = indexed_seed_items.len();
+    merged.extend(indexed_seed_items.iter().take(candidate_limit).cloned());
+    if normalized_query.len() >= INDEXED_PREFIX_CACHE_MIN_QUERY_LEN {
+        session.indexed_prefix_cache = Some(IndexedPrefixCache {
+            normalized_query: normalized_query.clone(),
+            indexed_filter: indexed_filter.clone(),
+            seed_items: indexed_seed_items,
+        });
+    } else {
+        session.clear();
+    }
 
     let mut provider_ms = 0_u128;
     let mut provider_count = 0_usize;
@@ -1248,10 +1328,13 @@ fn search_overlay_results(
     let total_ms = search_started.elapsed().as_millis();
     if total_ms >= QUERY_PROFILE_LOG_THRESHOLD_MS {
         log_info(&format!(
-            "[swiftfind-core] query_profile q=\"{}\" mode={} short_app_bias={} indexed_count={} indexed_ms={} provider_count={} provider_ms={} action_count={} action_ms={} built_in_actions={} plugin_actions={} clipboard_count={} clipboard_ms={} rank_ms={} total_ms={}",
+            "[swiftfind-core] query_profile q=\"{}\" mode={} candidate_limit={} indexed_seed_limit={} short_app_bias={} indexed_cache_hit={} indexed_count={} indexed_ms={} provider_count={} provider_ms={} action_count={} action_ms={} built_in_actions={} plugin_actions={} clipboard_count={} clipboard_ms={} rank_ms={} total_ms={}",
             sanitize_query_for_profile_log(text_query),
             format!("{:?}", filter.mode).to_ascii_lowercase(),
+            candidate_limit,
+            indexed_seed_limit,
             short_query_app_bias,
+            indexed_cache_hit,
             indexed_count,
             indexed_ms,
             provider_count,
@@ -1310,6 +1393,80 @@ fn should_use_short_query_app_mode(
         && parsed_query.exclude_terms.is_empty()
         && parsed_query.modified_within.is_none()
         && parsed_query.created_within.is_none()
+}
+
+fn candidate_limit_for_query(
+    result_limit: usize,
+    filter: &SearchFilter,
+    normalized_query: &str,
+    command_mode: bool,
+) -> usize {
+    if result_limit == 0 {
+        return 0;
+    }
+
+    let base = result_limit.saturating_mul(6).max(60);
+    if command_mode || filter.mode == crate::config::SearchMode::Actions {
+        return result_limit
+            .saturating_mul(4)
+            .max(48)
+            .min(160)
+            .max(result_limit);
+    }
+
+    match normalized_query.len() {
+        0 => base,
+        1 => match filter.mode {
+            crate::config::SearchMode::All => result_limit
+                .saturating_mul(3)
+                .max(45)
+                .min(96)
+                .max(result_limit),
+            crate::config::SearchMode::Files => result_limit
+                .saturating_mul(5)
+                .max(70)
+                .min(200)
+                .max(result_limit),
+            _ => result_limit
+                .saturating_mul(4)
+                .max(56)
+                .min(180)
+                .max(result_limit),
+        },
+        2 => result_limit
+            .saturating_mul(5)
+            .max(60)
+            .min(220)
+            .max(result_limit),
+        _ => base.min(280).max(result_limit),
+    }
+}
+
+fn indexed_seed_limit(candidate_limit: usize, normalized_query_len: usize) -> usize {
+    let multiplier = match normalized_query_len {
+        0 | 1 => 4,
+        2 => 3,
+        _ => 2,
+    };
+    candidate_limit.saturating_mul(multiplier).clamp(
+        INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
+        INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT,
+    )
+}
+
+fn can_use_indexed_prefix_cache(
+    cache: &IndexedPrefixCache,
+    normalized_query: &str,
+    indexed_filter: &SearchFilter,
+) -> bool {
+    if cache.seed_items.is_empty() || cache.normalized_query.is_empty() {
+        return false;
+    }
+    if cache.indexed_filter != *indexed_filter {
+        return false;
+    }
+    normalized_query.len() > cache.normalized_query.len()
+        && normalized_query.starts_with(&cache.normalized_query)
 }
 
 fn sanitize_query_for_profile_log(query: &str) -> String {
@@ -1468,17 +1625,19 @@ fn log_warn(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
+        can_use_indexed_prefix_cache, candidate_limit_for_query, dedupe_overlay_results,
+        launch_overlay_selection, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
-        RuntimeCommand, RuntimeOptions,
+        IndexedPrefixCache, RuntimeCommand, RuntimeOptions,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
-    use crate::config::Config;
+    use crate::config::{Config, SearchMode};
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
     use crate::model::SearchItem;
     use crate::plugin_sdk::PluginRegistry;
     use crate::query_dsl::ParsedQuery;
+    use crate::search::SearchFilter;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1609,6 +1768,63 @@ mod tests {
         assert_eq!(next_selection_index(2, 3, 1), 2);
         assert_eq!(next_selection_index(1, 3, 0), 1);
         assert_eq!(next_selection_index(5, 3, 0), 2);
+    }
+
+    #[test]
+    fn candidate_limit_adapts_to_query_shape() {
+        let all = SearchFilter::default();
+        let short_all = candidate_limit_for_query(20, &all, "v", false);
+        let medium_all = candidate_limit_for_query(20, &all, "vi", false);
+        let long_all = candidate_limit_for_query(20, &all, "vivaldi", false);
+        assert!(short_all < medium_all);
+        assert!(medium_all <= long_all);
+
+        let actions = SearchFilter {
+            mode: SearchMode::Actions,
+            ..SearchFilter::default()
+        };
+        let short_actions = candidate_limit_for_query(20, &actions, "v", true);
+        assert!(short_actions < long_all);
+    }
+
+    #[test]
+    fn prefix_cache_predicate_requires_same_filter_and_extended_query() {
+        let cache = IndexedPrefixCache {
+            normalized_query: "vi".to_string(),
+            indexed_filter: SearchFilter::default(),
+            seed_items: vec![SearchItem::new(
+                "app-1",
+                "app",
+                "Vivaldi",
+                "C:\\Vivaldi.exe",
+            )],
+        };
+
+        assert!(can_use_indexed_prefix_cache(
+            &cache,
+            "viv",
+            &SearchFilter::default()
+        ));
+        assert!(!can_use_indexed_prefix_cache(
+            &cache,
+            "vi",
+            &SearchFilter::default()
+        ));
+        assert!(!can_use_indexed_prefix_cache(
+            &cache,
+            "xvi",
+            &SearchFilter::default()
+        ));
+
+        let different_mode = SearchFilter {
+            mode: SearchMode::Apps,
+            ..SearchFilter::default()
+        };
+        assert!(!can_use_indexed_prefix_cache(
+            &cache,
+            "viv",
+            &different_mode
+        ));
     }
 
     #[test]
