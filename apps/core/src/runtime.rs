@@ -269,6 +269,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     match action {
                         HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
                             overlay.show_and_focus();
+                            overlay.set_mode_strip_text("");
                             if config.clipboard_enabled {
                                 let _ = clipboard_history::maybe_capture_latest(&config);
                             }
@@ -294,6 +295,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 OverlayEvent::ExternalShow => {
                     overlay_state.set_visible(overlay.is_visible());
                     overlay.show_and_focus();
+                    overlay.set_mode_strip_text("");
                     if config.clipboard_enabled {
                         let _ = clipboard_history::maybe_capture_latest(&config);
                     }
@@ -326,6 +328,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         selected_index = 0;
                         last_query.clear();
                         set_idle_overlay_state(&overlay);
+                        overlay.set_mode_strip_text("");
                         return;
                     }
                     if trimmed == last_query {
@@ -333,6 +336,8 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
                     last_query = trimmed.to_string();
                     let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
+                    let mode_for_ui = resolved_mode_for_query(&config, &parsed_query);
+                    overlay.set_mode_strip_text(&mode_strip_text(mode_for_ui));
 
                     match search_overlay_results(
                         &service,
@@ -1092,6 +1097,7 @@ fn reset_overlay_session(
     selected_index: &mut usize,
 ) {
     overlay.clear_query_text();
+    overlay.set_mode_strip_text("");
     current_results.clear();
     *selected_index = 0;
     set_idle_overlay_state(overlay);
@@ -1236,12 +1242,7 @@ fn search_overlay_results(
 }
 
 fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter {
-    let mut mode = parsed_query
-        .mode_override
-        .unwrap_or(cfg.search_mode_default);
-    if parsed_query.command_mode {
-        mode = crate::config::SearchMode::Actions;
-    }
+    let mode = resolved_mode_for_query(cfg, parsed_query);
     SearchFilter {
         mode,
         kind_filter: parsed_query.kind_filter.clone(),
@@ -1250,6 +1251,40 @@ fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter
         modified_within: parsed_query.modified_within,
         created_within: parsed_query.created_within,
     }
+}
+
+fn resolved_mode_for_query(cfg: &Config, parsed_query: &ParsedQuery) -> crate::config::SearchMode {
+    let mut mode = parsed_query
+        .mode_override
+        .unwrap_or(cfg.search_mode_default);
+    if parsed_query.command_mode {
+        mode = crate::config::SearchMode::Actions;
+    }
+    mode
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn mode_strip_text(active: crate::config::SearchMode) -> String {
+    fn chip(label: &str, is_active: bool) -> String {
+        if is_active {
+            format!("[{label}]")
+        } else {
+            label.to_string()
+        }
+    }
+
+    let all = chip("All", matches!(active, crate::config::SearchMode::All));
+    let apps = chip("Apps", matches!(active, crate::config::SearchMode::Apps));
+    let files = chip("Files", matches!(active, crate::config::SearchMode::Files));
+    let actions = chip(
+        "Actions",
+        matches!(active, crate::config::SearchMode::Actions),
+    );
+    let clipboard = chip(
+        "Clipboard",
+        matches!(active, crate::config::SearchMode::Clipboard),
+    );
+    format!("{all}   {apps}   {files}   {actions}   {clipboard}")
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]

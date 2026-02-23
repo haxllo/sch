@@ -205,20 +205,20 @@ fn read_system_clipboard_text() -> Result<Option<String>, String> {
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     };
-    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
     use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 
     unsafe {
         if OpenClipboard(std::ptr::null_mut()) == 0 {
             return Ok(None);
         }
 
-        if IsClipboardFormatAvailable(CF_UNICODETEXT) == 0 {
+        if IsClipboardFormatAvailable(u32::from(CF_UNICODETEXT)) == 0 {
             CloseClipboard();
             return Ok(None);
         }
 
-        let handle = GetClipboardData(CF_UNICODETEXT);
+        let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
         if handle.is_null() {
             CloseClipboard();
             return Ok(None);
@@ -250,14 +250,14 @@ fn read_system_clipboard_text() -> Result<Option<String>, String> {
 
 #[cfg(target_os = "windows")]
 fn write_system_clipboard_text(value: &str) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::System::DataExchange::{
         CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
-    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
-    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::System::Memory::{
         GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
     };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
 
     let wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
     let bytes = wide.len() * std::mem::size_of::<u16>();
@@ -285,7 +285,7 @@ fn write_system_clipboard_text(value: &str) -> Result<(), String> {
         std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
         GlobalUnlock(mem);
 
-        if SetClipboardData(CF_UNICODETEXT, mem).is_null() {
+        if SetClipboardData(u32::from(CF_UNICODETEXT), mem).is_null() {
             GlobalFree(mem);
             CloseClipboard();
             return Err("failed to set clipboard data".to_string());

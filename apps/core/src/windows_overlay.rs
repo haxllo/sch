@@ -78,6 +78,8 @@ mod imp {
     const DIVIDER_HEIGHT: i32 = 1;
     const DIVIDER_BOTTOM_SPACING: i32 = 5;
     const INPUT_TO_LIST_GAP: i32 = DIVIDER_TOP_SPACING + DIVIDER_HEIGHT + DIVIDER_BOTTOM_SPACING;
+    const MODE_STRIP_HEIGHT: i32 = 16;
+    const MODE_STRIP_TO_LIST_GAP: i32 = 4;
     const STATUS_HEIGHT: i32 = 18;
     const NO_RESULTS_INLINE_WIDTH: i32 = 96;
     const ROW_HEIGHT: i32 = 60;
@@ -101,6 +103,7 @@ mod imp {
     const CONTROL_ID_HELP: usize = 1004;
     const CONTROL_ID_HELP_TIP: usize = 1005;
     const CONTROL_ID_FOOTER_HINT: usize = 1006;
+    const CONTROL_ID_MODE_STRIP: usize = 1007;
     const STATIC_NOTIFY_STYLE: u32 = 0x0100; // SS_NOTIFY
     const STATIC_CENTER_STYLE: u32 = 0x00000001; // SS_CENTER
     const STATIC_RIGHT_STYLE: u32 = 0x00000002; // SS_RIGHT
@@ -171,6 +174,7 @@ mod imp {
     const COLOR_TEXT_HINT: u32 = 0x00BEBEBE;
     const COLOR_TEXT_SECTION: u32 = 0x00AFAFAF;
     const COLOR_TEXT_HINT_FOOTER: u32 = 0x009A9A9A;
+    const COLOR_TEXT_MODE_STRIP: u32 = 0x00ABABAB;
     const COLOR_SELECTION: u32 = 0x00262626;
     const COLOR_SELECTION_BORDER: u32 = 0x00383838;
     const COLOR_ROW_HOVER: u32 = 0x00313131;
@@ -192,6 +196,7 @@ mod imp {
     const NO_RESULTS_STATUS_TEXT: &str = "No results";
     const INPUT_PLACEHOLDER_TEXT: &str = "Type to search";
     const FOOTER_HINT_TEXT: &str = "Enter Open  •  ↑↓ Move  •  Esc Close";
+    const MODE_STRIP_DEFAULT_TEXT: &str = "All   Apps   Files   Actions   Clipboard";
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -233,6 +238,7 @@ mod imp {
         help_hwnd: HWND,
         help_tip_hwnd: HWND,
         footer_hint_hwnd: HWND,
+        mode_strip_hwnd: HWND,
 
         edit_prev_proc: isize,
         list_prev_proc: isize,
@@ -273,6 +279,7 @@ mod imp {
         active_query: String,
         expanded_rows: i32,
         placeholder_hint: String,
+        mode_strip_text: String,
 
         hover_index: i32,
         wheel_delta_remainder: i32,
@@ -303,6 +310,7 @@ mod imp {
                 help_hwnd: std::ptr::null_mut(),
                 help_tip_hwnd: std::ptr::null_mut(),
                 footer_hint_hwnd: std::ptr::null_mut(),
+                mode_strip_hwnd: std::ptr::null_mut(),
                 edit_prev_proc: 0,
                 list_prev_proc: 0,
                 help_prev_proc: 0,
@@ -339,6 +347,7 @@ mod imp {
                 active_query: String::new(),
                 expanded_rows: 0,
                 placeholder_hint: String::new(),
+                mode_strip_text: MODE_STRIP_DEFAULT_TEXT.to_string(),
                 hover_index: -1,
                 wheel_delta_remainder: 0,
                 pending_wheel_delta: 0,
@@ -522,6 +531,29 @@ mod imp {
 
         pub fn set_hotkey_hint(&self, _hotkey: &str) {
             self.set_status_text("");
+        }
+
+        pub fn set_mode_strip_text(&self, text: &str) {
+            if let Some(state) = state_for(self.hwnd) {
+                let resolved = if text.trim().is_empty() {
+                    MODE_STRIP_DEFAULT_TEXT.to_string()
+                } else {
+                    text.trim().to_string()
+                };
+                if state.mode_strip_text == resolved {
+                    return;
+                }
+                state.mode_strip_text = resolved.clone();
+                let wide = to_wide(&resolved);
+                unsafe {
+                    SetWindowTextW(state.mode_strip_hwnd, wide.as_ptr());
+                    InvalidateRect(state.mode_strip_hwnd, std::ptr::null(), 1);
+                }
+                layout_children(self.hwnd, state);
+                unsafe {
+                    InvalidateRect(self.hwnd, std::ptr::null(), 1);
+                }
+            }
         }
 
         pub fn set_help_config_path(&self, path: &str) {
@@ -796,6 +828,7 @@ mod imp {
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
                     ShowWindow(state.footer_hint_hwnd, SW_HIDE);
+                    ShowWindow(state.mode_strip_hwnd, SW_HIDE);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
@@ -806,7 +839,8 @@ mod imp {
         fn expand_results(&self, visible_row_count: usize) {
             let rows = visible_row_count.max(1) as i32;
             let animate = RESULTS_ANIM_MS;
-            let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
+            let list_top =
+                COMPACT_HEIGHT + INPUT_TO_LIST_GAP + MODE_STRIP_HEIGHT + MODE_STRIP_TO_LIST_GAP;
             // Keep enough vertical space for list rows plus bottom breathing room.
             // This must mirror layout_children() non-inline list bottom reserve.
             let list_bottom_reserve = PANEL_MARGIN_X + FOOTER_HINT_HEIGHT + 4;
@@ -1111,6 +1145,22 @@ mod imp {
                             std::ptr::null_mut(),
                         )
                     };
+                    state.mode_strip_hwnd = unsafe {
+                        CreateWindowExW(
+                            0,
+                            to_wide(STATUS_CLASS).as_ptr(),
+                            to_wide(MODE_STRIP_DEFAULT_TEXT).as_ptr(),
+                            WS_CHILD | STATIC_CENTER_STYLE,
+                            0,
+                            0,
+                            0,
+                            0,
+                            hwnd,
+                            CONTROL_ID_MODE_STRIP as HMENU,
+                            std::ptr::null_mut(),
+                            std::ptr::null_mut(),
+                        )
+                    };
 
                     unsafe {
                         SendMessageW(state.edit_hwnd, WM_SETFONT, state.input_font as usize, 1);
@@ -1119,6 +1169,12 @@ mod imp {
                         SendMessageW(state.help_hwnd, WM_SETFONT, state.status_font as usize, 1);
                         SendMessageW(
                             state.footer_hint_hwnd,
+                            WM_SETFONT,
+                            state.hint_font as usize,
+                            1,
+                        );
+                        SendMessageW(
+                            state.mode_strip_hwnd,
                             WM_SETFONT,
                             state.hint_font as usize,
                             1,
@@ -1154,6 +1210,7 @@ mod imp {
                         ShowWindow(state.list_hwnd, SW_HIDE);
                         ShowWindow(state.help_tip_hwnd, SW_HIDE);
                         ShowWindow(state.footer_hint_hwnd, SW_HIDE);
+                        ShowWindow(state.mode_strip_hwnd, SW_HIDE);
                     }
 
                     state.results_visible = false;
@@ -1258,6 +1315,13 @@ mod imp {
                     if target == state.footer_hint_hwnd {
                         unsafe {
                             SetTextColor(wparam as _, COLOR_TEXT_HINT_FOOTER);
+                            SetBkMode(wparam as _, TRANSPARENT as i32);
+                        }
+                        return state.panel_brush;
+                    }
+                    if target == state.mode_strip_hwnd {
+                        unsafe {
+                            SetTextColor(wparam as _, COLOR_TEXT_MODE_STRIP);
                             SetBkMode(wparam as _, TRANSPARENT as i32);
                         }
                         return state.panel_brush;
@@ -2728,6 +2792,7 @@ mod imp {
             } else if !state.results_visible {
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
+                    ShowWindow(state.mode_strip_hwnd, SW_HIDE);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                 }
                 state.rows.clear();
@@ -2813,6 +2878,7 @@ mod imp {
         let status_visible = status_len > 0;
         let footer_status_mode = state.results_visible && status_visible && !no_results_inline;
         let footer_hint_mode = state.results_visible && !footer_status_mode && !no_results_inline;
+        let mode_strip_visible = state.results_visible && !no_results_inline;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
         let status_top = if footer_status_mode {
@@ -2824,7 +2890,14 @@ mod imp {
         };
         let status_height = STATUS_HEIGHT;
 
-        let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
+        let mode_strip_top = COMPACT_HEIGHT + DIVIDER_TOP_SPACING + 1;
+        let list_top = COMPACT_HEIGHT
+            + INPUT_TO_LIST_GAP
+            + if mode_strip_visible {
+                MODE_STRIP_HEIGHT + MODE_STRIP_TO_LIST_GAP
+            } else {
+                0
+            };
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_bottom_reserved = if footer_status_mode {
@@ -2907,6 +2980,21 @@ mod imp {
                 ShowWindow(state.footer_hint_hwnd, SW_SHOW);
             } else {
                 ShowWindow(state.footer_hint_hwnd, SW_HIDE);
+            }
+            if mode_strip_visible {
+                let wide = to_wide(&state.mode_strip_text);
+                SetWindowTextW(state.mode_strip_hwnd, wide.as_ptr());
+                MoveWindow(
+                    state.mode_strip_hwnd,
+                    PANEL_MARGIN_X,
+                    mode_strip_top,
+                    input_width,
+                    MODE_STRIP_HEIGHT,
+                    1,
+                );
+                ShowWindow(state.mode_strip_hwnd, SW_SHOW);
+            } else {
+                ShowWindow(state.mode_strip_hwnd, SW_HIDE);
             }
             position_help_tip_popup(state);
             apply_help_tip_rounded_corners(
