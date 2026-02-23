@@ -158,11 +158,24 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("\"hotkey\": \"Ctrl+Shift+Space\""));
     assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
-    assert!(raw.contains("\"discovery_exclude_roots\": []"));
+    assert!(raw.contains("\"discovery_exclude_roots\":"));
+    if cfg.discovery_exclude_roots.is_empty() {
+        assert!(raw.contains("\"discovery_exclude_roots\": []"));
+    } else {
+        for exclude_root in &cfg.discovery_exclude_roots {
+            let encoded =
+                serde_json::to_string(&exclude_root.to_string_lossy().to_string()).unwrap();
+            assert!(
+                raw.contains(&encoded),
+                "template should include discovery_exclude_roots path {encoded}"
+            );
+        }
+    }
 
     let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
     assert_eq!(loaded.hotkey, cfg.hotkey);
     assert_eq!(loaded.max_results, cfg.max_results);
+    assert_eq!(loaded.discovery_exclude_roots, cfg.discovery_exclude_roots);
 
     std::fs::remove_file(&config_path).unwrap();
 }
