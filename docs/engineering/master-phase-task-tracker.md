@@ -60,8 +60,9 @@ Major tasks:
 - [ ] Publish stable `v1.0.0` artifacts and release notes
 - [ ] Run initial post-release triage window (issues/logs/hotfix readiness)
 - [ ] Validate patch-release path if critical issues appear
+- [x] Command-mode action UX polish: dynamic web-search action + URL launch path for action rows
 
 ## Deferred Backlog (Non-Blocking)
 
 - [ ] Runtime auto-update mechanism (intentionally deferred)
-- [ ] Additional UWP/AppX icon edge-case polish (optional, post-stable)
+- [x] Additional UWP/AppX icon edge-case polish (shortcut AppsFolder token extraction + extra shell fallback)

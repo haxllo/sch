@@ -1,6 +1,6 @@
 use crate::action_registry::{
-    search_actions, ACTION_CLEAR_CLIPBOARD_ID, ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_OPEN_CONFIG_ID,
-    ACTION_OPEN_LOGS_ID, ACTION_REBUILD_INDEX_ID,
+    search_actions_with_mode, ACTION_CLEAR_CLIPBOARD_ID, ACTION_DIAGNOSTICS_BUNDLE_ID,
+    ACTION_OPEN_CONFIG_ID, ACTION_OPEN_LOGS_ID, ACTION_REBUILD_INDEX_ID, ACTION_WEB_SEARCH_PREFIX,
 };
 use crate::clipboard_history;
 use crate::config::{self, Config, ConfigError};
@@ -1201,7 +1201,8 @@ fn search_overlay_results(
         &filter,
     ));
 
-    let mut action_items = search_actions(text_query, candidate_limit);
+    let mut action_items =
+        search_actions_with_mode(text_query, candidate_limit, parsed_query.command_mode);
     if !plugins.action_items.is_empty() {
         action_items.extend(crate::search::search_with_filter(
             &plugins.action_items,
@@ -1296,6 +1297,11 @@ fn execute_action_selection(
     plugins: &PluginRegistry,
     selected: &crate::model::SearchItem,
 ) -> Result<(), String> {
+    if selected.id.starts_with(ACTION_WEB_SEARCH_PREFIX) {
+        return crate::action_executor::launch_open_target(selected.path.trim())
+            .map_err(|error| format!("web search launch failed: {error}"));
+    }
+
     match selected.id.as_str() {
         ACTION_OPEN_LOGS_ID => crate::logging::open_logs_folder()
             .map_err(|error| format!("open logs folder failed: {error}")),
@@ -1400,7 +1406,7 @@ mod tests {
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
         RuntimeCommand, RuntimeOptions,
     };
-    use crate::action_registry::ACTION_DIAGNOSTICS_BUNDLE_ID;
+    use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::Config;
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
@@ -1587,6 +1593,20 @@ mod tests {
         assert!(results
             .iter()
             .any(|item| item.id == ACTION_DIAGNOSTICS_BUNDLE_ID));
+    }
+
+    #[test]
+    fn command_mode_includes_web_search_action() {
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let parsed = ParsedQuery::parse(">swiftfind roadmap", true);
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 10)
+            .expect("search should succeed");
+        assert!(results
+            .iter()
+            .any(|item| item.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
     }
 
     #[test]

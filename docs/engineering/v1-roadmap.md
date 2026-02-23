@@ -164,6 +164,11 @@ Acceptance criteria:
 - No noticeable idle memory/runtime responsiveness regression.
 - UI interaction contracts remain unchanged unless explicitly versioned.
 
+Current status:
+- [x] Additional UWP/AppX icon edge-case fallback polish implemented (improved AppsFolder token extraction and shell fallback chain).
+- [x] Command-mode UX polish implemented with dynamic web-search action (`>` query) and URL launch support for action rows.
+- [ ] Accessibility pass (high-contrast and larger text mode).
+
 ## Feature Option Backlog (Prioritized)
 
 Priority A (robustness first):

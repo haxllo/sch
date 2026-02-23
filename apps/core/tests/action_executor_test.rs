@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use swiftfind_core::action_executor::{launch_path, LaunchError};
+use swiftfind_core::action_executor::{launch_open_target, launch_path, LaunchError};
 
 fn unique_temp_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -39,5 +39,17 @@ fn accepts_existing_launch_path() {
     let result = launch_path(&file_path_str);
     fs::remove_file(&file_path).expect("should clean temp file");
 
+    assert!(result.is_ok());
+}
+
+#[test]
+fn rejects_empty_open_target() {
+    let result = launch_open_target("   ");
+    assert_eq!(result, Err(LaunchError::EmptyPath));
+}
+
+#[test]
+fn accepts_web_open_target() {
+    let result = launch_open_target("https://duckduckgo.com/?q=swiftfind");
     assert!(result.is_ok());
 }

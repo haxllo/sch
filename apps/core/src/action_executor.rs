@@ -42,12 +42,25 @@ pub fn launch_path(path: &str) -> Result<(), LaunchError> {
     Ok(())
 }
 
+pub fn launch_open_target(target: &str) -> Result<(), LaunchError> {
+    let trimmed = target.trim();
+    if trimmed.is_empty() {
+        return Err(LaunchError::EmptyPath);
+    }
+    launch_open(trimmed)
+}
+
 #[cfg(target_os = "windows")]
 fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
+    let target = candidate.to_string_lossy().into_owned();
+    launch_open(&target)
+}
+
+#[cfg(target_os = "windows")]
+fn launch_open(target: &str) -> Result<(), LaunchError> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
-    let target = candidate.to_string_lossy().into_owned();
     let wide_target = to_wide(&target);
     let result = unsafe {
         ShellExecuteW(
@@ -72,6 +85,11 @@ fn launch_existing_path(candidate: &Path) -> Result<(), LaunchError> {
 
 #[cfg(not(target_os = "windows"))]
 fn launch_existing_path(_candidate: &Path) -> Result<(), LaunchError> {
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn launch_open(_target: &str) -> Result<(), LaunchError> {
     Ok(())
 }
 

@@ -2355,6 +2355,9 @@ mod imp {
         if icon_source.trim().is_empty() {
             return None;
         }
+        if let Some(icon) = shell_icon_from_appsfolder_target(icon_source.trim()) {
+            return Some(icon);
+        }
         let (icon_path, parsed_index) = split_icon_resource_spec(icon_source.trim());
         let icon_index = if info.iIcon == 0 {
             parsed_index.unwrap_or(0)
@@ -2389,10 +2392,9 @@ mod imp {
         }
 
         if extracted == 0 || large_icon.is_null() {
-            None
-        } else {
-            Some(large_icon as isize)
+            return shell_icon_from_display_name(&normalized);
         }
+        Some(large_icon as isize)
     }
 
     fn executable_icon_from_shortcut(shortcut_path: &str) -> Option<isize> {
@@ -2543,19 +2545,87 @@ mod imp {
             return Vec::new();
         }
 
-        let mut candidates = Vec::with_capacity(4);
-        candidates.push(trimmed.to_string());
+        let mut candidates = Vec::with_capacity(6);
+        push_unique_candidate(&mut candidates, trimmed);
+
+        if let Some(appsfolder_token) = extract_appsfolder_token(trimmed) {
+            push_unique_candidate(&mut candidates, &appsfolder_token);
+            if appsfolder_token
+                .to_ascii_lowercase()
+                .starts_with("shell:appsfolder\\")
+            {
+                push_unique_candidate(&mut candidates, &appsfolder_token[6..]);
+            } else if appsfolder_token
+                .to_ascii_lowercase()
+                .starts_with("appsfolder\\")
+            {
+                push_unique_candidate(&mut candidates, &format!("shell:{appsfolder_token}"));
+            }
+        }
 
         let lowered = trimmed.to_ascii_lowercase();
         if lowered.starts_with("appsfolder\\") {
-            candidates.push(format!("shell:{trimmed}"));
+            push_unique_candidate(&mut candidates, &format!("shell:{trimmed}"));
         } else if lowered.starts_with("shell:appsfolder\\") {
-            candidates.push(trimmed[6..].to_string());
+            push_unique_candidate(&mut candidates, &trimmed[6..]);
         } else if let Some(index) = lowered.find("appsfolder\\") {
-            candidates.push(format!("shell:{}", &trimmed[index..]));
+            push_unique_candidate(&mut candidates, &format!("shell:{}", &trimmed[index..]));
         }
 
         candidates
+    }
+
+    fn push_unique_candidate(candidates: &mut Vec<String>, value: &str) {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            return;
+        }
+        if candidates
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(normalized))
+        {
+            return;
+        }
+        candidates.push(normalized.to_string());
+    }
+
+    fn extract_appsfolder_token(raw: &str) -> Option<String> {
+        let trimmed = raw.trim().trim_matches('"');
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let lowered = trimmed.to_ascii_lowercase();
+        let start = lowered
+            .find("shell:appsfolder\\")
+            .or_else(|| lowered.find("appsfolder\\"))?;
+        let tail = &trimmed[start..];
+        if tail.is_empty() {
+            return None;
+        }
+
+        let mut end = tail.len();
+        for (index, ch) in tail.char_indices() {
+            if index == 0 {
+                continue;
+            }
+            if ch.is_whitespace() || ch == '"' || ch == '\'' {
+                end = index;
+                break;
+            }
+        }
+
+        let token = tail[..end]
+            .trim()
+            .trim_end_matches(',')
+            .trim_end_matches(';')
+            .trim_matches('"')
+            .trim_matches('\'');
+        if token.is_empty() {
+            None
+        } else {
+            Some(token.to_string())
+        }
     }
 
     fn is_icon_module_path(path: &str) -> bool {
