@@ -30,7 +30,7 @@ const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_INDEXING: &str = "Indexing in background...";
 const QUERY_PROFILE_LOG_THRESHOLD_MS: u128 = 35;
-const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 1;
+const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 2;
 const INDEXED_PREFIX_CACHE_MIN_QUERY_LEN: usize = 1;
 const INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT: usize = 120;
 const INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT: usize = 480;
@@ -553,6 +553,21 @@ fn command_status() -> Result<(), RuntimeError> {
                 log_info(&format!("[swiftfind-core] status last_icon_cache {line}"));
             }
         }
+        if let Some(summary) = load_query_profile_summary() {
+            log_info(&format!(
+                "[swiftfind-core] status query_latency samples={} p50_ms={} p95_ms={} p99_ms={} max_ms={} avg_ms={} indexed_p95_ms={} short_q_samples={} short_q_p95_ms={} short_q_app_bias_rate={}%",
+                summary.samples,
+                summary.p50_total_ms,
+                summary.p95_total_ms,
+                summary.p99_total_ms,
+                summary.max_total_ms,
+                summary.avg_total_ms,
+                summary.p95_indexed_ms,
+                summary.short_query_samples,
+                summary.short_query_p95_total_ms,
+                summary.short_query_app_bias_rate_pct
+            ));
+        }
         return Ok(());
     }
 
@@ -582,10 +597,41 @@ struct StatusDiagnosticsSnapshot {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QueryProfileSample {
+    total_ms: u128,
+    indexed_ms: u128,
+    query_len: usize,
+    short_app_bias: bool,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QueryProfileSummary {
+    samples: usize,
+    p50_total_ms: u128,
+    p95_total_ms: u128,
+    p99_total_ms: u128,
+    max_total_ms: u128,
+    avg_total_ms: u128,
+    p95_indexed_ms: u128,
+    short_query_samples: usize,
+    short_query_p95_total_ms: u128,
+    short_query_app_bias_rate_pct: u8,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn load_status_diagnostics_snapshot() -> Option<StatusDiagnosticsSnapshot> {
     let log_path = crate::logging::logs_dir().join("swiftfind.log");
     let content = std::fs::read_to_string(&log_path).ok()?;
     parse_status_diagnostics_snapshot(&content)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn load_query_profile_summary() -> Option<QueryProfileSummary> {
+    let log_path = crate::logging::logs_dir().join("swiftfind.log");
+    let content = std::fs::read_to_string(&log_path).ok()?;
+    summarize_query_profiles(&content)
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -615,6 +661,128 @@ fn latest_line_with_token(content: &str, token: &str) -> Option<String> {
         .rev()
         .find(|line| line.contains(token))
         .map(str::to_string)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
+    let samples = parse_query_profile_samples(content);
+    if samples.is_empty() {
+        return None;
+    }
+
+    let mut total_ms: Vec<u128> = samples.iter().map(|sample| sample.total_ms).collect();
+    let mut indexed_ms: Vec<u128> = samples.iter().map(|sample| sample.indexed_ms).collect();
+    let max_total_ms = total_ms.iter().copied().max().unwrap_or(0);
+    let avg_total_ms = total_ms.iter().sum::<u128>() / (total_ms.len() as u128);
+    let p50_total_ms = percentile_u128(&mut total_ms, 0.50);
+    let p95_total_ms = percentile_u128(&mut total_ms, 0.95);
+    let p99_total_ms = percentile_u128(&mut total_ms, 0.99);
+    let p95_indexed_ms = percentile_u128(&mut indexed_ms, 0.95);
+
+    let short_query_samples: Vec<QueryProfileSample> = samples
+        .iter()
+        .copied()
+        .filter(|sample| sample.query_len <= SHORT_QUERY_APP_BIAS_MAX_LEN)
+        .collect();
+    let short_query_samples_count = short_query_samples.len();
+    let mut short_total_ms: Vec<u128> = short_query_samples
+        .iter()
+        .map(|sample| sample.total_ms)
+        .collect();
+    let short_query_p95_total_ms = percentile_u128(&mut short_total_ms, 0.95);
+    let short_query_app_bias_count = short_query_samples
+        .iter()
+        .filter(|sample| sample.short_app_bias)
+        .count();
+    let short_query_app_bias_rate_pct = if short_query_samples_count == 0 {
+        0
+    } else {
+        ((short_query_app_bias_count * 100) / short_query_samples_count) as u8
+    };
+
+    Some(QueryProfileSummary {
+        samples: samples.len(),
+        p50_total_ms,
+        p95_total_ms,
+        p99_total_ms,
+        max_total_ms,
+        avg_total_ms,
+        p95_indexed_ms,
+        short_query_samples: short_query_samples_count,
+        short_query_p95_total_ms,
+        short_query_app_bias_rate_pct,
+    })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_query_profile_samples(content: &str) -> Vec<QueryProfileSample> {
+    content
+        .lines()
+        .filter(|line| line.contains("[swiftfind-core] query_profile "))
+        .filter_map(|line| {
+            let total_ms = parse_u128_field(line, "total_ms=")?;
+            let indexed_ms = parse_u128_field(line, "indexed_ms=").unwrap_or(0);
+            let query = parse_quoted_field(line, "q=").unwrap_or_default();
+            let query_len = query.chars().count();
+            let short_app_bias = parse_bool_field(line, "short_app_bias=").unwrap_or(false);
+            Some(QueryProfileSample {
+                total_ms,
+                indexed_ms,
+                query_len,
+                short_app_bias,
+            })
+        })
+        .collect()
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_u128_field(line: &str, key: &str) -> Option<u128> {
+    let start = line.find(key)? + key.len();
+    let tail = &line[start..];
+    let value = tail
+        .split_whitespace()
+        .next()
+        .map(|part| part.trim_end_matches(','))
+        .unwrap_or_default();
+    value.parse::<u128>().ok()
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_bool_field(line: &str, key: &str) -> Option<bool> {
+    let start = line.find(key)? + key.len();
+    let tail = &line[start..];
+    let value = tail
+        .split_whitespace()
+        .next()
+        .map(|part| part.trim_end_matches(','))
+        .unwrap_or_default();
+    match value {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn parse_quoted_field(line: &str, key: &str) -> Option<String> {
+    let start = line.find(key)? + key.len();
+    let tail = &line[start..];
+    if !tail.starts_with('"') {
+        return None;
+    }
+    let end = tail[1..].find('"')?;
+    Some(tail[1..(1 + end)].to_string())
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn percentile_u128(values: &mut [u128], percentile: f64) -> u128 {
+    if values.is_empty() {
+        return 0;
+    }
+    values.sort_unstable();
+    let last = values.len().saturating_sub(1);
+    let idx = ((last as f64) * percentile.clamp(0.0, 1.0)).round() as usize;
+    values[idx.min(last)]
 }
 
 fn command_quit() -> Result<(), RuntimeError> {
@@ -1582,11 +1750,23 @@ fn candidate_limit_for_query(
                 .min(180)
                 .max(result_limit),
         },
-        2 => result_limit
-            .saturating_mul(5)
-            .max(60)
-            .min(220)
-            .max(result_limit),
+        2 => match filter.mode {
+            crate::config::SearchMode::All => result_limit
+                .saturating_mul(4)
+                .max(56)
+                .min(140)
+                .max(result_limit),
+            crate::config::SearchMode::Files => result_limit
+                .saturating_mul(5)
+                .max(70)
+                .min(200)
+                .max(result_limit),
+            _ => result_limit
+                .saturating_mul(4)
+                .max(56)
+                .min(180)
+                .max(result_limit),
+        },
         _ => base.min(280).max(result_limit),
     }
 }
@@ -1594,7 +1774,7 @@ fn candidate_limit_for_query(
 fn indexed_seed_limit(candidate_limit: usize, normalized_query_len: usize) -> usize {
     let multiplier = match normalized_query_len {
         0 | 1 => 4,
-        2 => 3,
+        2 => 2,
         _ => 2,
     };
     candidate_limit.saturating_mul(multiplier).clamp(
@@ -1806,7 +1986,7 @@ mod tests {
         can_use_indexed_prefix_cache, candidate_limit_for_query, dedupe_overlay_results,
         launch_overlay_selection, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
-        IndexedPrefixCache, RuntimeCommand, RuntimeOptions,
+        summarize_query_profiles, IndexedPrefixCache, RuntimeCommand, RuntimeOptions,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2123,6 +2303,48 @@ mod tests {
     }
 
     #[test]
+    fn short_two_letter_query_in_all_mode_biases_to_apps() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let app_path = std::env::temp_dir().join(format!("swiftfind-short-two-app-{unique}.tmp"));
+        let file_path = std::env::temp_dir().join(format!("swiftfind-short-two-file-{unique}.tmp"));
+        std::fs::write(&app_path, b"ok").expect("app temp file should be created");
+        std::fs::write(&file_path, b"ok").expect("file temp file should be created");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "app-1",
+                "app",
+                "Valorant",
+                app_path.to_string_lossy().as_ref(),
+            ))
+            .expect("app should upsert");
+        service
+            .upsert_item(&SearchItem::new(
+                "file-1",
+                "file",
+                "Valuation Notes",
+                file_path.to_string_lossy().as_ref(),
+            ))
+            .expect("file should upsert");
+
+        let parsed = ParsedQuery::parse("va", true);
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 20)
+            .expect("search should succeed");
+        assert!(results.iter().any(|item| item.id == "app-1"));
+        assert!(!results.iter().any(|item| item.id == "file-1"));
+
+        std::fs::remove_file(app_path).expect("app temp file should be removed");
+        std::fs::remove_file(file_path).expect("file temp file should be removed");
+    }
+
+    #[test]
     fn dedupes_duplicate_app_titles_for_overlay() {
         let mut results = vec![
             SearchItem::new("a1", "app", "Steam", "C:\\One\\Steam.lnk"),
@@ -2202,6 +2424,21 @@ mod tests {
     fn returns_none_for_status_snapshot_without_diagnostics_tokens() {
         let content = "[1] [INFO] [swiftfind-core] status: running\n";
         assert!(parse_status_diagnostics_snapshot(content).is_none());
+    }
+
+    #[test]
+    fn summarizes_query_profiles_from_log_content() {
+        let content = "\
+[1] [INFO] [swiftfind-core] query_profile q=\"v\" mode=all candidate_limit=60 indexed_seed_limit=240 short_app_bias=true indexed_cache_hit=false indexed_count=20 indexed_ms=20 provider_count=0 provider_ms=0 action_count=0 action_ms=0 built_in_actions=0 plugin_actions=0 clipboard_count=0 clipboard_ms=0 rank_ms=0 total_ms=21
+[2] [INFO] [swiftfind-core] query_profile q=\"va\" mode=all candidate_limit=80 indexed_seed_limit=160 short_app_bias=true indexed_cache_hit=false indexed_count=20 indexed_ms=26 provider_count=0 provider_ms=0 action_count=0 action_ms=0 built_in_actions=0 plugin_actions=0 clipboard_count=0 clipboard_ms=0 rank_ms=0 total_ms=27
+[3] [INFO] [swiftfind-core] query_profile q=\"vala\" mode=all candidate_limit=120 indexed_seed_limit=240 short_app_bias=false indexed_cache_hit=false indexed_count=20 indexed_ms=54 provider_count=0 provider_ms=0 action_count=0 action_ms=0 built_in_actions=0 plugin_actions=0 clipboard_count=0 clipboard_ms=0 rank_ms=0 total_ms=55
+";
+        let summary = summarize_query_profiles(content).expect("summary should parse");
+        assert_eq!(summary.samples, 3);
+        assert_eq!(summary.p95_total_ms, 55);
+        assert_eq!(summary.short_query_samples, 2);
+        assert_eq!(summary.short_query_app_bias_rate_pct, 100);
+        assert_eq!(summary.short_query_p95_total_ms, 27);
     }
 
     #[test]

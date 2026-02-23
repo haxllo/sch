@@ -30,6 +30,10 @@ mod imp {
     use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::UI::Controls::{
         ImageList_GetIcon, DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
@@ -466,6 +470,7 @@ mod imp {
                 SetForegroundWindow(self.hwnd);
             }
             self.focus_input_and_select_all();
+            log_memory_snapshot("overlay_show");
         }
 
         pub fn focus_input_and_select_all(&self) {
@@ -1481,6 +1486,7 @@ mod imp {
                             schedule_icon_cache_idle_cleanup(hwnd);
                         } else {
                             clear_icon_cache(state);
+                            log_memory_snapshot("icon_cache_trim");
                             unsafe {
                                 KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
                             }
@@ -1914,7 +1920,8 @@ mod imp {
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
             let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, content_progress);
-            let secondary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, content_progress);
+            let secondary_text =
+                blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, content_progress);
             let highlight_text =
                 blend_color(COLOR_RESULTS_BG, COLOR_TEXT_HIGHLIGHT, content_progress);
             SetTextColor(dis.hDC, primary_text);
@@ -2816,13 +2823,40 @@ mod imp {
         state.icon_cache_metrics = IconCacheMetrics::default();
     }
 
+    fn log_memory_snapshot(reason: &str) {
+        let process = unsafe { GetCurrentProcess() };
+        let mut counters: PROCESS_MEMORY_COUNTERS = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            GetProcessMemoryInfo(
+                process,
+                &mut counters as *mut PROCESS_MEMORY_COUNTERS as *mut c_void,
+                std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            )
+        };
+        if ok == 0 {
+            return;
+        }
+
+        let mb_divisor = 1024.0_f64 * 1024.0_f64;
+        let working_set_mb = (counters.WorkingSetSize as f64) / mb_divisor;
+        let private_mb = (counters.PagefileUsage as f64) / mb_divisor;
+        crate::logging::info(&format!(
+            "[swiftfind-core] memory_snapshot reason={} working_set_mb={:.1} private_mb={:.1}",
+            reason, working_set_mb, private_mb
+        ));
+    }
+
     fn configure_runtime_performance_tuning(idle_cache_trim_ms: u32, active_memory_target_mb: u16) {
         let idle_ms = idle_cache_trim_ms.clamp(250, 120_000);
         ICON_CACHE_IDLE_MS_RUNTIME.store(idle_ms, Ordering::Relaxed);
 
         // Keep icon-cache size proportional to active-memory target without unbounded growth.
-        let max_entries = ((active_memory_target_mb as usize).saturating_mul(2)).clamp(48, 384);
+        let max_entries = ((active_memory_target_mb as usize).saturating_mul(3) / 2).clamp(40, 320);
         ICON_CACHE_MAX_ENTRIES_RUNTIME.store(max_entries, Ordering::Relaxed);
+        crate::logging::info(&format!(
+            "[swiftfind-core] overlay_tuning idle_cache_trim_ms={} active_memory_target_mb={} icon_cache_max_entries={}",
+            idle_ms, active_memory_target_mb, max_entries
+        ));
     }
 
     fn runtime_icon_cache_idle_ms() -> u32 {
@@ -2834,7 +2868,7 @@ mod imp {
     fn runtime_icon_cache_max_entries() -> usize {
         ICON_CACHE_MAX_ENTRIES_RUNTIME
             .load(Ordering::Relaxed)
-            .clamp(48, 384)
+            .clamp(40, 320)
     }
 
     fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {
@@ -3039,6 +3073,7 @@ mod imp {
             SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
+        log_memory_snapshot("overlay_hide");
         schedule_icon_cache_idle_cleanup(hwnd);
     }
 

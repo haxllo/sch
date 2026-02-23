@@ -95,8 +95,8 @@ impl Default for Config {
             plugins_enabled: true,
             plugin_paths: vec![app_dir.join("plugins")],
             plugins_safe_mode: true,
-            idle_cache_trim_ms: 1200,
-            active_memory_target_mb: 80,
+            idle_cache_trim_ms: 900,
+            active_memory_target_mb: 72,
         }
     }
 }
