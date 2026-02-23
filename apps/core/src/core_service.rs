@@ -1,7 +1,7 @@
 use rusqlite::Connection;
 
 use crate::action_executor::{launch_path, LaunchError};
-use crate::config::{validate, Config};
+use crate::config::{validate, Config, SearchMode};
 use crate::contract::{CoreRequest, CoreResponse, LaunchResponse, SearchResponse};
 use crate::discovery::{
     DiscoveryProvider, FileSystemDiscoveryProvider, ProviderError, StartMenuAppDiscoveryProvider,
@@ -71,6 +71,7 @@ pub struct CoreService {
     db: Connection,
     providers: Vec<Box<dyn DiscoveryProvider>>,
     cached_items: RwLock<Vec<SearchItem>>,
+    cached_app_items: RwLock<Vec<SearchItem>>,
     last_stale_prune: Mutex<Option<Instant>>,
     stale_prune_cursor: Mutex<usize>,
 }
@@ -108,11 +109,13 @@ impl CoreService {
 
     fn with_loaded_cache(config: Config, db: Connection) -> Result<Self, ServiceError> {
         let cached = index_store::list_items(&db)?;
+        let cached_apps = collect_app_items(&cached);
         Ok(Self {
             config,
             db,
             providers: Vec::new(),
             cached_items: RwLock::new(cached),
+            cached_app_items: RwLock::new(cached_apps),
             last_stale_prune: Mutex::new(None),
             stale_prune_cursor: Mutex::new(0),
         })
@@ -155,16 +158,29 @@ impl CoreService {
             limit.min(self.config.max_results as usize)
         };
 
-        let guard = match self.cached_items.read() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        Ok(crate::search::search_with_filter(
-            &guard,
-            query,
-            effective_limit,
-            filter,
-        ))
+        if should_use_app_cache(filter) {
+            let guard = match self.cached_app_items.read() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            Ok(crate::search::search_with_filter(
+                &guard,
+                query,
+                effective_limit,
+                filter,
+            ))
+        } else {
+            let guard = match self.cached_items.read() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            Ok(crate::search::search_with_filter(
+                &guard,
+                query,
+                effective_limit,
+                filter,
+            ))
+        }
     }
 
     pub fn cached_items_snapshot(&self) -> Vec<SearchItem> {
@@ -395,6 +411,7 @@ impl CoreService {
 
     fn refresh_cache_from_store(&self) -> Result<(), ServiceError> {
         let latest = index_store::list_items(&self.db)?;
+        let latest_apps = collect_app_items(&latest);
         match self.cached_items.write() {
             Ok(mut guard) => {
                 *guard = latest;
@@ -404,10 +421,22 @@ impl CoreService {
                 *guard = latest;
             }
         }
+        match self.cached_app_items.write() {
+            Ok(mut guard) => {
+                *guard = latest_apps;
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                *guard = latest_apps;
+            }
+        }
         Ok(())
     }
 
     fn upsert_cached_item(&self, item: SearchItem) {
+        let item_for_apps = item.clone();
+        let item_id = item.id.clone();
+        let is_app = item.kind.eq_ignore_ascii_case("app");
         match self.cached_items.write() {
             Ok(mut guard) => upsert_cached_item_inner(&mut guard, item),
             Err(poisoned) => {
@@ -415,10 +444,34 @@ impl CoreService {
                 upsert_cached_item_inner(&mut guard, item);
             }
         }
+        match self.cached_app_items.write() {
+            Ok(mut guard) => {
+                if is_app {
+                    upsert_cached_item_inner(&mut guard, item_for_apps);
+                } else {
+                    guard.retain(|entry| entry.id != item_id);
+                }
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                if is_app {
+                    upsert_cached_item_inner(&mut guard, item_for_apps);
+                } else {
+                    guard.retain(|entry| entry.id != item_id);
+                }
+            }
+        }
     }
 
     fn remove_cached_item_by_id(&self, id: &str) {
         match self.cached_items.write() {
+            Ok(mut guard) => guard.retain(|entry| entry.id != id),
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                guard.retain(|entry| entry.id != id);
+            }
+        }
+        match self.cached_app_items.write() {
             Ok(mut guard) => guard.retain(|entry| entry.id != id),
             Err(poisoned) => {
                 let mut guard = poisoned.into_inner();
@@ -484,6 +537,17 @@ impl CoreService {
                 guard.retain(|entry| !stale_lookup.contains(entry.id.as_str()));
             }
         }
+        match self.cached_app_items.write() {
+            Ok(mut guard) => {
+                let stale_lookup: HashSet<&str> = stale_ids.iter().map(String::as_str).collect();
+                guard.retain(|entry| !stale_lookup.contains(entry.id.as_str()));
+            }
+            Err(poisoned) => {
+                let mut guard = poisoned.into_inner();
+                let stale_lookup: HashSet<&str> = stale_ids.iter().map(String::as_str).collect();
+                guard.retain(|entry| !stale_lookup.contains(entry.id.as_str()));
+            }
+        }
 
         Ok(())
     }
@@ -526,6 +590,18 @@ fn upsert_cached_item_inner(cached: &mut Vec<SearchItem>, item: SearchItem) {
     } else {
         cached.push(item);
     }
+}
+
+fn collect_app_items(items: &[SearchItem]) -> Vec<SearchItem> {
+    items
+        .iter()
+        .filter(|item| item.kind.eq_ignore_ascii_case("app"))
+        .cloned()
+        .collect()
+}
+
+fn should_use_app_cache(filter: &SearchFilter) -> bool {
+    filter.mode == SearchMode::Apps
 }
 
 fn is_stale_index_entry(item: &SearchItem) -> bool {
@@ -640,4 +716,98 @@ fn now_epoch_secs() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|value| value.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CoreService;
+    use crate::config::{Config, SearchMode};
+    use crate::index_store::open_memory;
+    use crate::model::SearchItem;
+    use crate::search::SearchFilter;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn app_mode_search_excludes_non_app_items() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let app_path = std::env::temp_dir().join(format!("swiftfind-app-cache-app-{unique}.tmp"));
+        let file_path = std::env::temp_dir().join(format!("swiftfind-app-cache-file-{unique}.tmp"));
+        std::fs::write(&app_path, b"ok").expect("app path should exist");
+        std::fs::write(&file_path, b"ok").expect("file path should exist");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "app-vivaldi",
+                "app",
+                "Vivaldi",
+                app_path.to_string_lossy().as_ref(),
+            ))
+            .expect("app should upsert");
+        service
+            .upsert_item(&SearchItem::new(
+                "file-video",
+                "file",
+                "video notes",
+                file_path.to_string_lossy().as_ref(),
+            ))
+            .expect("file should upsert");
+
+        let filter = SearchFilter {
+            mode: SearchMode::Apps,
+            ..SearchFilter::default()
+        };
+        let results = service
+            .search_with_filter("v", 20, &filter)
+            .expect("search should succeed");
+        assert!(results.iter().any(|item| item.id == "app-vivaldi"));
+        assert!(!results.iter().any(|item| item.id == "file-video"));
+
+        std::fs::remove_file(app_path).expect("app temp file should be removed");
+        std::fs::remove_file(file_path).expect("file temp file should be removed");
+    }
+
+    #[test]
+    fn app_cache_tracks_kind_changes() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("swiftfind-app-cache-kind-{unique}.tmp"));
+        std::fs::write(&path, b"ok").expect("temp file should exist");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "entry-1",
+                "app",
+                "Visual Studio Code",
+                path.to_string_lossy().as_ref(),
+            ))
+            .expect("app should upsert");
+        service
+            .upsert_item(&SearchItem::new(
+                "entry-1",
+                "file",
+                "Visual Studio Code.txt",
+                path.to_string_lossy().as_ref(),
+            ))
+            .expect("file should replace app");
+
+        let filter = SearchFilter {
+            mode: SearchMode::Apps,
+            ..SearchFilter::default()
+        };
+        let results = service
+            .search_with_filter("visual", 20, &filter)
+            .expect("search should succeed");
+        assert!(!results.iter().any(|item| item.id == "entry-1"));
+
+        std::fs::remove_file(path).expect("temp file should be removed");
+    }
 }

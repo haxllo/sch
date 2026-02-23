@@ -19,11 +19,14 @@ use crate::windows_overlay::{
     NativeOverlayShell, OverlayEvent, OverlayRow, OverlayRowRole,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
+const QUERY_PROFILE_LOG_THRESHOLD_MS: u128 = 35;
+const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 1;
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
@@ -1170,25 +1173,47 @@ fn search_overlay_results(
 
     let filter = build_search_filter(cfg, parsed_query);
     let text_query = parsed_query.free_text.trim();
+    let normalized_query = crate::model::normalize_for_search(text_query);
     let candidate_limit = result_limit.saturating_mul(6).max(60);
+    let short_query_app_bias =
+        should_use_short_query_app_mode(parsed_query, &filter, &normalized_query);
+    let mut indexed_filter = filter.clone();
+    if short_query_app_bias {
+        indexed_filter.mode = crate::config::SearchMode::Apps;
+    }
 
+    let search_started = Instant::now();
     let mut merged = Vec::new();
-    merged.extend(
-        service
-            .search_with_filter(text_query, candidate_limit, &filter)
-            .map_err(|error| format!("indexed search failed: {error}"))?,
-    );
-    merged.extend(crate::search::search_with_filter(
-        &plugins.provider_items,
-        text_query,
-        candidate_limit,
-        &filter,
-    ));
+    let indexed_started = Instant::now();
+    let indexed_results = service
+        .search_with_filter(text_query, candidate_limit, &indexed_filter)
+        .map_err(|error| format!("indexed search failed: {error}"))?;
+    let indexed_ms = indexed_started.elapsed().as_millis();
+    let indexed_count = indexed_results.len();
+    merged.extend(indexed_results);
 
+    let mut provider_ms = 0_u128;
+    let mut provider_count = 0_usize;
+    if !short_query_app_bias {
+        let provider_started = Instant::now();
+        let provider_results = crate::search::search_with_filter(
+            &plugins.provider_items,
+            text_query,
+            candidate_limit,
+            &filter,
+        );
+        provider_ms = provider_started.elapsed().as_millis();
+        provider_count = provider_results.len();
+        merged.extend(provider_results);
+    }
+
+    let actions_started = Instant::now();
     let mut action_items =
         search_actions_with_mode(text_query, candidate_limit, parsed_query.command_mode);
+    let built_in_actions_count = action_items.len();
+    let mut plugin_action_count = 0_usize;
     if !plugins.action_items.is_empty() {
-        action_items.extend(crate::search::search_with_filter(
+        let plugin_actions = crate::search::search_with_filter(
             &plugins.action_items,
             text_query,
             candidate_limit,
@@ -1196,28 +1221,52 @@ fn search_overlay_results(
                 mode: crate::config::SearchMode::Actions,
                 ..SearchFilter::default()
             },
+        );
+        plugin_action_count = plugin_actions.len();
+        action_items.extend(plugin_actions);
+    }
+    let action_results =
+        crate::search::search_with_filter(&action_items, text_query, candidate_limit, &filter);
+    let actions_ms = actions_started.elapsed().as_millis();
+    let action_count = action_results.len();
+    merged.extend(action_results);
+
+    let mut clipboard_ms = 0_u128;
+    let mut clipboard_count = 0_usize;
+    if !short_query_app_bias {
+        let clipboard_started = Instant::now();
+        let clipboard_results =
+            clipboard_history::search_history(cfg, text_query, &filter, candidate_limit.min(120));
+        clipboard_ms = clipboard_started.elapsed().as_millis();
+        clipboard_count = clipboard_results.len();
+        merged.extend(clipboard_results);
+    }
+
+    let rank_started = Instant::now();
+    let ranked = crate::search::search_with_filter(&merged, text_query, result_limit, &filter);
+    let rank_ms = rank_started.elapsed().as_millis();
+    let total_ms = search_started.elapsed().as_millis();
+    if total_ms >= QUERY_PROFILE_LOG_THRESHOLD_MS {
+        log_info(&format!(
+            "[swiftfind-core] query_profile q=\"{}\" mode={} short_app_bias={} indexed_count={} indexed_ms={} provider_count={} provider_ms={} action_count={} action_ms={} built_in_actions={} plugin_actions={} clipboard_count={} clipboard_ms={} rank_ms={} total_ms={}",
+            sanitize_query_for_profile_log(text_query),
+            format!("{:?}", filter.mode).to_ascii_lowercase(),
+            short_query_app_bias,
+            indexed_count,
+            indexed_ms,
+            provider_count,
+            provider_ms,
+            action_count,
+            actions_ms,
+            built_in_actions_count,
+            plugin_action_count,
+            clipboard_count,
+            clipboard_ms,
+            rank_ms,
+            total_ms
         ));
     }
-    merged.extend(crate::search::search_with_filter(
-        &action_items,
-        text_query,
-        candidate_limit,
-        &filter,
-    ));
-
-    merged.extend(clipboard_history::search_history(
-        cfg,
-        text_query,
-        &filter,
-        candidate_limit.min(120),
-    ));
-
-    Ok(crate::search::search_with_filter(
-        &merged,
-        text_query,
-        result_limit,
-        &filter,
-    ))
+    Ok(ranked)
 }
 
 fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter {
@@ -1240,6 +1289,44 @@ fn resolved_mode_for_query(cfg: &Config, parsed_query: &ParsedQuery) -> crate::c
         mode = crate::config::SearchMode::Actions;
     }
     mode
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn should_use_short_query_app_mode(
+    parsed_query: &ParsedQuery,
+    filter: &SearchFilter,
+    normalized_query: &str,
+) -> bool {
+    if normalized_query.is_empty() || normalized_query.len() > SHORT_QUERY_APP_BIAS_MAX_LEN {
+        return false;
+    }
+    if parsed_query.command_mode {
+        return false;
+    }
+    if filter.mode != crate::config::SearchMode::All {
+        return false;
+    }
+    parsed_query.kind_filter.is_none()
+        && parsed_query.exclude_terms.is_empty()
+        && parsed_query.modified_within.is_none()
+        && parsed_query.created_within.is_none()
+}
+
+fn sanitize_query_for_profile_log(query: &str) -> String {
+    const MAX_QUERY_LOG_CHARS: usize = 48;
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return "-".to_string();
+    }
+    let mut cleaned = String::new();
+    for ch in trimmed.chars().take(MAX_QUERY_LOG_CHARS) {
+        if ch.is_control() {
+            cleaned.push(' ');
+        } else {
+            cleaned.push(ch);
+        }
+    }
+    cleaned.trim().to_string()
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -1586,6 +1673,49 @@ mod tests {
         assert!(results
             .iter()
             .any(|item| item.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
+    }
+
+    #[test]
+    fn short_single_letter_query_in_all_mode_biases_to_apps() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let app_path = std::env::temp_dir().join(format!("swiftfind-short-query-app-{unique}.tmp"));
+        let file_path =
+            std::env::temp_dir().join(format!("swiftfind-short-query-file-{unique}.tmp"));
+        std::fs::write(&app_path, b"ok").expect("app temp file should be created");
+        std::fs::write(&file_path, b"ok").expect("file temp file should be created");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "app-1",
+                "app",
+                "Vivaldi Browser",
+                app_path.to_string_lossy().as_ref(),
+            ))
+            .expect("app should upsert");
+        service
+            .upsert_item(&SearchItem::new(
+                "file-1",
+                "file",
+                "Vacation Notes",
+                file_path.to_string_lossy().as_ref(),
+            ))
+            .expect("file should upsert");
+
+        let parsed = ParsedQuery::parse("v", true);
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 20)
+            .expect("search should succeed");
+        assert!(results.iter().any(|item| item.id == "app-1"));
+        assert!(!results.iter().any(|item| item.id == "file-1"));
+
+        std::fs::remove_file(app_path).expect("app temp file should be removed");
+        std::fs::remove_file(file_path).expect("file temp file should be removed");
     }
 
     #[test]
