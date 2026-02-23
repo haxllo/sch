@@ -160,7 +160,7 @@ mod imp {
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
-    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -26;
+    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -22;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -184,6 +184,7 @@ mod imp {
     const COMMAND_PREFIX_GAP: i32 = 12;
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 20;
     const COMMAND_PREFIX_INPUT_PAD: i32 = 16;
+    const COMMAND_PREFIX_OPACITY: f32 = 0.60;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -2065,7 +2066,14 @@ mod imp {
             };
             let old_font = SelectObject(hdc, prefix_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(hdc, state.palette.text_hint);
+            SetTextColor(
+                hdc,
+                blend_color(
+                    state.palette.input_bg,
+                    state.palette.text_hint,
+                    COMMAND_PREFIX_OPACITY,
+                ),
+            );
             let prefix = to_wide(COMMAND_PREFIX_TEXT);
             DrawTextW(
                 hdc,
