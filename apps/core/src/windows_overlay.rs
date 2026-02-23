@@ -2849,8 +2849,9 @@ mod imp {
         let idle_ms = idle_cache_trim_ms.clamp(250, 120_000);
         ICON_CACHE_IDLE_MS_RUNTIME.store(idle_ms, Ordering::Relaxed);
 
-        // Keep icon-cache size proportional to active-memory target without unbounded growth.
-        let max_entries = ((active_memory_target_mb as usize).saturating_mul(3) / 2).clamp(40, 320);
+        // Keep icon-cache size proportional to active-memory target with a tighter cap so
+        // active working set stays stable on large result sets.
+        let max_entries = ((active_memory_target_mb as usize).saturating_mul(5) / 4).clamp(32, 256);
         ICON_CACHE_MAX_ENTRIES_RUNTIME.store(max_entries, Ordering::Relaxed);
         crate::logging::info(&format!(
             "[swiftfind-core] overlay_tuning idle_cache_trim_ms={} active_memory_target_mb={} icon_cache_max_entries={}",
@@ -2867,7 +2868,7 @@ mod imp {
     fn runtime_icon_cache_max_entries() -> usize {
         ICON_CACHE_MAX_ENTRIES_RUNTIME
             .load(Ordering::Relaxed)
-            .clamp(40, 320)
+            .clamp(32, 256)
     }
 
     fn schedule_icon_cache_idle_cleanup(hwnd: HWND) {

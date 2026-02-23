@@ -1572,6 +1572,10 @@ fn search_overlay_results_with_session(
     let filter = build_search_filter(cfg, parsed_query);
     let text_query = parsed_query.free_text.trim();
     let normalized_query = crate::model::normalize_for_search(text_query);
+    if should_skip_non_searchable_query(parsed_query, &normalized_query) {
+        session.clear();
+        return Ok(Vec::new());
+    }
     let candidate_limit = candidate_limit_for_query(
         result_limit,
         &filter,
@@ -1748,6 +1752,23 @@ fn should_use_short_query_app_mode(
         && parsed_query.created_within.is_none()
 }
 
+fn should_skip_non_searchable_query(parsed_query: &ParsedQuery, normalized_query: &str) -> bool {
+    if !normalized_query.is_empty() {
+        return false;
+    }
+    if parsed_query.command_mode {
+        return false;
+    }
+    if parsed_query.mode_override.is_some() {
+        return false;
+    }
+    parsed_query.kind_filter.is_none()
+        && parsed_query.include_groups.is_empty()
+        && parsed_query.exclude_terms.is_empty()
+        && parsed_query.modified_within.is_none()
+        && parsed_query.created_within.is_none()
+}
+
 fn candidate_limit_for_query(
     result_limit: usize,
     filter: &SearchFilter,
@@ -1768,7 +1789,11 @@ fn candidate_limit_for_query(
     }
 
     match normalized_query.len() {
-        0 => base,
+        0 => result_limit
+            .saturating_mul(2)
+            .max(24)
+            .min(64)
+            .max(result_limit),
         1 => match filter.mode {
             crate::config::SearchMode::All => result_limit
                 .saturating_mul(3)
@@ -2022,7 +2047,8 @@ mod tests {
         can_use_indexed_prefix_cache, candidate_limit_for_query, dedupe_overlay_results,
         launch_overlay_selection, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
-        summarize_query_profiles, IndexedPrefixCache, RuntimeCommand, RuntimeOptions,
+        should_skip_non_searchable_query, summarize_query_profiles, IndexedPrefixCache,
+        RuntimeCommand, RuntimeOptions,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2167,9 +2193,11 @@ mod tests {
     #[test]
     fn candidate_limit_adapts_to_query_shape() {
         let all = SearchFilter::default();
+        let empty_all = candidate_limit_for_query(20, &all, "", false);
         let short_all = candidate_limit_for_query(20, &all, "v", false);
         let medium_all = candidate_limit_for_query(20, &all, "vi", false);
         let long_all = candidate_limit_for_query(20, &all, "vivaldi", false);
+        assert!(empty_all <= short_all);
         assert!(short_all < medium_all);
         assert!(medium_all <= long_all);
 
@@ -2475,6 +2503,21 @@ mod tests {
         assert_eq!(summary.short_query_samples, 2);
         assert_eq!(summary.short_query_app_bias_rate_pct, 100);
         assert_eq!(summary.short_query_p95_total_ms, 27);
+    }
+
+    #[test]
+    fn skips_non_searchable_symbol_only_query() {
+        let parsed = ParsedQuery::parse("-", true);
+        let normalized = crate::model::normalize_for_search(parsed.free_text.trim());
+        assert!(should_skip_non_searchable_query(&parsed, &normalized));
+
+        let parsed_command = ParsedQuery::parse(">-", true);
+        let normalized_command =
+            crate::model::normalize_for_search(parsed_command.free_text.trim());
+        assert!(!should_skip_non_searchable_query(
+            &parsed_command,
+            &normalized_command
+        ));
     }
 
     #[test]
