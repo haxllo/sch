@@ -185,6 +185,8 @@ mod imp {
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 20;
     const COMMAND_PREFIX_INPUT_PAD: i32 = 16;
     const COMMAND_PREFIX_OPACITY: f32 = 0.60;
+    const COMMAND_PREFIX_EMBOLDEN_OPACITY: f32 = 0.40;
+    const COMMAND_PREFIX_EMBOLDEN_OFFSET_PX: i32 = 1;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -2066,15 +2068,39 @@ mod imp {
             };
             let old_font = SelectObject(hdc, prefix_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(
-                hdc,
-                blend_color(
-                    state.palette.input_bg,
-                    state.palette.text_hint,
-                    COMMAND_PREFIX_OPACITY,
-                ),
+            let prefix_color = blend_color(
+                state.palette.input_bg,
+                state.palette.text_hint,
+                COMMAND_PREFIX_OPACITY,
+            );
+            let embolden_color = blend_color(
+                state.palette.input_bg,
+                state.palette.text_hint,
+                COMMAND_PREFIX_EMBOLDEN_OPACITY,
             );
             let prefix = to_wide(COMMAND_PREFIX_TEXT);
+            let mut left_pass_rect = prefix_rect;
+            left_pass_rect.left -= COMMAND_PREFIX_EMBOLDEN_OFFSET_PX;
+            left_pass_rect.right -= COMMAND_PREFIX_EMBOLDEN_OFFSET_PX;
+            SetTextColor(hdc, embolden_color);
+            DrawTextW(
+                hdc,
+                prefix.as_ptr(),
+                -1,
+                &mut left_pass_rect,
+                DT_CENTER | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
+            );
+            let mut right_pass_rect = prefix_rect;
+            right_pass_rect.left += COMMAND_PREFIX_EMBOLDEN_OFFSET_PX;
+            right_pass_rect.right += COMMAND_PREFIX_EMBOLDEN_OFFSET_PX;
+            DrawTextW(
+                hdc,
+                prefix.as_ptr(),
+                -1,
+                &mut right_pass_rect,
+                DT_CENTER | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
+            );
+            SetTextColor(hdc, prefix_color);
             DrawTextW(
                 hdc,
                 prefix.as_ptr(),
