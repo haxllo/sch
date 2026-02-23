@@ -260,7 +260,9 @@ fn roots_change_stamp(roots: &[PathBuf]) -> String {
 }
 
 fn normalize_root_for_stamp(path: &Path) -> String {
-    path.to_string_lossy().replace('/', "\\").to_ascii_lowercase()
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase()
 }
 
 fn quick_path_fingerprint(path: &Path) -> (u8, u64, usize, u64) {

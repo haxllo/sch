@@ -1,10 +1,18 @@
-use crate::config::{self, ConfigError};
+use crate::action_registry::{
+    search_actions, ACTION_CLEAR_CLIPBOARD_ID, ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_OPEN_CONFIG_ID,
+    ACTION_OPEN_LOGS_ID, ACTION_REBUILD_INDEX_ID,
+};
+use crate::clipboard_history;
+use crate::config::{self, Config, ConfigError};
 use crate::core_service::{CoreService, LaunchTarget, ServiceError};
 use crate::hotkey_runtime::HotkeyRuntimeError;
 #[cfg(target_os = "windows")]
 use crate::hotkey_runtime::{default_hotkey_registrar, HotkeyRegistration};
 #[cfg(target_os = "windows")]
 use crate::overlay_state::{HotkeyAction, OverlayState};
+use crate::plugin_sdk::{PluginActionKind, PluginRegistry};
+use crate::query_dsl::ParsedQuery;
+use crate::search::SearchFilter;
 #[cfg(target_os = "windows")]
 use crate::windows_overlay::{
     is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
@@ -12,7 +20,6 @@ use crate::windows_overlay::{
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
 #[cfg(target_os = "windows")]
@@ -198,6 +205,19 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
             provider.elapsed_ms,
         ));
     }
+    #[cfg(target_os = "windows")]
+    let plugin_registry = PluginRegistry::load_from_config(&config);
+    #[cfg(target_os = "windows")]
+    {
+        for warning in &plugin_registry.load_warnings {
+            log_warn(&format!("[swiftfind-core] plugin_warning {warning}"));
+        }
+        log_info(&format!(
+            "[swiftfind-core] plugins loaded provider_items={} action_items={}",
+            plugin_registry.provider_items.len(),
+            plugin_registry.action_items.len()
+        ));
+    }
 
     #[cfg(target_os = "windows")]
     {
@@ -249,6 +269,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     match action {
                         HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
                             overlay.show_and_focus();
+                            if config.clipboard_enabled {
+                                let _ = clipboard_history::maybe_capture_latest(&config);
+                            }
                             if overlay.query_text().trim().is_empty() {
                                 set_idle_overlay_state(&overlay);
                                 if first_run_onboarding {
@@ -271,6 +294,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 OverlayEvent::ExternalShow => {
                     overlay_state.set_visible(overlay.is_visible());
                     overlay.show_and_focus();
+                    if config.clipboard_enabled {
+                        let _ = clipboard_history::maybe_capture_latest(&config);
+                    }
                     if overlay.query_text().trim().is_empty() {
                         set_idle_overlay_state(&overlay);
                         if first_run_onboarding {
@@ -306,10 +332,16 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         return;
                     }
                     last_query = trimmed.to_string();
+                    let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
 
-                    match search_overlay_results(&service, trimmed, max_results) {
+                    match search_overlay_results(
+                        &service,
+                        &config,
+                        &plugin_registry,
+                        &parsed_query,
+                        max_results,
+                    ) {
                         Ok(mut results) => {
-                            prepend_runtime_actions(trimmed, max_results, &mut results);
                             dedupe_overlay_results(&mut results);
                             current_results = results;
                             selected_index = 0;
@@ -352,7 +384,13 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         selected_index = list_selection.min(current_results.len() - 1);
                     }
 
-                    match launch_overlay_selection(&service, &current_results, selected_index) {
+                    match launch_overlay_selection(
+                        &service,
+                        &config,
+                        &plugin_registry,
+                        &current_results,
+                        selected_index,
+                    ) {
                         Ok(()) => {
                             overlay.set_status_text("");
                             overlay.hide_now();
@@ -491,7 +529,9 @@ fn parse_status_diagnostics_snapshot(content: &str) -> Option<StatusDiagnosticsS
     let last_provider_line = latest_line_with_token(content, "index_provider name=");
     let last_icon_cache_line = latest_line_with_token(content, "overlay_icon_cache reason=");
 
-    if startup_index_line.is_none() && last_provider_line.is_none() && last_icon_cache_line.is_none()
+    if startup_index_line.is_none()
+        && last_provider_line.is_none()
+        && last_icon_cache_line.is_none()
     {
         return None;
     }
@@ -704,6 +744,16 @@ fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, 
         "max_results": cfg.max_results,
         "hotkey": cfg.hotkey,
         "launch_at_startup": cfg.launch_at_startup,
+        "search_mode_default": cfg.search_mode_default,
+        "search_dsl_enabled": cfg.search_dsl_enabled,
+        "clipboard_enabled": cfg.clipboard_enabled,
+        "clipboard_retention_minutes": cfg.clipboard_retention_minutes,
+        "clipboard_exclude_sensitive_patterns_count": cfg.clipboard_exclude_sensitive_patterns.len(),
+        "plugins_enabled": cfg.plugins_enabled,
+        "plugin_paths_count": cfg.plugin_paths.len(),
+        "plugins_safe_mode": cfg.plugins_safe_mode,
+        "idle_cache_trim_ms": cfg.idle_cache_trim_ms,
+        "active_memory_target_mb": cfg.active_memory_target_mb,
         "discovery_roots_count": cfg.discovery_roots.len(),
         "discovery_exclude_roots_count": cfg.discovery_exclude_roots.len()
     });
@@ -816,6 +866,7 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
     let mut app_indices = Vec::new();
     let mut file_indices = Vec::new();
     let mut action_indices = Vec::new();
+    let mut clipboard_indices = Vec::new();
     let mut other_indices = Vec::new();
 
     for (index, item) in results.iter().enumerate().skip(1) {
@@ -826,6 +877,8 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
             file_indices.push(index);
         } else if item.kind.eq_ignore_ascii_case("action") {
             action_indices.push(index);
+        } else if item.kind.eq_ignore_ascii_case("clipboard") {
+            clipboard_indices.push(index);
         } else {
             other_indices.push(index);
         }
@@ -834,6 +887,7 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
     append_group_rows(&mut rows, "Applications", &app_indices, results);
     append_group_rows(&mut rows, "Files", &file_indices, results);
     append_group_rows(&mut rows, "Actions", &action_indices, results);
+    append_group_rows(&mut rows, "Clipboard", &clipboard_indices, results);
     append_group_rows(&mut rows, "Other", &other_indices, results);
     rows
 }
@@ -850,11 +904,7 @@ fn append_group_rows(
     }
     rows.push(section_header_row(header));
     for index in indices {
-        rows.push(result_row(
-            &results[*index],
-            *index,
-            OverlayRowRole::Item,
-        ));
+        rows.push(result_row(&results[*index], *index, OverlayRowRole::Item));
     }
 }
 
@@ -871,7 +921,11 @@ fn section_header_row(title: &str) -> OverlayRow {
 }
 
 #[cfg(target_os = "windows")]
-fn result_row(item: &crate::model::SearchItem, result_index: usize, role: OverlayRowRole) -> OverlayRow {
+fn result_row(
+    item: &crate::model::SearchItem,
+    result_index: usize,
+    role: OverlayRowRole,
+) -> OverlayRow {
     OverlayRow {
         role,
         result_index: result_index as i32,
@@ -967,7 +1021,10 @@ fn overlay_subtitle(item: &crate::model::SearchItem) -> String {
         return String::new();
     }
     if item.kind.eq_ignore_ascii_case("action") {
-        return "Open SwiftFind logs folder".to_string();
+        if item.path.trim().is_empty() {
+            return "SwiftFind action".to_string();
+        }
+        return item.path.trim().to_string();
     }
     abbreviate_path(&item.path)
 }
@@ -1116,17 +1173,90 @@ fn to_wide(value: &str) -> Vec<u16> {
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn search_overlay_results(
     service: &CoreService,
-    query: &str,
+    cfg: &Config,
+    plugins: &PluginRegistry,
+    parsed_query: &ParsedQuery,
     result_limit: usize,
 ) -> Result<Vec<crate::model::SearchItem>, String> {
-    service
-        .search(query, result_limit)
-        .map_err(|error| format!("search failed: {error}"))
+    if result_limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let filter = build_search_filter(cfg, parsed_query);
+    let text_query = parsed_query.free_text.trim();
+    let candidate_limit = result_limit.saturating_mul(6).max(60);
+
+    let mut merged = Vec::new();
+    let indexed_items = service.cached_items_snapshot();
+    merged.extend(crate::search::search_with_filter(
+        &indexed_items,
+        text_query,
+        candidate_limit,
+        &filter,
+    ));
+    merged.extend(crate::search::search_with_filter(
+        &plugins.provider_items,
+        text_query,
+        candidate_limit,
+        &filter,
+    ));
+
+    let mut action_items = search_actions(text_query, candidate_limit);
+    if !plugins.action_items.is_empty() {
+        action_items.extend(crate::search::search_with_filter(
+            &plugins.action_items,
+            text_query,
+            candidate_limit,
+            &SearchFilter {
+                mode: crate::config::SearchMode::Actions,
+                ..SearchFilter::default()
+            },
+        ));
+    }
+    merged.extend(crate::search::search_with_filter(
+        &action_items,
+        text_query,
+        candidate_limit,
+        &filter,
+    ));
+
+    merged.extend(clipboard_history::search_history(
+        cfg,
+        text_query,
+        &filter,
+        candidate_limit.min(120),
+    ));
+
+    Ok(crate::search::search_with_filter(
+        &merged,
+        text_query,
+        result_limit,
+        &filter,
+    ))
+}
+
+fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter {
+    let mut mode = parsed_query
+        .mode_override
+        .unwrap_or(cfg.search_mode_default);
+    if parsed_query.command_mode {
+        mode = crate::config::SearchMode::Actions;
+    }
+    SearchFilter {
+        mode,
+        kind_filter: parsed_query.kind_filter.clone(),
+        include_groups: parsed_query.include_groups.clone(),
+        exclude_terms: parsed_query.exclude_terms.clone(),
+        modified_within: parsed_query.modified_within,
+        created_within: parsed_query.created_within,
+    }
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn launch_overlay_selection(
     service: &CoreService,
+    cfg: &Config,
+    plugins: &PluginRegistry,
     results: &[crate::model::SearchItem],
     selected_index: usize,
 ) -> Result<(), String> {
@@ -1142,41 +1272,85 @@ fn launch_overlay_selection(
     }
 
     let selected = &results[selected_index];
-    if selected.id == ACTION_OPEN_LOGS_ID {
-        return crate::logging::open_logs_folder()
-            .map_err(|error| format!("open logs folder failed: {error}"));
+    if selected.kind.eq_ignore_ascii_case("action") {
+        return execute_action_selection(service, cfg, plugins, selected);
     }
+    if selected.kind.eq_ignore_ascii_case("clipboard") {
+        return clipboard_history::copy_result_to_clipboard(cfg, &selected.id);
+    }
+
     service
         .launch(LaunchTarget::Id(&selected.id))
         .map_err(|error| format!("launch failed: {error}"))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn prepend_runtime_actions(query: &str, limit: usize, results: &mut Vec<crate::model::SearchItem>) {
-    if limit == 0 {
-        return;
+fn execute_action_selection(
+    service: &CoreService,
+    cfg: &Config,
+    plugins: &PluginRegistry,
+    selected: &crate::model::SearchItem,
+) -> Result<(), String> {
+    match selected.id.as_str() {
+        ACTION_OPEN_LOGS_ID => crate::logging::open_logs_folder()
+            .map_err(|error| format!("open logs folder failed: {error}")),
+        ACTION_REBUILD_INDEX_ID => {
+            let report = service
+                .rebuild_index_incremental_with_report()
+                .map_err(|error| format!("rebuild index failed: {error}"))?;
+            log_info(&format!(
+                "[swiftfind-core] action_rebuild_index indexed={} discovered={} upserted={} removed={}",
+                report.indexed_total, report.discovered_total, report.upserted_total, report.removed_total
+            ));
+            Ok(())
+        }
+        ACTION_CLEAR_CLIPBOARD_ID => clipboard_history::clear_history(cfg),
+        ACTION_OPEN_CONFIG_ID => {
+            crate::action_executor::launch_path(cfg.config_path.to_string_lossy().as_ref())
+                .map_err(|error| format!("open config failed: {error}"))
+        }
+        ACTION_DIAGNOSTICS_BUNDLE_ID => {
+            let output_dir = write_diagnostics_bundle(cfg)
+                .map_err(|error| format!("diagnostics bundle failed: {error}"))?;
+            log_info(&format!(
+                "[swiftfind-core] diagnostics bundle written to {}",
+                output_dir.display()
+            ));
+            Ok(())
+        }
+        _ => execute_plugin_action(cfg, plugins, &selected.id),
     }
+}
 
-    let normalized = query.trim().to_ascii_lowercase();
-    if !normalized.starts_with("log") {
-        return;
-    }
-    if results.iter().any(|item| item.id == ACTION_OPEN_LOGS_ID) {
-        return;
-    }
+fn execute_plugin_action(
+    cfg: &Config,
+    plugins: &PluginRegistry,
+    result_id: &str,
+) -> Result<(), String> {
+    let action = plugins
+        .actions_by_result_id
+        .get(result_id)
+        .ok_or_else(|| "unknown action".to_string())?;
 
-    let logs_path = crate::logging::logs_dir();
-    results.insert(
-        0,
-        crate::model::SearchItem::new(
-            ACTION_OPEN_LOGS_ID,
-            "action",
-            "Open SwiftFind Logs Folder",
-            logs_path.to_string_lossy().as_ref(),
-        ),
-    );
-    if results.len() > limit {
-        results.truncate(limit);
+    match &action.kind {
+        PluginActionKind::OpenPath { path } => crate::action_executor::launch_path(path)
+            .map_err(|error| format!("plugin open path failed: {error}")),
+        PluginActionKind::Command { command, args } => {
+            if cfg.plugins_safe_mode {
+                return Err(
+                    "plugin command execution blocked: plugins_safe_mode is enabled in config"
+                        .to_string(),
+                );
+            }
+            if command.trim().is_empty() {
+                return Err("plugin command action missing command".to_string());
+            }
+            std::process::Command::new(command)
+                .args(args)
+                .spawn()
+                .map_err(|e| format!("plugin command spawn failed: {e}"))?;
+            Ok(())
+        }
     }
 }
 
@@ -1218,13 +1392,16 @@ fn log_warn(message: &str) {
 mod tests {
     use super::{
         dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
-        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, prepend_runtime_actions,
-        search_overlay_results, RuntimeCommand, RuntimeOptions, ACTION_OPEN_LOGS_ID,
+        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
+        RuntimeCommand, RuntimeOptions,
     };
+    use crate::action_registry::ACTION_DIAGNOSTICS_BUNDLE_ID;
     use crate::config::Config;
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
     use crate::model::SearchItem;
+    use crate::plugin_sdk::PluginRegistry;
+    use crate::query_dsl::ParsedQuery;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1247,7 +1424,11 @@ mod tests {
             ))
             .expect("item should upsert");
 
-        let results = search_overlay_results(&service, "code", 20).expect("search should succeed");
+        let parsed = ParsedQuery::parse("code", true);
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 20)
+            .expect("search should succeed");
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "item-1");
@@ -1275,8 +1456,13 @@ mod tests {
             ))
             .expect("item should upsert");
 
-        let results = search_overlay_results(&service, "code", 20).expect("search should succeed");
-        launch_overlay_selection(&service, &results, 0).expect("launch should succeed");
+        let parsed = ParsedQuery::parse("code", true);
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 20)
+            .expect("search should succeed");
+        launch_overlay_selection(&service, &cfg, &plugins, &results, 0)
+            .expect("launch should succeed");
 
         std::fs::remove_file(&launch_path).expect("temp launch file should be removed");
     }
@@ -1302,8 +1488,10 @@ mod tests {
             .expect("item should upsert");
 
         let results = vec![item];
-        let error =
-            launch_overlay_selection(&service, &results, 0).expect_err("launch should fail");
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 0)
+            .expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));
     }
@@ -1314,8 +1502,10 @@ mod tests {
             .expect("service should initialize");
         let results = vec![SearchItem::new("item-1", "app", "One", "C:\\One.exe")];
 
-        let error =
-            launch_overlay_selection(&service, &results, 1).expect_err("selection should fail");
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 1)
+            .expect_err("selection should fail");
 
         assert!(error.contains("selected index out of range"));
     }
@@ -1325,8 +1515,10 @@ mod tests {
         let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
             .expect("service should initialize");
 
-        let error =
-            launch_overlay_selection(&service, &[], 0).expect_err("empty selection should fail");
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &[], 0)
+            .expect_err("empty selection should fail");
 
         assert_eq!(error, "no result selected");
     }
@@ -1379,18 +1571,17 @@ mod tests {
     }
 
     #[test]
-    fn prepends_logs_action_for_log_query() {
-        let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
-        prepend_runtime_actions("logs", 5, &mut results);
-        assert_eq!(results[0].id, ACTION_OPEN_LOGS_ID);
-        assert_eq!(results[0].kind, "action");
-    }
-
-    #[test]
-    fn does_not_prepend_logs_action_for_non_log_query() {
-        let mut results = vec![SearchItem::new("x", "file", "Example", "C:\\Example.txt")];
-        prepend_runtime_actions("code", 5, &mut results);
-        assert_ne!(results[0].id, ACTION_OPEN_LOGS_ID);
+    fn command_mode_returns_action_results() {
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let parsed = ParsedQuery::parse(">diag", true);
+        let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 10)
+            .expect("search should succeed");
+        assert!(results
+            .iter()
+            .any(|item| item.id == ACTION_DIAGNOSTICS_BUNDLE_ID));
     }
 
     #[test]
@@ -1423,7 +1614,12 @@ mod tests {
     fn dedupes_lnk_file_when_matching_app_title_exists() {
         let mut results = vec![
             SearchItem::new("a1", "app", "Framer", "C:\\ProgramData\\Framer.lnk"),
-            SearchItem::new("f1", "file", "Framer.lnk", "C:\\Users\\Admin\\Desktop\\Framer.lnk"),
+            SearchItem::new(
+                "f1",
+                "file",
+                "Framer.lnk",
+                "C:\\Users\\Admin\\Desktop\\Framer.lnk",
+            ),
             SearchItem::new(
                 "f2",
                 "file",
@@ -1447,27 +1643,21 @@ mod tests {
 ";
 
         let snapshot = parse_status_diagnostics_snapshot(content).expect("snapshot should parse");
-        assert!(
-            snapshot
-                .startup_index_line
-                .as_deref()
-                .unwrap_or_default()
-                .contains("startup indexed_items=310")
-        );
-        assert!(
-            snapshot
-                .last_provider_line
-                .as_deref()
-                .unwrap_or_default()
-                .contains("index_provider name=start-menu-apps")
-        );
-        assert!(
-            snapshot
-                .last_icon_cache_line
-                .as_deref()
-                .unwrap_or_default()
-                .contains("overlay_icon_cache reason=cache_clear")
-        );
+        assert!(snapshot
+            .startup_index_line
+            .as_deref()
+            .unwrap_or_default()
+            .contains("startup indexed_items=310"));
+        assert!(snapshot
+            .last_provider_line
+            .as_deref()
+            .unwrap_or_default()
+            .contains("index_provider name=start-menu-apps"));
+        assert!(snapshot
+            .last_icon_cache_line
+            .as_deref()
+            .unwrap_or_default()
+            .contains("overlay_icon_cache reason=cache_clear"));
     }
 
     #[test]

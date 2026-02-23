@@ -10,54 +10,52 @@ mod imp {
         GetLastError, HWND, LPARAM, LRESULT, POINT, RECT, SIZE, WPARAM,
     };
     use windows_sys::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_BORDER_COLOR,
-        DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows_sys::Win32::Graphics::Gdi::{
         AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
-        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC,
-        SelectObject, SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
+        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
+        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
         DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE,
-        OUT_DEFAULT_PRECIS, PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+        TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     };
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::System::Environment::ExpandEnvironmentStringsW;
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-    use windows_sys::Win32::System::Com::CoTaskMemFree;
     use windows_sys::Win32::UI::Controls::{
-        DRAWITEMSTRUCT, EM_SETSEL, ImageList_GetIcon, MEASUREITEMSTRUCT, ODS_SELECTED,
+        ImageList_GetIcon, DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
-        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW, SHParseDisplayName, SHFILEINFOW,
-        SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SYSICONINDEX,
-        SHGFI_USEFILEATTRIBUTES,
+        ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW,
+        SHParseDisplayName, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION, SHGFI_LARGEICON,
+        SHGFI_PIDL, SHGFI_SYSICONINDEX, SHGFI_USEFILEATTRIBUTES,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         AnimateWindow, CallWindowProcW, CreateWindowExW, DefWindowProcW, DestroyIcon,
-        DispatchMessageW,
-        DrawIconEx, FindWindowW, GetClientRect, GetCursorPos, GetForegroundWindow, GetMessageW,
-        GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
-        GetWindowTextW, HideCaret, IsChild, KillTimer, LoadCursorW, MoveWindow, PostMessageW,
-        PeekMessageW, PostQuitMessage, RegisterClassW, SendMessageW, SetCursor, SetForegroundWindow,
-        SetLayeredWindowAttributes, SetTimer, SetWindowLongPtrW, SetWindowPos, SetWindowTextW,
-        ShowWindow, TranslateMessage, AW_ACTIVATE, AW_BLEND, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-        CW_USEDEFAULT, DI_NORMAL, EN_CHANGE, ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA,
-        GWLP_WNDPROC, GWL_STYLE, HMENU, HWND_TOPMOST, IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS,
-        LBS_NOINTEGRALHEIGHT, LBS_NOTIFY, LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT,
-        LB_GETCURSEL, LB_GETITEMRECT, LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT,
-        LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA, MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN,
-        SWP_NOACTIVATE,
-        SW_HIDE, SW_SHOW, WM_ACTIVATE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT,
-        WM_CTLCOLORLISTBOX, WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN,
-        WM_LBUTTONUP, WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY,
-        WM_PAINT, WM_SETFOCUS, WM_SETFONT, WM_SETREDRAW, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
+        DispatchMessageW, DrawIconEx, FindWindowW, GetClientRect, GetCursorPos,
+        GetForegroundWindow, GetMessageW, GetParent, GetSystemMetrics, GetWindowLongPtrW,
+        GetWindowRect, GetWindowTextLengthW, GetWindowTextW, HideCaret, IsChild, KillTimer,
+        LoadCursorW, MoveWindow, PeekMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
+        SendMessageW, SetCursor, SetForegroundWindow, SetLayeredWindowAttributes, SetTimer,
+        SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, AW_ACTIVATE,
+        AW_BLEND, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, DI_NORMAL, EN_CHANGE,
+        ES_AUTOHSCROLL, ES_MULTILINE, GWLP_USERDATA, GWLP_WNDPROC, GWL_STYLE, HMENU, HWND_TOPMOST,
+        IDC_ARROW, IDC_HAND, LBN_DBLCLK, LBS_HASSTRINGS, LBS_NOINTEGRALHEIGHT, LBS_NOTIFY,
+        LBS_OWNERDRAWFIXED, LB_ADDSTRING, LB_GETCOUNT, LB_GETCURSEL, LB_GETITEMRECT,
+        LB_GETTOPINDEX, LB_ITEMFROMPOINT, LB_RESETCONTENT, LB_SETCURSEL, LB_SETTOPINDEX, LWA_ALPHA,
+        MSG, PM_REMOVE, SM_CXSCREEN, SM_CYSCREEN, SWP_NOACTIVATE, SW_HIDE, SW_SHOW, WM_ACTIVATE,
+        WM_APP, WM_CLOSE, WM_COMMAND, WM_CREATE, WM_CTLCOLOREDIT, WM_CTLCOLORLISTBOX,
+        WM_CTLCOLORSTATIC, WM_DESTROY, WM_DRAWITEM, WM_HOTKEY, WM_KEYDOWN, WM_LBUTTONUP,
+        WM_MEASUREITEM, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCCREATE, WM_NCDESTROY, WM_PAINT,
+        WM_SETFOCUS, WM_SETFONT, WM_SETREDRAW, WM_SIZE, WM_TIMER, WNDCLASSW, WS_CHILD,
         WS_CLIPCHILDREN, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_POPUP, WS_TABSTOP, WS_VISIBLE,
     };
 
@@ -672,8 +670,12 @@ mod imp {
                 return;
             };
             let current_top = unsafe { SendMessageW(state.list_hwnd, LB_GETTOPINDEX, 0, 0) as i32 };
-            let target_top =
-                target_top_index_for_selection(state.list_hwnd, clamped as i32, count as i32, current_top);
+            let target_top = target_top_index_for_selection(
+                state.list_hwnd,
+                clamped as i32,
+                count as i32,
+                current_top,
+            );
             unsafe {
                 // Avoid default listbox "scroll into view" animation on keyboard selection changes.
                 SendMessageW(state.list_hwnd, WM_SETREDRAW as u32, 0, 0);
@@ -1523,8 +1525,7 @@ mod imp {
 
                 if next_hover != state.hover_index {
                     let previous_hover = state.hover_index;
-                    let selected_before =
-                        unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32 };
+                    let selected_before = unsafe { SendMessageW(hwnd, LB_GETCURSEL, 0, 0) as i32 };
                     state.hover_index = next_hover;
                     if next_hover >= 0 && next_hover != selected_before {
                         unsafe {
@@ -2338,7 +2339,13 @@ mod imp {
     fn executable_icon_from_shortcut(shortcut_path: &str) -> Option<isize> {
         let wide_shortcut = to_wide(shortcut_path);
         let mut exe_out = vec![0u16; 260];
-        let result = unsafe { FindExecutableW(wide_shortcut.as_ptr(), std::ptr::null(), exe_out.as_mut_ptr()) };
+        let result = unsafe {
+            FindExecutableW(
+                wide_shortcut.as_ptr(),
+                std::ptr::null(),
+                exe_out.as_mut_ptr(),
+            )
+        };
         if (result as isize) <= 32 {
             return None;
         }
@@ -2355,11 +2362,7 @@ mod imp {
         let mut target: windows_sys::core::PWSTR = std::ptr::null_mut();
         let mut location: windows_sys::core::PWSTR = std::ptr::null_mut();
         let hr = unsafe {
-            HlinkResolveShortcutToString(
-                wide_shortcut.as_ptr(),
-                &mut target,
-                &mut location,
-            )
+            HlinkResolveShortcutToString(wide_shortcut.as_ptr(), &mut target, &mut location)
         };
 
         let resolved_target = pwstr_to_string_and_free(target);
@@ -2376,7 +2379,9 @@ mod imp {
             let (icon_path, parsed_index) = split_icon_resource_spec(resolved_location_trimmed);
             let normalized_icon_path = normalize_icon_source_path(icon_path);
             if is_icon_module_path(&normalized_icon_path) {
-                if let Some(icon) = extract_icon_from_path(&normalized_icon_path, parsed_index.unwrap_or(0)) {
+                if let Some(icon) =
+                    extract_icon_from_path(&normalized_icon_path, parsed_index.unwrap_or(0))
+                {
                     return Some(icon);
                 }
             }
@@ -2590,11 +2595,7 @@ mod imp {
         }
     }
 
-    fn log_icon_cache_metrics(
-        state: &mut OverlayShellState,
-        reason: &str,
-        cleared_entries: usize,
-    ) {
+    fn log_icon_cache_metrics(state: &mut OverlayShellState, reason: &str, cleared_entries: usize) {
         let metrics = state.icon_cache_metrics;
         if metrics.hits == 0
             && metrics.misses == 0
@@ -2800,7 +2801,8 @@ mod imp {
         }
 
         let input_width = width - PANEL_MARGIN_X * 2;
-        let no_results_inline = state.no_results_mode && !state.results_visible && !state.status_is_error;
+        let no_results_inline =
+            state.no_results_mode && !state.results_visible && !state.status_is_error;
         let help_reserved = if no_results_inline {
             NO_RESULTS_INLINE_WIDTH + HELP_ICON_GAP_FROM_INPUT
         } else {
@@ -2867,7 +2869,11 @@ mod imp {
                     1,
                 );
                 if no_results_inline && state.no_results_anim_pending {
-                    let _ = AnimateWindow(state.status_hwnd, NO_RESULTS_FADE_MS, AW_BLEND | AW_ACTIVATE);
+                    let _ = AnimateWindow(
+                        state.status_hwnd,
+                        NO_RESULTS_FADE_MS,
+                        AW_BLEND | AW_ACTIVATE,
+                    );
                     state.no_results_anim_pending = false;
                 }
             } else {
@@ -3353,14 +3359,8 @@ mod imp {
 
                     if width > 2 && height > 2 {
                         let inner_radius = (PANEL_RADIUS - 2).max(2);
-                        let inner_region = CreateRoundRectRgn(
-                            1,
-                            1,
-                            width,
-                            height,
-                            inner_radius,
-                            inner_radius,
-                        );
+                        let inner_region =
+                            CreateRoundRectRgn(1, 1, width, height, inner_radius, inner_radius);
                         FillRgn(hdc, inner_region, state.panel_brush as _);
                         DeleteObject(inner_region as _);
                     } else {
@@ -3686,7 +3686,12 @@ mod imp {
     }
 
     fn normalize_icon_source_path(raw: &str) -> String {
-        let mut s = raw.trim().trim_matches('"').trim_start_matches('@').trim().to_string();
+        let mut s = raw
+            .trim()
+            .trim_matches('"')
+            .trim_start_matches('@')
+            .trim()
+            .to_string();
         if s.is_empty() {
             return String::new();
         }
@@ -3712,12 +3717,14 @@ mod imp {
             return raw.to_string();
         }
         let input = to_wide(raw);
-        let required = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), std::ptr::null_mut(), 0) };
+        let required =
+            unsafe { ExpandEnvironmentStringsW(input.as_ptr(), std::ptr::null_mut(), 0) };
         if required <= 1 {
             return raw.to_string();
         }
         let mut out = vec![0u16; required as usize];
-        let written = unsafe { ExpandEnvironmentStringsW(input.as_ptr(), out.as_mut_ptr(), required) };
+        let written =
+            unsafe { ExpandEnvironmentStringsW(input.as_ptr(), out.as_mut_ptr(), required) };
         if written <= 1 {
             return raw.to_string();
         }

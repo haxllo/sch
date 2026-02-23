@@ -5,10 +5,7 @@ use std::path::{Path, PathBuf};
 pub enum LaunchError {
     EmptyPath,
     MissingPath(PathBuf),
-    LaunchFailed {
-        message: String,
-        code: Option<i32>,
-    },
+    LaunchFailed { message: String, code: Option<i32> },
 }
 
 impl Display for LaunchError {

@@ -6,6 +6,31 @@ use serde::{Deserialize, Serialize};
 
 pub const CURRENT_CONFIG_VERSION: u32 = 1;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    #[default]
+    All,
+    Apps,
+    Files,
+    Actions,
+    Clipboard,
+}
+
+impl SearchMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        let normalized = value.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "all" => Some(Self::All),
+            "apps" | "app" => Some(Self::Apps),
+            "files" | "file" => Some(Self::Files),
+            "actions" | "action" => Some(Self::Actions),
+            "clipboard" | "clip" => Some(Self::Clipboard),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct Config {
@@ -19,6 +44,16 @@ pub struct Config {
     pub launch_at_startup: bool,
     pub hotkey_help: String,
     pub hotkey_recommended: Vec<String>,
+    pub search_mode_default: SearchMode,
+    pub search_dsl_enabled: bool,
+    pub clipboard_enabled: bool,
+    pub clipboard_retention_minutes: u32,
+    pub clipboard_exclude_sensitive_patterns: Vec<String>,
+    pub plugins_enabled: bool,
+    pub plugin_paths: Vec<PathBuf>,
+    pub plugins_safe_mode: bool,
+    pub idle_cache_trim_ms: u32,
+    pub active_memory_target_mb: u16,
 }
 
 impl Default for Config {
@@ -44,6 +79,24 @@ impl Default for Config {
                 "Ctrl+Shift+P".to_string(),
                 "Ctrl+Alt+P".to_string(),
             ],
+            search_mode_default: SearchMode::All,
+            search_dsl_enabled: true,
+            clipboard_enabled: true,
+            clipboard_retention_minutes: 8 * 60,
+            clipboard_exclude_sensitive_patterns: vec![
+                "password".to_string(),
+                "passcode".to_string(),
+                "otp".to_string(),
+                "token".to_string(),
+                "secret".to_string(),
+                "apikey".to_string(),
+                "api_key".to_string(),
+            ],
+            plugins_enabled: true,
+            plugin_paths: vec![app_dir.join("plugins")],
+            plugins_safe_mode: true,
+            idle_cache_trim_ms: 1200,
+            active_memory_target_mb: 80,
         }
     }
 }
@@ -223,7 +276,87 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str(",\n\n");
     text.push_str("  // Optional: folders to exclude from local-file discovery.\n");
     text.push_str("  // Any file/folder under these roots is ignored.\n");
-    text.push_str("  \"discovery_exclude_roots\": []\n");
+    text.push_str("  \"discovery_exclude_roots\": [],\n\n");
+
+    text.push_str("  // Search mode default: all | apps | files | actions | clipboard\n");
+    text.push_str("  \"search_mode_default\": ");
+    text.push_str(&json_string(match cfg.search_mode_default {
+        SearchMode::All => "all",
+        SearchMode::Apps => "apps",
+        SearchMode::Files => "files",
+        SearchMode::Actions => "actions",
+        SearchMode::Clipboard => "clipboard",
+    }));
+    text.push_str(",\n");
+    text.push_str(
+        "  // Enable query operators like kind:, modified:, created:, AND/OR/NOT and -term\n",
+    );
+    text.push_str("  \"search_dsl_enabled\": ");
+    text.push_str(if cfg.search_dsl_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n\n");
+
+    text.push_str("  // Clipboard history provider settings\n");
+    text.push_str("  \"clipboard_enabled\": ");
+    text.push_str(if cfg.clipboard_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n");
+    text.push_str("  // Retention in minutes (valid range: 5..43200)\n");
+    text.push_str("  \"clipboard_retention_minutes\": ");
+    text.push_str(&cfg.clipboard_retention_minutes.to_string());
+    text.push_str(",\n");
+    text.push_str(
+        "  // Substring patterns that should be skipped when capturing clipboard entries\n",
+    );
+    text.push_str("  \"clipboard_exclude_sensitive_patterns\": [\n");
+    for (idx, pattern) in cfg.clipboard_exclude_sensitive_patterns.iter().enumerate() {
+        text.push_str("    ");
+        text.push_str(&json_string(pattern));
+        if idx + 1 != cfg.clipboard_exclude_sensitive_patterns.len() {
+            text.push(',');
+        }
+        text.push('\n');
+    }
+    text.push_str("  ],\n\n");
+
+    text.push_str("  // Plugin SDK settings\n");
+    text.push_str("  \"plugins_enabled\": ");
+    text.push_str(if cfg.plugins_enabled { "true" } else { "false" });
+    text.push_str(",\n");
+    text.push_str("  // Keep safe mode true to prevent plugin command execution.\n");
+    text.push_str("  \"plugins_safe_mode\": ");
+    text.push_str(if cfg.plugins_safe_mode {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n");
+    text.push_str("  \"plugin_paths\": [\n");
+    for (idx, path) in cfg.plugin_paths.iter().enumerate() {
+        text.push_str("    ");
+        text.push_str(&json_string(&path.to_string_lossy()));
+        if idx + 1 != cfg.plugin_paths.len() {
+            text.push(',');
+        }
+        text.push('\n');
+    }
+    text.push_str("  ],\n\n");
+
+    text.push_str("  // Runtime performance targets\n");
+    text.push_str("  // cache trim after hide in milliseconds (valid range: 100..10000)\n");
+    text.push_str("  \"idle_cache_trim_ms\": ");
+    text.push_str(&cfg.idle_cache_trim_ms.to_string());
+    text.push_str(",\n");
+    text.push_str("  // active memory target in MB (valid range: 20..512)\n");
+    text.push_str("  \"active_memory_target_mb\": ");
+    text.push_str(&cfg.active_memory_target_mb.to_string());
+    text.push('\n');
     text.push_str("}\n");
 
     std::fs::write(path, text)?;
@@ -247,6 +380,18 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
         return Err("hotkey is required".into());
     }
 
+    if cfg.clipboard_retention_minutes < 5 || cfg.clipboard_retention_minutes > 43_200 {
+        return Err("clipboard_retention_minutes out of range".into());
+    }
+
+    if cfg.idle_cache_trim_ms < 100 || cfg.idle_cache_trim_ms > 10_000 {
+        return Err("idle_cache_trim_ms out of range".into());
+    }
+
+    if cfg.active_memory_target_mb < 20 || cfg.active_memory_target_mb > 512 {
+        return Err("active_memory_target_mb out of range".into());
+    }
+
     if cfg
         .discovery_roots
         .iter()
@@ -261,6 +406,22 @@ pub fn validate(cfg: &Config) -> Result<(), String> {
         .any(|root| root.as_os_str().is_empty())
     {
         return Err("discovery_exclude_roots contains an empty path".into());
+    }
+
+    if cfg
+        .plugin_paths
+        .iter()
+        .any(|path| path.as_os_str().is_empty())
+    {
+        return Err("plugin_paths contains an empty path".into());
+    }
+
+    if cfg
+        .clipboard_exclude_sensitive_patterns
+        .iter()
+        .any(|pattern| pattern.trim().is_empty())
+    {
+        return Err("clipboard_exclude_sensitive_patterns contains an empty pattern".into());
     }
 
     crate::settings::validate_hotkey(&cfg.hotkey)

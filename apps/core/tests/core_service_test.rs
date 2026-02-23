@@ -1,9 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use std::sync::{Arc, Mutex};
 use swiftfind_core::core_service::{CoreService, LaunchTarget, ServiceError};
 use swiftfind_core::discovery::{DiscoveryProvider, ProviderError};
 use swiftfind_core::model::SearchItem;
-use std::sync::{Arc, Mutex};
 
 fn test_config() -> swiftfind_core::config::Config {
     swiftfind_core::config::Config::default()
@@ -327,10 +327,20 @@ fn service_search_order_is_deterministic_for_mixed_ties() {
         ))
         .unwrap();
     service
-        .upsert_item(&SearchItem::new("file", "file", "Code Notes", file_path.to_string_lossy().as_ref()))
+        .upsert_item(&SearchItem::new(
+            "file",
+            "file",
+            "Code Notes",
+            file_path.to_string_lossy().as_ref(),
+        ))
         .unwrap();
     service
-        .upsert_item(&SearchItem::new("app", "app", "Code", app_path.to_string_lossy().as_ref()))
+        .upsert_item(&SearchItem::new(
+            "app",
+            "app",
+            "Code",
+            app_path.to_string_lossy().as_ref(),
+        ))
         .unwrap();
 
     let first = service.search("code", 10).unwrap();

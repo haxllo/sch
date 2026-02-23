@@ -7,6 +7,7 @@ pub struct SearchItem {
     pub use_count: u32,
     pub last_accessed_epoch_secs: i64,
     normalized_title: String,
+    normalized_search_text: String,
 }
 
 impl SearchItem {
@@ -30,6 +31,7 @@ impl SearchItem {
         last_accessed_epoch_secs: i64,
     ) -> Self {
         let normalized_title = normalize_for_search(&title);
+        let normalized_search_text = normalize_for_search(&format!("{title} {path}"));
         Self {
             id,
             kind,
@@ -38,6 +40,7 @@ impl SearchItem {
             use_count,
             last_accessed_epoch_secs,
             normalized_title,
+            normalized_search_text,
         }
     }
 
@@ -49,6 +52,10 @@ impl SearchItem {
 
     pub fn normalized_title(&self) -> &str {
         &self.normalized_title
+    }
+
+    pub fn normalized_search_text(&self) -> &str {
+        &self.normalized_search_text
     }
 }
 

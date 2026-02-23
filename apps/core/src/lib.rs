@@ -1,4 +1,6 @@
 pub mod action_executor;
+pub mod action_registry;
+pub mod clipboard_history;
 pub mod config;
 pub mod contract;
 pub mod core_service;
@@ -9,6 +11,8 @@ pub mod index_store;
 pub mod logging;
 pub mod model;
 pub mod overlay_state;
+pub mod plugin_sdk;
+pub mod query_dsl;
 pub mod runtime;
 pub mod search;
 pub mod settings;

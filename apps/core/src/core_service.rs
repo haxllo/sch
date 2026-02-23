@@ -8,6 +8,7 @@ use crate::discovery::{
 };
 use crate::index_store::{self, StoreError};
 use crate::model::SearchItem;
+use crate::search::SearchFilter;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Mutex, RwLock};
@@ -134,6 +135,15 @@ impl CoreService {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchItem>, ServiceError> {
+        self.search_with_filter(query, limit, &SearchFilter::default())
+    }
+
+    pub fn search_with_filter(
+        &self,
+        query: &str,
+        limit: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<SearchItem>, ServiceError> {
         self.prune_stale_items_if_due()?;
 
         let effective_limit = if limit == 0 {
@@ -146,7 +156,20 @@ impl CoreService {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        Ok(crate::search::search(&guard, query, effective_limit))
+        Ok(crate::search::search_with_filter(
+            &guard,
+            query,
+            effective_limit,
+            filter,
+        ))
+    }
+
+    pub fn cached_items_snapshot(&self) -> Vec<SearchItem> {
+        let guard = match self.cached_items.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        guard.clone()
     }
 
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
@@ -177,11 +200,16 @@ impl CoreService {
         self.rebuild_index_internal(false)
     }
 
-    pub fn rebuild_index_incremental_with_report(&self) -> Result<IndexRefreshReport, ServiceError> {
+    pub fn rebuild_index_incremental_with_report(
+        &self,
+    ) -> Result<IndexRefreshReport, ServiceError> {
         self.rebuild_index_internal(true)
     }
 
-    fn rebuild_index_internal(&self, incremental_mode: bool) -> Result<IndexRefreshReport, ServiceError> {
+    fn rebuild_index_internal(
+        &self,
+        incremental_mode: bool,
+    ) -> Result<IndexRefreshReport, ServiceError> {
         if self.providers.is_empty() {
             self.refresh_cache_from_store()?;
             return Ok(IndexRefreshReport {
@@ -491,7 +519,9 @@ fn provider_manages_kind(provider_name: &str, kind: &str) -> bool {
 fn should_prune_after_launch_error(item: &SearchItem, error: &LaunchError) -> bool {
     match error {
         LaunchError::MissingPath(_) => true,
-        LaunchError::LaunchFailed { code: Some(code), .. } => {
+        LaunchError::LaunchFailed {
+            code: Some(code), ..
+        } => {
             // ShellExecute missing-file/path errors: remove stale entries immediately.
             (*code == 2 || *code == 3)
                 && (item.kind.eq_ignore_ascii_case("app")
