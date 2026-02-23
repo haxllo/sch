@@ -1242,11 +1242,16 @@ fn search_overlay_results_with_session(
     let mut merged = Vec::new();
     let indexed_started = Instant::now();
     let mut indexed_cache_hit = false;
-    let indexed_seed_items = if let Some(cache) = session
-        .indexed_prefix_cache
-        .as_ref()
-        .filter(|cache| can_use_indexed_prefix_cache(cache, &normalized_query, &indexed_filter))
-    {
+    let prefix_cache_eligible = is_prefix_cache_eligible_query(parsed_query, short_query_app_bias);
+    let indexed_seed_items = if let Some(cache) =
+        session.indexed_prefix_cache.as_ref().filter(|cache| {
+            can_use_indexed_prefix_cache(
+                cache,
+                prefix_cache_eligible,
+                &normalized_query,
+                &indexed_filter,
+            )
+        }) {
         indexed_cache_hit = true;
         crate::search::search_with_filter(
             &cache.seed_items,
@@ -1256,13 +1261,13 @@ fn search_overlay_results_with_session(
         )
     } else {
         service
-            .search_with_filter(text_query, indexed_seed_limit, &indexed_filter)
+            .search_with_filter_uncapped(text_query, indexed_seed_limit, &indexed_filter)
             .map_err(|error| format!("indexed search failed: {error}"))?
     };
     let indexed_ms = indexed_started.elapsed().as_millis();
     let indexed_count = indexed_seed_items.len();
     merged.extend(indexed_seed_items.iter().take(candidate_limit).cloned());
-    if normalized_query.len() >= INDEXED_PREFIX_CACHE_MIN_QUERY_LEN {
+    if prefix_cache_eligible && normalized_query.len() >= INDEXED_PREFIX_CACHE_MIN_QUERY_LEN {
         session.indexed_prefix_cache = Some(IndexedPrefixCache {
             normalized_query: normalized_query.clone(),
             indexed_filter: indexed_filter.clone(),
@@ -1456,17 +1461,46 @@ fn indexed_seed_limit(candidate_limit: usize, normalized_query_len: usize) -> us
 
 fn can_use_indexed_prefix_cache(
     cache: &IndexedPrefixCache,
+    prefix_cache_eligible: bool,
     normalized_query: &str,
     indexed_filter: &SearchFilter,
 ) -> bool {
+    if !prefix_cache_eligible {
+        return false;
+    }
     if cache.seed_items.is_empty() || cache.normalized_query.is_empty() {
         return false;
     }
-    if cache.indexed_filter != *indexed_filter {
+    if !indexed_filter_matches_for_prefix_cache(&cache.indexed_filter, indexed_filter) {
         return false;
     }
     normalized_query.len() > cache.normalized_query.len()
         && normalized_query.starts_with(&cache.normalized_query)
+}
+
+fn indexed_filter_matches_for_prefix_cache(a: &SearchFilter, b: &SearchFilter) -> bool {
+    a.mode == b.mode
+        && a.kind_filter == b.kind_filter
+        && a.modified_within == b.modified_within
+        && a.created_within == b.created_within
+}
+
+fn is_prefix_cache_eligible_query(parsed_query: &ParsedQuery, short_query_app_bias: bool) -> bool {
+    if short_query_app_bias || parsed_query.command_mode {
+        return false;
+    }
+    if parsed_query.mode_override.is_some()
+        || parsed_query.kind_filter.is_some()
+        || !parsed_query.exclude_terms.is_empty()
+        || parsed_query.modified_within.is_some()
+        || parsed_query.created_within.is_some()
+    {
+        return false;
+    }
+    if parsed_query.free_text.trim().is_empty() {
+        return false;
+    }
+    parsed_query.raw.trim() == parsed_query.free_text.trim()
 }
 
 fn sanitize_query_for_profile_log(query: &str) -> String {
@@ -1802,16 +1836,19 @@ mod tests {
 
         assert!(can_use_indexed_prefix_cache(
             &cache,
+            true,
             "viv",
             &SearchFilter::default()
         ));
         assert!(!can_use_indexed_prefix_cache(
             &cache,
+            true,
             "vi",
             &SearchFilter::default()
         ));
         assert!(!can_use_indexed_prefix_cache(
             &cache,
+            true,
             "xvi",
             &SearchFilter::default()
         ));
@@ -1822,8 +1859,15 @@ mod tests {
         };
         assert!(!can_use_indexed_prefix_cache(
             &cache,
+            true,
             "viv",
             &different_mode
+        ));
+        assert!(!can_use_indexed_prefix_cache(
+            &cache,
+            false,
+            "viv",
+            &SearchFilter::default()
         ));
     }
 

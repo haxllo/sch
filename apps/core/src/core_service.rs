@@ -150,12 +150,37 @@ impl CoreService {
         limit: usize,
         filter: &SearchFilter,
     ) -> Result<Vec<SearchItem>, ServiceError> {
+        self.search_with_filter_internal(query, limit, filter, true)
+    }
+
+    pub fn search_with_filter_uncapped(
+        &self,
+        query: &str,
+        limit: usize,
+        filter: &SearchFilter,
+    ) -> Result<Vec<SearchItem>, ServiceError> {
+        self.search_with_filter_internal(query, limit, filter, false)
+    }
+
+    fn search_with_filter_internal(
+        &self,
+        query: &str,
+        limit: usize,
+        filter: &SearchFilter,
+        clamp_to_config_max: bool,
+    ) -> Result<Vec<SearchItem>, ServiceError> {
         self.prune_stale_items_if_due()?;
 
-        let effective_limit = if limit == 0 {
+        let effective_limit = if clamp_to_config_max {
+            if limit == 0 {
+                self.config.max_results as usize
+            } else {
+                limit.min(self.config.max_results as usize)
+            }
+        } else if limit == 0 {
             self.config.max_results as usize
         } else {
-            limit.min(self.config.max_results as usize)
+            limit
         };
 
         if should_use_app_cache(filter) {
@@ -809,5 +834,43 @@ mod tests {
         assert!(!results.iter().any(|item| item.id == "entry-1"));
 
         std::fs::remove_file(path).expect("temp file should be removed");
+    }
+
+    #[test]
+    fn uncapped_search_respects_requested_limit_above_config_max() {
+        let mut cfg = Config::default();
+        cfg.max_results = 5;
+        let service = CoreService::with_connection(cfg, open_memory().unwrap())
+            .expect("service should initialize");
+
+        let mut temp_paths = Vec::new();
+        for idx in 0..25 {
+            let path = std::env::temp_dir().join(format!("swiftfind-uncapped-{idx}.tmp"));
+            std::fs::write(&path, b"ok").expect("temp file should exist");
+            temp_paths.push(path.clone());
+            service
+                .upsert_item(&SearchItem::new(
+                    &format!("app-{idx:02}"),
+                    "app",
+                    &format!("Alpha App {idx:02}"),
+                    path.to_string_lossy().as_ref(),
+                ))
+                .expect("item should upsert");
+        }
+
+        let filter = SearchFilter::default();
+        let capped = service
+            .search_with_filter("alpha", 20, &filter)
+            .expect("capped search should succeed");
+        let uncapped = service
+            .search_with_filter_uncapped("alpha", 20, &filter)
+            .expect("uncapped search should succeed");
+
+        assert_eq!(capped.len(), 5);
+        assert!(uncapped.len() >= 20);
+
+        for path in temp_paths {
+            let _ = std::fs::remove_file(path);
+        }
     }
 }
