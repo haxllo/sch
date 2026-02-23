@@ -860,7 +860,6 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
     }
 
     let mut rows = Vec::new();
-    rows.push(section_header_row("Top Hit"));
     rows.push(result_row(&results[0], 0, OverlayRowRole::TopHit));
 
     let mut app_indices = Vec::new();
