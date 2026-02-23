@@ -17,7 +17,6 @@ const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
     "search_dsl_enabled",
     "web_search_provider",
     "web_search_custom_template",
-    "web_search_browser_default_enabled",
     "clipboard_enabled",
     "clipboard_retention_minutes",
     "clipboard_exclude_sensitive_patterns",
@@ -99,7 +98,6 @@ pub struct Config {
     pub search_dsl_enabled: bool,
     pub web_search_provider: WebSearchProvider,
     pub web_search_custom_template: String,
-    pub web_search_browser_default_enabled: bool,
     pub clipboard_enabled: bool,
     pub clipboard_retention_minutes: u32,
     pub clipboard_exclude_sensitive_patterns: Vec<String>,
@@ -137,7 +135,6 @@ impl Default for Config {
             search_dsl_enabled: true,
             web_search_provider: WebSearchProvider::Duckduckgo,
             web_search_custom_template: String::new(),
-            web_search_browser_default_enabled: true,
             clipboard_enabled: true,
             clipboard_retention_minutes: 8 * 60,
             clipboard_exclude_sensitive_patterns: vec![
@@ -349,7 +346,7 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         "false"
     });
     text.push_str(",\n\n");
-    text.push_str("  // Web search command actions\n");
+    text.push_str("  // Web search command action (opens in your default browser)\n");
     text.push_str(
         "  // Provider: duckduckgo | google | bing | brave | startpage | ecosia | yahoo | custom\n",
     );
@@ -368,14 +365,6 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str("  // Used only when provider is custom. Must include {query}.\n");
     text.push_str("  \"web_search_custom_template\": ");
     text.push_str(&json_string(&cfg.web_search_custom_template));
-    text.push_str(",\n");
-    text.push_str("  // Show a browser-default web search action in command mode\n");
-    text.push_str("  \"web_search_browser_default_enabled\": ");
-    text.push_str(if cfg.web_search_browser_default_enabled {
-        "true"
-    } else {
-        "false"
-    });
     text.push_str(",\n\n");
 
     text.push_str("  // Clipboard history provider settings\n");
@@ -667,11 +656,6 @@ fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
         }
         if !raw_has_key(raw, "web_search_custom_template") {
             cfg.web_search_custom_template = Config::default().web_search_custom_template;
-            changed = true;
-        }
-        if !raw_has_key(raw, "web_search_browser_default_enabled") {
-            cfg.web_search_browser_default_enabled =
-                Config::default().web_search_browser_default_enabled;
             changed = true;
         }
     }

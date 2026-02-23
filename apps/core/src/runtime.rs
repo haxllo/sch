@@ -1,7 +1,6 @@
 use crate::action_registry::{
     search_actions_with_mode, ACTION_CLEAR_CLIPBOARD_ID, ACTION_DIAGNOSTICS_BUNDLE_ID,
-    ACTION_OPEN_CONFIG_ID, ACTION_OPEN_LOGS_ID, ACTION_REBUILD_INDEX_ID,
-    ACTION_WEB_SEARCH_BROWSER_PREFIX, ACTION_WEB_SEARCH_PREFIX,
+    ACTION_OPEN_CONFIG_ID, ACTION_OPEN_LOGS_ID, ACTION_REBUILD_INDEX_ID, ACTION_WEB_SEARCH_PREFIX,
 };
 use crate::clipboard_history;
 use crate::config::{self, Config, ConfigError};
@@ -1122,7 +1121,6 @@ fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, 
         "search_mode_default": cfg.search_mode_default,
         "search_dsl_enabled": cfg.search_dsl_enabled,
         "web_search_provider": cfg.web_search_provider,
-        "web_search_browser_default_enabled": cfg.web_search_browser_default_enabled,
         "clipboard_enabled": cfg.clipboard_enabled,
         "clipboard_retention_minutes": cfg.clipboard_retention_minutes,
         "clipboard_exclude_sensitive_patterns_count": cfg.clipboard_exclude_sensitive_patterns.len(),
@@ -2225,15 +2223,6 @@ fn execute_action_selection(
     plugins: &PluginRegistry,
     selected: &crate::model::SearchItem,
 ) -> Result<(), String> {
-    if let Some(query) = selected.id.strip_prefix(ACTION_WEB_SEARCH_BROWSER_PREFIX) {
-        let fallback_url = crate::action_registry::provider_web_search_url(cfg, query);
-        return crate::action_executor::launch_browser_default_search(
-            query,
-            fallback_url.as_deref(),
-        )
-        .map_err(|error| format!("browser-default web search launch failed: {error}"));
-    }
-
     if selected.id.starts_with(ACTION_WEB_SEARCH_PREFIX) {
         return crate::action_executor::launch_open_target(selected.path.trim())
             .map_err(|error| format!("web search launch failed: {error}"));
@@ -2341,9 +2330,7 @@ mod tests {
         summarize_query_profiles, IndexedPrefixCache, OverlaySearchSession, RuntimeCommand,
         RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
     };
-    use crate::action_registry::{
-        ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_BROWSER_PREFIX, ACTION_WEB_SEARCH_PREFIX,
-    };
+    use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
     use crate::core_service::CoreService;
     use crate::index_store::open_memory;
@@ -2681,9 +2668,6 @@ mod tests {
         assert!(results
             .iter()
             .any(|item| item.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
-        assert!(results
-            .iter()
-            .any(|item| item.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 
     #[test]

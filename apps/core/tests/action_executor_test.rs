@@ -2,9 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use swiftfind_core::action_executor::{
-    launch_browser_default_search, launch_open_target, launch_path, LaunchError,
-};
+use swiftfind_core::action_executor::{launch_open_target, launch_path, LaunchError};
 
 fn unique_temp_path(label: &str) -> PathBuf {
     let unique = SystemTime::now()
@@ -54,22 +52,4 @@ fn rejects_empty_open_target() {
 fn accepts_web_open_target() {
     let result = launch_open_target("https://duckduckgo.com/?q=swiftfind");
     assert!(result.is_ok());
-}
-
-#[test]
-fn rejects_empty_browser_default_search() {
-    let result = launch_browser_default_search("   ", None);
-    assert_eq!(result, Err(LaunchError::EmptyPath));
-}
-
-#[test]
-fn rejects_browser_default_search_without_fallback_url() {
-    let result = launch_browser_default_search("swiftfind", None);
-    assert_eq!(
-        result,
-        Err(LaunchError::LaunchFailed {
-            message: "missing fallback web search URL".to_string(),
-            code: None,
-        })
-    );
 }

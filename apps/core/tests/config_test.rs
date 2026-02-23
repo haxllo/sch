@@ -23,7 +23,6 @@ fn accepts_default_config() {
         cfg.web_search_provider,
         swiftfind_core::config::WebSearchProvider::Duckduckgo
     );
-    assert!(cfg.web_search_browser_default_enabled);
     assert!(
         cfg.index_db_path.to_string_lossy().contains("swiftfind")
             || cfg.index_db_path.to_string_lossy().contains("SwiftFind")
@@ -165,7 +164,6 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(!raw.contains("\"index_db_path\""));
     assert!(raw.contains("\"discovery_exclude_roots\":"));
     assert!(raw.contains("\"web_search_provider\": \"duckduckgo\""));
-    assert!(raw.contains("\"web_search_browser_default_enabled\": true"));
     if cfg.discovery_exclude_roots.is_empty() {
         assert!(raw.contains("\"discovery_exclude_roots\": []"));
     } else {

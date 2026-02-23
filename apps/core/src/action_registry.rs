@@ -7,7 +7,6 @@ pub const ACTION_CLEAR_CLIPBOARD_ID: &str = "__swiftfind_action_clear_clipboard_
 pub const ACTION_OPEN_CONFIG_ID: &str = "__swiftfind_action_open_config__";
 pub const ACTION_DIAGNOSTICS_BUNDLE_ID: &str = "__swiftfind_action_diagnostics_bundle__";
 pub const ACTION_WEB_SEARCH_PREFIX: &str = "__swiftfind_action_web_search__:";
-pub const ACTION_WEB_SEARCH_BROWSER_PREFIX: &str = "__swiftfind_action_web_search_browser__:";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuiltInAction {
@@ -70,17 +69,8 @@ pub fn search_actions_with_mode(
     let mut out = Vec::new();
 
     if command_mode {
-        if cfg.web_search_browser_default_enabled {
-            if let Some(browser_action) = dynamic_browser_web_search_action(trimmed_query) {
-                out.push(browser_action);
-            }
-            if out.len() >= limit {
-                return out;
-            }
-        }
-
-        if let Some(provider_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
-            out.push(provider_action);
+        if let Some(web_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
+            out.push(web_action);
             if out.len() >= limit {
                 return out;
             }
@@ -135,20 +125,6 @@ pub fn provider_web_search_url(cfg: &Config, query: &str) -> Option<String> {
     Some(url)
 }
 
-fn dynamic_browser_web_search_action(query: &str) -> Option<SearchItem> {
-    let trimmed = query.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let id = format!("{ACTION_WEB_SEARCH_BROWSER_PREFIX}{trimmed}");
-    Some(SearchItem::new(
-        &id,
-        "action",
-        &format!("Search Web (Browser Default) for \"{trimmed}\""),
-        "Use browser default search engine",
-    ))
-}
-
 fn dynamic_provider_web_search_action(query: &str, cfg: &Config) -> Option<SearchItem> {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -159,10 +135,7 @@ fn dynamic_provider_web_search_action(query: &str, cfg: &Config) -> Option<Searc
     Some(SearchItem::new(
         &id,
         "action",
-        &format!(
-            "Search {} for \"{trimmed}\"",
-            cfg.web_search_provider.label()
-        ),
+        &format!("Search Web for \"{trimmed}\""),
         &url,
     ))
 }
@@ -184,10 +157,7 @@ fn url_encode_component(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        search_actions, search_actions_with_mode, ACTION_WEB_SEARCH_BROWSER_PREFIX,
-        ACTION_WEB_SEARCH_PREFIX,
-    };
+    use super::{search_actions, search_actions_with_mode, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, WebSearchProvider};
 
     #[test]
@@ -205,9 +175,6 @@ mod tests {
         assert!(actions
             .iter()
             .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
-        assert!(actions
-            .iter()
-            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 
     #[test]
@@ -217,16 +184,12 @@ mod tests {
         assert!(!actions
             .iter()
             .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
-        assert!(!actions
-            .iter()
-            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 
     #[test]
-    fn command_mode_respects_configured_provider_and_browser_toggle() {
+    fn command_mode_respects_configured_provider() {
         let mut cfg = Config::default();
         cfg.web_search_provider = WebSearchProvider::Google;
-        cfg.web_search_browser_default_enabled = false;
 
         let actions = search_actions_with_mode("rust icons", 10, true, &cfg);
         let provider = actions
@@ -234,8 +197,5 @@ mod tests {
             .find(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX))
             .expect("provider web action should exist");
         assert!(provider.path.contains("google.com/search?q="));
-        assert!(!actions
-            .iter()
-            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_BROWSER_PREFIX)));
     }
 }
