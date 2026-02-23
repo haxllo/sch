@@ -39,7 +39,7 @@ if ((-not $SourceExe -or -not (Test-Path $SourceExe)) -and $BuildFromSource) {
   Write-Host "[1/5] Building release binary from source..." -ForegroundColor Yellow
   Push-Location $repoRoot
   try {
-    cargo build -p swiftfind-core --release
+    cargo build -p swiftfind-core --release --quiet
     $built = Join-Path $repoRoot "target\release\swiftfind-core.exe"
     if (Test-Path $built) {
       $SourceExe = $built

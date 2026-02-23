@@ -38,7 +38,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "assets") | Out-N
 New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "docs") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "scripts") | Out-Null
 
-cargo build -p swiftfind-core --release
+cargo build -p swiftfind-core --release --quiet
 
 $coreExe = "target/release/swiftfind-core.exe"
 if (-not (Test-Path $coreExe)) {
