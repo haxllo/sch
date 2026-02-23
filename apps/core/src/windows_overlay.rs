@@ -102,6 +102,8 @@ mod imp {
     const ROW_META_BLOCK_HEIGHT: i32 = 16;
     const ROW_TEXT_LINE_GAP: i32 = 3;
     const HEADER_ROW_LABEL_HEIGHT: i32 = 14;
+    const HEADER_ROW_LINE_GAP: i32 = 10;
+    const HEADER_ROW_LINE_HEIGHT: i32 = 1;
     const FOOTER_HINT_HEIGHT: i32 = 14;
 
     const CONTROL_ID_INPUT: usize = 1001;
@@ -153,7 +155,7 @@ mod imp {
     const FONT_TITLE_HEIGHT: i32 = -15;
     const FONT_META_HEIGHT: i32 = -12;
     const FONT_STATUS_HEIGHT: i32 = -11;
-    const FONT_HEADER_HEIGHT: i32 = -11;
+    const FONT_HEADER_HEIGHT: i32 = -12;
     const FONT_TOP_HIT_HEIGHT: i32 = -16;
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
@@ -161,7 +163,7 @@ mod imp {
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
     const FONT_WEIGHT_STATUS: i32 = 400;
-    const FONT_WEIGHT_HEADER: i32 = 600;
+    const FONT_WEIGHT_HEADER: i32 = 500;
     const FONT_WEIGHT_TOP_HIT: i32 = 600;
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
@@ -217,7 +219,7 @@ mod imp {
         text_error: 0x00E8E8E8,
         text_highlight: 0x00FFFFFF,
         text_hint: 0x00BEBEBE,
-        text_section: 0x00AFAFAF,
+        text_section: 0x009E9E9E,
         text_hint_footer: 0x009A9A9A,
         text_mode_strip: 0x00ABABAB,
         selection: 0x00262626,
@@ -243,7 +245,7 @@ mod imp {
         text_error: 0x003E3E3E,
         text_highlight: 0x000D0D0D,
         text_hint: 0x00606060,
-        text_section: 0x005A5A5A,
+        text_section: 0x00606060,
         text_hint_footer: 0x00686868,
         text_mode_strip: 0x00626262,
         selection: 0x00E5E5E5,
@@ -1981,6 +1983,12 @@ mod imp {
         unsafe {
             FillRect(dis.hDC, &dis.rcItem, state.results_brush as _);
             if section_row {
+                let section_title = row.title.trim();
+                let section_title = if section_title.is_empty() {
+                    "Section"
+                } else {
+                    section_title
+                };
                 let mut section_rect = RECT {
                     left: dis.rcItem.left + ROW_INSET_X,
                     top: dis.rcItem.top + ((ROW_HEIGHT - HEADER_ROW_LABEL_HEIGHT).max(0) / 2),
@@ -1997,11 +2005,33 @@ mod imp {
                 );
                 DrawTextW(
                     dis.hDC,
-                    to_wide(&row.title.to_ascii_uppercase()).as_ptr(),
+                    to_wide(section_title).as_ptr(),
                     -1,
                     &mut section_rect,
                     DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS,
                 );
+                let section_text_width = measure_text_width(dis.hDC, section_title);
+                if section_text_width > 0 {
+                    let line_left = (section_rect.left + section_text_width + HEADER_ROW_LINE_GAP)
+                        .min(section_rect.right);
+                    if line_left < section_rect.right {
+                        let line_top = section_rect.top + (HEADER_ROW_LABEL_HEIGHT / 2);
+                        let line_rect = RECT {
+                            left: line_left,
+                            top: line_top,
+                            right: section_rect.right,
+                            bottom: line_top + HEADER_ROW_LINE_HEIGHT,
+                        };
+                        let line_color = blend_color(
+                            palette.results_bg,
+                            palette.row_separator,
+                            content_progress,
+                        );
+                        let line_brush = CreateSolidBrush(line_color);
+                        FillRect(dis.hDC, &line_rect, line_brush as _);
+                        DeleteObject(line_brush as _);
+                    }
+                }
                 SelectObject(dis.hDC, old_font);
                 return;
             }
@@ -2070,7 +2100,7 @@ mod imp {
                     SetTextColor(dis.hDC, palette.icon_text);
                     DrawTextW(
                         dis.hDC,
-                        to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
+                        to_wide(icon_glyph_for_row(&row)).as_ptr(),
                         -1,
                         &mut icon_text_rect,
                         DT_CENTER | DT_SINGLELINE | DT_VCENTER,
@@ -2423,6 +2453,28 @@ mod imp {
         }
     }
 
+    fn icon_glyph_for_row(row: &OverlayRow) -> &'static str {
+        if !row.kind.eq_ignore_ascii_case("action") {
+            return icon_glyph_for_kind(&row.kind);
+        }
+        let lower = row.title.to_ascii_lowercase();
+        if lower.contains("web") || lower.contains("search") {
+            "W"
+        } else if lower.contains("clipboard") {
+            "C"
+        } else if lower.contains("config") || lower.contains("setting") {
+            "G"
+        } else if lower.contains("diagnostic") || lower.contains("bundle") {
+            "D"
+        } else if lower.contains("log") {
+            "L"
+        } else if lower.contains("rebuild") || lower.contains("index") {
+            "R"
+        } else {
+            ">"
+        }
+    }
+
     fn draw_row_icon(
         hdc: HDC,
         icon_rect: &RECT,
@@ -2486,6 +2538,12 @@ mod imp {
         let kind = row.kind.to_ascii_lowercase();
         let source = row.icon_path.trim();
         let is_app_shortcut = kind == "app" && source.to_ascii_lowercase().ends_with(".lnk");
+
+        // Action/command rows are semantic operations, not filesystem targets.
+        // Force deterministic in-app iconography instead of generic shell-file icons.
+        if kind == "action" {
+            return None;
+        }
 
         if kind == "folder" {
             return shell_icon_with_attrs("folder", FILE_ATTRIBUTE_DIRECTORY);

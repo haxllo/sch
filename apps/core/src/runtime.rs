@@ -761,7 +761,7 @@ fn summarize_query_profile_status_report(content: &str) -> Option<QueryProfileSt
     })
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg(test)]
 fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
     let samples = parse_recent_query_profile_samples(content);
     summarize_query_profile_samples(&samples)
