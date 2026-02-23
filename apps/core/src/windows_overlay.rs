@@ -33,6 +33,7 @@ mod imp {
     use windows_sys::Win32::System::ProcessStatus::{
         GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
     };
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
     use windows_sys::Win32::UI::Controls::{
         ImageList_GetIcon, DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
@@ -173,30 +174,90 @@ mod imp {
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
 
-    // Visual tokens.
-    const COLOR_PANEL_BG: u32 = 0x00272727;
-    const COLOR_PANEL_BORDER: u32 = 0x00424242;
-    const COLOR_INPUT_BG: u32 = COLOR_PANEL_BG;
-    const COLOR_RESULTS_BG: u32 = 0x00272727;
-    const COLOR_TEXT_PRIMARY: u32 = 0x00F5F5F5;
-    const COLOR_TEXT_SECONDARY: u32 = 0x00B5B5B5;
-    const COLOR_TEXT_ERROR: u32 = 0x00E8E8E8;
-    const COLOR_TEXT_HIGHLIGHT: u32 = 0x00FFFFFF;
-    const COLOR_TEXT_HINT: u32 = 0x00BEBEBE;
-    const COLOR_TEXT_SECTION: u32 = 0x00AFAFAF;
-    const COLOR_TEXT_HINT_FOOTER: u32 = 0x009A9A9A;
-    const COLOR_TEXT_MODE_STRIP: u32 = 0x00ABABAB;
-    const COLOR_SELECTION: u32 = 0x00262626;
-    const COLOR_SELECTION_BORDER: u32 = 0x00383838;
-    const COLOR_ROW_HOVER: u32 = 0x00313131;
-    const COLOR_ROW_SEPARATOR: u32 = 0x00161616;
-    const COLOR_SELECTION_ACCENT: u32 = 0x00343434;
-    const COLOR_ICON_BG: u32 = 0x001D1D1D;
-    const COLOR_ICON_TEXT: u32 = 0x00F0F0F0;
-    const COLOR_HELP_ICON: u32 = COLOR_TEXT_SECONDARY;
-    const COLOR_HELP_ICON_HOVER: u32 = COLOR_TEXT_PRIMARY;
-    const COLOR_HELP_TIP_BG: u32 = COLOR_PANEL_BG;
-    const COLOR_HELP_TIP_TEXT: u32 = COLOR_TEXT_SECONDARY;
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum OverlayTheme {
+        Dark,
+        Light,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct OverlayPalette {
+        panel_bg: u32,
+        panel_border: u32,
+        input_bg: u32,
+        results_bg: u32,
+        text_primary: u32,
+        text_secondary: u32,
+        text_error: u32,
+        text_highlight: u32,
+        text_hint: u32,
+        text_section: u32,
+        text_hint_footer: u32,
+        text_mode_strip: u32,
+        selection: u32,
+        selection_border: u32,
+        row_hover: u32,
+        row_separator: u32,
+        selection_accent: u32,
+        icon_bg: u32,
+        icon_text: u32,
+        help_icon: u32,
+        help_icon_hover: u32,
+        help_tip_bg: u32,
+        help_tip_text: u32,
+    }
+
+    const PALETTE_DARK: OverlayPalette = OverlayPalette {
+        panel_bg: 0x00272727,
+        panel_border: 0x00424242,
+        input_bg: 0x00272727,
+        results_bg: 0x00272727,
+        text_primary: 0x00F5F5F5,
+        text_secondary: 0x00B5B5B5,
+        text_error: 0x00E8E8E8,
+        text_highlight: 0x00FFFFFF,
+        text_hint: 0x00BEBEBE,
+        text_section: 0x00AFAFAF,
+        text_hint_footer: 0x009A9A9A,
+        text_mode_strip: 0x00ABABAB,
+        selection: 0x00262626,
+        selection_border: 0x00383838,
+        row_hover: 0x00313131,
+        row_separator: 0x00161616,
+        selection_accent: 0x00343434,
+        icon_bg: 0x001D1D1D,
+        icon_text: 0x00F0F0F0,
+        help_icon: 0x00B5B5B5,
+        help_icon_hover: 0x00F5F5F5,
+        help_tip_bg: 0x00272727,
+        help_tip_text: 0x00B5B5B5,
+    };
+
+    const PALETTE_LIGHT: OverlayPalette = OverlayPalette {
+        panel_bg: 0x00F3F3F3,
+        panel_border: 0x00C9C9C9,
+        input_bg: 0x00F3F3F3,
+        results_bg: 0x00F3F3F3,
+        text_primary: 0x001A1A1A,
+        text_secondary: 0x00505050,
+        text_error: 0x003E3E3E,
+        text_highlight: 0x000D0D0D,
+        text_hint: 0x00606060,
+        text_section: 0x005A5A5A,
+        text_hint_footer: 0x00686868,
+        text_mode_strip: 0x00626262,
+        selection: 0x00E5E5E5,
+        selection_border: 0x00D3D3D3,
+        row_hover: 0x00ECECEC,
+        row_separator: 0x00DCDCDC,
+        selection_accent: 0x00D8D8D8,
+        icon_bg: 0x00DFDFDF,
+        icon_text: 0x00202020,
+        help_icon: 0x00505050,
+        help_icon_hover: 0x001A1A1A,
+        help_tip_bg: 0x00F3F3F3,
+        help_tip_text: 0x00505050,
+    };
     const HELP_TIP_WIDTH: i32 = 132;
     const HELP_TIP_HEIGHT: i32 = 26;
     const HELP_TIP_RADIUS: i32 = 10;
@@ -208,6 +269,36 @@ mod imp {
     const INPUT_PLACEHOLDER_TEXT: &str = "Type to search";
     const FOOTER_HINT_TEXT: &str = "Enter Open  •  ↑↓ Move  •  Esc Close";
     const MODE_STRIP_DEFAULT_TEXT: &str = "All   Apps   Files   Actions   Clipboard";
+
+    fn palette_for_theme(theme: OverlayTheme) -> OverlayPalette {
+        match theme {
+            OverlayTheme::Dark => PALETTE_DARK,
+            OverlayTheme::Light => PALETTE_LIGHT,
+        }
+    }
+
+    fn detect_system_theme() -> OverlayTheme {
+        let key = to_wide("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+        let value = to_wide("AppsUseLightTheme");
+        let mut data: u32 = 0;
+        let mut data_size = std::mem::size_of::<u32>() as u32;
+        let status = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_DWORD,
+                std::ptr::null_mut(),
+                &mut data as *mut u32 as *mut c_void,
+                &mut data_size,
+            )
+        };
+        if status == 0 && data == 1 {
+            OverlayTheme::Light
+        } else {
+            OverlayTheme::Dark
+        }
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum OverlayEvent {
@@ -277,6 +368,8 @@ mod imp {
         icon_brush: isize,
         help_tip_brush: isize,
         help_tip_border_brush: isize,
+        theme: OverlayTheme,
+        palette: OverlayPalette,
 
         status_is_error: bool,
         no_results_mode: bool,
@@ -347,6 +440,8 @@ mod imp {
                 icon_brush: 0,
                 help_tip_brush: 0,
                 help_tip_border_brush: 0,
+                theme: OverlayTheme::Dark,
+                palette: PALETTE_DARK,
                 status_is_error: false,
                 no_results_mode: false,
                 no_results_anim_pending: false,
@@ -1059,23 +1154,39 @@ mod imp {
             }
             WM_CREATE => {
                 if let Some(state) = state_for(hwnd) {
+                    state.theme = detect_system_theme();
+                    state.palette = palette_for_theme(state.theme);
                     state.dwm_rounded_enabled = try_enable_dwm_rounded_corners(hwnd);
-                    state.panel_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BG) } as isize;
-                    state.border_brush = unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
-                    state.input_brush = unsafe { CreateSolidBrush(COLOR_INPUT_BG) } as isize;
-                    state.results_brush = unsafe { CreateSolidBrush(COLOR_RESULTS_BG) } as isize;
-                    state.selection_brush = unsafe { CreateSolidBrush(COLOR_SELECTION) } as isize;
+                    state.panel_brush =
+                        unsafe { CreateSolidBrush(state.palette.panel_bg) } as isize;
+                    state.border_brush =
+                        unsafe { CreateSolidBrush(state.palette.panel_border) } as isize;
+                    state.input_brush =
+                        unsafe { CreateSolidBrush(state.palette.input_bg) } as isize;
+                    state.results_brush =
+                        unsafe { CreateSolidBrush(state.palette.results_bg) } as isize;
+                    state.selection_brush =
+                        unsafe { CreateSolidBrush(state.palette.selection) } as isize;
                     state.selection_border_brush =
-                        unsafe { CreateSolidBrush(COLOR_SELECTION_BORDER) } as isize;
-                    state.row_hover_brush = unsafe { CreateSolidBrush(COLOR_ROW_HOVER) } as isize;
+                        unsafe { CreateSolidBrush(state.palette.selection_border) } as isize;
+                    state.row_hover_brush =
+                        unsafe { CreateSolidBrush(state.palette.row_hover) } as isize;
                     state.row_separator_brush =
-                        unsafe { CreateSolidBrush(COLOR_ROW_SEPARATOR) } as isize;
+                        unsafe { CreateSolidBrush(state.palette.row_separator) } as isize;
                     state.selection_accent_brush =
-                        unsafe { CreateSolidBrush(COLOR_SELECTION_ACCENT) } as isize;
-                    state.icon_brush = unsafe { CreateSolidBrush(COLOR_ICON_BG) } as isize;
-                    state.help_tip_brush = unsafe { CreateSolidBrush(COLOR_HELP_TIP_BG) } as isize;
+                        unsafe { CreateSolidBrush(state.palette.selection_accent) } as isize;
+                    state.icon_brush = unsafe { CreateSolidBrush(state.palette.icon_bg) } as isize;
+                    state.help_tip_brush =
+                        unsafe { CreateSolidBrush(state.palette.help_tip_bg) } as isize;
                     state.help_tip_border_brush =
-                        unsafe { CreateSolidBrush(COLOR_PANEL_BORDER) } as isize;
+                        unsafe { CreateSolidBrush(state.palette.panel_border) } as isize;
+                    crate::logging::info(&format!(
+                        "[swiftfind-core] overlay_theme mode={}",
+                        match state.theme {
+                            OverlayTheme::Dark => "dark",
+                            OverlayTheme::Light => "light",
+                        }
+                    ));
 
                     state.input_font = create_font(FONT_INPUT_HEIGHT, FONT_WEIGHT_INPUT);
                     state.title_font = create_font(FONT_TITLE_HEIGHT, FONT_WEIGHT_TITLE);
@@ -1340,8 +1451,8 @@ mod imp {
                     let target = lparam as HWND;
                     if target == state.help_tip_hwnd {
                         unsafe {
-                            SetTextColor(wparam as _, COLOR_HELP_TIP_TEXT);
-                            SetBkColor(wparam as _, COLOR_HELP_TIP_BG);
+                            SetTextColor(wparam as _, state.palette.help_tip_text);
+                            SetBkColor(wparam as _, state.palette.help_tip_bg);
                             SetBkMode(wparam as _, OPAQUE as i32);
                         }
                         return state.help_tip_brush;
@@ -1351,9 +1462,9 @@ mod imp {
                             SetTextColor(
                                 wparam as _,
                                 if state.help_hovered {
-                                    COLOR_HELP_ICON_HOVER
+                                    state.palette.help_icon_hover
                                 } else {
-                                    COLOR_HELP_ICON
+                                    state.palette.help_icon
                                 },
                             );
                             SetBkMode(wparam as _, TRANSPARENT as i32);
@@ -1362,23 +1473,23 @@ mod imp {
                     }
                     if target == state.footer_hint_hwnd {
                         unsafe {
-                            SetTextColor(wparam as _, COLOR_TEXT_HINT_FOOTER);
+                            SetTextColor(wparam as _, state.palette.text_hint_footer);
                             SetBkMode(wparam as _, TRANSPARENT as i32);
                         }
                         return state.panel_brush;
                     }
                     if target == state.mode_strip_hwnd {
                         unsafe {
-                            SetTextColor(wparam as _, COLOR_TEXT_MODE_STRIP);
+                            SetTextColor(wparam as _, state.palette.text_mode_strip);
                             SetBkMode(wparam as _, TRANSPARENT as i32);
                         }
                         return state.panel_brush;
                     }
                     if target == state.status_hwnd {
                         let color = if state.status_is_error {
-                            COLOR_TEXT_ERROR
+                            state.palette.text_error
                         } else {
-                            COLOR_TEXT_HINT
+                            state.palette.text_hint
                         };
                         unsafe {
                             SetTextColor(wparam as _, color);
@@ -1394,8 +1505,8 @@ mod imp {
                     let target = lparam as HWND;
                     if target == state.edit_hwnd {
                         unsafe {
-                            SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
-                            SetBkColor(wparam as _, COLOR_INPUT_BG);
+                            SetTextColor(wparam as _, state.palette.text_primary);
+                            SetBkColor(wparam as _, state.palette.input_bg);
                             SetBkMode(wparam as _, OPAQUE as i32);
                         }
                         return state.input_brush;
@@ -1408,8 +1519,8 @@ mod imp {
                     let target = lparam as HWND;
                     if target == state.list_hwnd {
                         unsafe {
-                            SetTextColor(wparam as _, COLOR_TEXT_PRIMARY);
-                            SetBkColor(wparam as _, COLOR_RESULTS_BG);
+                            SetTextColor(wparam as _, state.palette.text_primary);
+                            SetBkColor(wparam as _, state.palette.results_bg);
                         }
                         return state.results_brush;
                     }
@@ -1810,7 +1921,7 @@ mod imp {
         unsafe {
             let old_font = SelectObject(hdc, state.input_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(hdc, COLOR_TEXT_SECONDARY);
+            SetTextColor(hdc, state.palette.text_secondary);
             let placeholder_text = if state.placeholder_hint.is_empty() {
                 INPUT_PLACEHOLDER_TEXT
             } else {
@@ -1864,6 +1975,7 @@ mod imp {
         let section_row = matches!(row.role, OverlayRowRole::Header);
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
         let hovered = state.hover_index == item_index;
+        let palette = state.palette;
         let selected_visible =
             !status_row && !section_row && selected_flag && (state.hover_index < 0 || hovered);
         unsafe {
@@ -1881,7 +1993,7 @@ mod imp {
                 SetBkMode(dis.hDC, TRANSPARENT as i32);
                 SetTextColor(
                     dis.hDC,
-                    blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECTION, content_progress),
+                    blend_color(palette.results_bg, palette.text_section, content_progress),
                 );
                 DrawTextW(
                     dis.hDC,
@@ -1909,7 +2021,8 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let hover_color = blend_color(COLOR_RESULTS_BG, COLOR_ROW_HOVER, content_progress);
+                let hover_color =
+                    blend_color(palette.results_bg, palette.row_hover, content_progress);
                 let fill_brush = CreateSolidBrush(hover_color);
                 FillRgn(dis.hDC, region, fill_brush);
                 DeleteObject(fill_brush as _);
@@ -1918,11 +2031,12 @@ mod imp {
 
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
-            let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, content_progress);
+            let primary_text =
+                blend_color(palette.results_bg, palette.text_primary, content_progress);
             let secondary_text =
-                blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, content_progress);
+                blend_color(palette.results_bg, palette.text_secondary, content_progress);
             let highlight_text =
-                blend_color(COLOR_RESULTS_BG, COLOR_TEXT_HIGHLIGHT, content_progress);
+                blend_color(palette.results_bg, palette.text_highlight, content_progress);
             SetTextColor(dis.hDC, primary_text);
 
             let has_meta = !row.path.trim().is_empty();
@@ -1953,7 +2067,7 @@ mod imp {
                 if !icon_drawn {
                     FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
                     let mut icon_text_rect = icon_rect;
-                    SetTextColor(dis.hDC, COLOR_ICON_TEXT);
+                    SetTextColor(dis.hDC, palette.icon_text);
                     DrawTextW(
                         dis.hDC,
                         to_wide(icon_glyph_for_kind(&row.kind)).as_ptr(),
@@ -3488,7 +3602,7 @@ mod imp {
                 std::ptr::null_mut()
             };
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(hdc, COLOR_HELP_TIP_TEXT);
+            SetTextColor(hdc, state.palette.help_tip_text);
 
             let mut text_rect = RECT {
                 left: HELP_TIP_TEXT_PAD_X,
@@ -3741,7 +3855,9 @@ mod imp {
             )
         };
         // Use DWM border in rounded mode for cleaner anti-aliased edge.
-        let border_color: u32 = COLOR_PANEL_BORDER;
+        let border_color: u32 = state_for(hwnd)
+            .map(|state| state.palette.panel_border)
+            .unwrap_or(PALETTE_DARK.panel_border);
         let _ = unsafe {
             DwmSetWindowAttribute(
                 hwnd,

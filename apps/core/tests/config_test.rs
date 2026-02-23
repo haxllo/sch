@@ -179,3 +179,66 @@ fn writes_user_template_with_comments_and_loads_it() {
 
     std::fs::remove_file(&config_path).unwrap();
 }
+
+#[test]
+fn migrates_legacy_config_and_preserves_user_values() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let config_dir = std::env::temp_dir()
+        .join("swiftfind")
+        .join(format!("migrate-{unique}"));
+    let config_path = config_dir.join("config.json");
+
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        &config_path,
+        r#"{
+  "version": 1,
+  "hotkey": "Ctrl+Alt+P",
+  "max_results": 33,
+  "launch_at_startup": true,
+  "idle_cache_trim_ms": 1200,
+  "active_memory_target_mb": 80,
+  "discovery_roots": ["C:\\Users\\Admin"]
+}"#,
+    )
+    .unwrap();
+
+    let loaded = swiftfind_core::config::load(Some(&config_path)).unwrap();
+    assert_eq!(
+        loaded.version,
+        swiftfind_core::config::CURRENT_CONFIG_VERSION
+    );
+    assert_eq!(loaded.hotkey, "Ctrl+Alt+P");
+    assert_eq!(loaded.max_results, 33);
+    assert!(loaded.launch_at_startup);
+    assert_eq!(loaded.idle_cache_trim_ms, 900);
+    assert_eq!(loaded.active_memory_target_mb, 72);
+
+    let updated_raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(updated_raw.contains("\"hotkey\": \"Ctrl+Alt+P\""));
+    assert!(updated_raw.contains("\"max_results\": 33"));
+    assert!(updated_raw.contains("\"idle_cache_trim_ms\": 900"));
+    assert!(updated_raw.contains("\"active_memory_target_mb\": 72"));
+
+    let backups: Vec<_> = std::fs::read_dir(&config_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("config.v1-backup-"))
+                .unwrap_or(false)
+        })
+        .collect();
+    assert!(!backups.is_empty());
+
+    for backup in backups {
+        let _ = std::fs::remove_file(backup);
+    }
+    std::fs::remove_file(&config_path).unwrap();
+    std::fs::remove_dir_all(&config_dir).unwrap();
+}

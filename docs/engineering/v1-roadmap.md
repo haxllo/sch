@@ -197,6 +197,19 @@ Completed in current pass:
 - [x] Config-to-runtime tuning hookup for overlay cache behavior:
   - `idle_cache_trim_ms` now controls icon-cache idle cleanup timer.
   - `active_memory_target_mb` now controls icon-cache budget envelope.
+- [x] Query DSL extension operator support:
+  - `ext:` / `extension:` now filters results by file extension (for example: `ext:txt`, `@files extension:md`).
+- [x] Runtime query execution hardening:
+  - in-session final-query result cache avoids repeat compute for identical query+filter requests.
+  - indexed seed limit now auto-tunes down/up based on recent indexed-latency telemetry.
+- [x] Diagnostics/status depth increased:
+  - status now reports recent vs historical query-latency summaries.
+  - status now reports symbol-only query skip counters from `query_guard` logs.
+- [x] Config migration/update resilience:
+  - older config files are backed up and rewritten to the latest template while preserving user-set values.
+  - legacy performance defaults are migrated to current tuned defaults when detected.
+- [x] Overlay theme parity improvement:
+  - launcher palette now follows Windows system dark/light app theme.
 
 Next recommended tasks:
 1. Startup responsiveness hardening:

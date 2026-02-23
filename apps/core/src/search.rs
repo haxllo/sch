@@ -25,9 +25,14 @@ const APP_INTENT_SHORT_QUERY_BONUS: i64 = 320;
 const APP_INTENT_MEDIUM_QUERY_BONUS: i64 = 160;
 const NON_APP_SHORT_QUERY_PENALTY: i64 = 120;
 
-const TOP_HIT_CONFIDENCE_DELTA: i64 = 28;
+const TOP_HIT_CONFIDENCE_DELTA_SHORT: i64 = 52;
+const TOP_HIT_CONFIDENCE_DELTA_MEDIUM: i64 = 78;
+const TOP_HIT_CONFIDENCE_DELTA_LONG: i64 = 108;
 const TOP_HIT_APP_PREFERENCE_DELTA_SHORT: i64 = 7_000;
 const TOP_HIT_APP_PREFERENCE_DELTA_MEDIUM: i64 = 2_100;
+const TOP_HIT_APP_PREFERENCE_DELTA_LONG: i64 = 780;
+const TOP_HIT_SOURCE_PREFERENCE_DELTA_SHORT: i64 = 420;
+const TOP_HIT_SOURCE_PREFERENCE_DELTA_LONG: i64 = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextMatchKind {
@@ -58,6 +63,7 @@ struct TextScore {
 pub struct SearchFilter {
     pub mode: SearchMode,
     pub kind_filter: Option<String>,
+    pub extension_filter: Option<String>,
     pub include_groups: Vec<Vec<String>>,
     pub exclude_terms: Vec<String>,
     pub modified_within: Option<TimeFilterWindow>,
@@ -69,6 +75,7 @@ impl Default for SearchFilter {
         Self {
             mode: SearchMode::All,
             kind_filter: None,
+            extension_filter: None,
             include_groups: Vec::new(),
             exclude_terms: Vec::new(),
             modified_within: None,
@@ -191,6 +198,11 @@ fn score_item(
     }
     if let Some(kind) = &filter.kind_filter {
         if !matches_kind_filter(item, kind) {
+            return None;
+        }
+    }
+    if let Some(extension) = &filter.extension_filter {
+        if !matches_extension_filter(item, extension) {
             return None;
         }
     }
@@ -357,21 +369,36 @@ fn apply_top_hit_confidence_guard(
     let lead = scored[0];
     let runner_up = scored[1];
     let score_delta = lead.score.saturating_sub(runner_up.score);
+    let query_len = normalized_query.len();
+    let confidence_delta = match query_len {
+        0..=2 => TOP_HIT_CONFIDENCE_DELTA_SHORT,
+        3..=5 => TOP_HIT_CONFIDENCE_DELTA_MEDIUM,
+        _ => TOP_HIT_CONFIDENCE_DELTA_LONG,
+    };
 
-    let stronger_runner_up_match = runner_up.match_kind.rank() < lead.match_kind.rank()
-        && score_delta <= TOP_HIT_CONFIDENCE_DELTA;
+    let stronger_runner_up_match =
+        runner_up.match_kind.rank() < lead.match_kind.rank() && score_delta <= confidence_delta;
 
     let app_runner_up_preferred = app_intent_query
         && !lead.item.kind.eq_ignore_ascii_case("app")
         && runner_up.item.kind.eq_ignore_ascii_case("app")
         && score_delta
-            <= if normalized_query.len() <= 2 {
-                TOP_HIT_APP_PREFERENCE_DELTA_SHORT
-            } else {
-                TOP_HIT_APP_PREFERENCE_DELTA_MEDIUM
+            <= match query_len {
+                0..=2 => TOP_HIT_APP_PREFERENCE_DELTA_SHORT,
+                3..=5 => TOP_HIT_APP_PREFERENCE_DELTA_MEDIUM,
+                _ => TOP_HIT_APP_PREFERENCE_DELTA_LONG,
             };
 
-    if stronger_runner_up_match || app_runner_up_preferred {
+    let stronger_source_runner_up = lead.match_kind.rank() == runner_up.match_kind.rank()
+        && source_rank(runner_up.item) < source_rank(lead.item)
+        && score_delta
+            <= if query_len <= 2 {
+                TOP_HIT_SOURCE_PREFERENCE_DELTA_SHORT
+            } else {
+                TOP_HIT_SOURCE_PREFERENCE_DELTA_LONG
+            };
+
+    if stronger_runner_up_match || app_runner_up_preferred || stronger_source_runner_up {
         scored.swap(0, 1);
     }
 }
@@ -490,6 +517,7 @@ fn looks_like_app_intent_query(raw_query: &str, normalized_query: &str, mode: Se
 fn is_default_filter(filter: &SearchFilter) -> bool {
     filter.mode == SearchMode::All
         && filter.kind_filter.is_none()
+        && filter.extension_filter.is_none()
         && filter.include_groups.is_empty()
         && filter.exclude_terms.is_empty()
         && filter.modified_within.is_none()
@@ -529,6 +557,31 @@ fn matches_kind_filter(item: &SearchItem, kind_filter: &str) -> bool {
         return item.kind.eq_ignore_ascii_case("clipboard");
     }
     item.kind.eq_ignore_ascii_case(&normalized)
+}
+
+fn matches_extension_filter(item: &SearchItem, extension_filter: &str) -> bool {
+    let normalized = extension_filter
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if normalized.is_empty() {
+        return true;
+    }
+    if item.kind.eq_ignore_ascii_case("folder") || item.kind.eq_ignore_ascii_case("action") {
+        return false;
+    }
+
+    let path = item.path.trim();
+    if path.is_empty() {
+        return false;
+    }
+
+    let ext = Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.trim_start_matches('.').to_ascii_lowercase())
+        .unwrap_or_default();
+    !ext.is_empty() && ext == normalized
 }
 
 fn matches_term_filters(item: &SearchItem, filter: &SearchFilter) -> bool {

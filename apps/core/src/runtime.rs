@@ -18,6 +18,7 @@ use crate::windows_overlay::{
     is_instance_window_present, signal_existing_instance_quit, signal_existing_instance_show,
     NativeOverlayShell, OverlayEvent, OverlayRow, OverlayRowRole,
 };
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::{Arc, Mutex};
@@ -35,16 +36,24 @@ const INDEXED_PREFIX_CACHE_MIN_QUERY_LEN: usize = 1;
 const INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT: usize = 120;
 const INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT: usize = 480;
 const QUERY_PROFILE_STATUS_SAMPLE_WINDOW: usize = 400;
+const FINAL_QUERY_CACHE_MAX_ENTRIES: usize = 32;
+const ADAPTIVE_INDEXED_LATENCY_WINDOW: usize = 24;
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Default)]
 struct OverlaySearchSession {
     indexed_prefix_cache: Option<IndexedPrefixCache>,
+    final_query_cache: HashMap<String, Vec<crate::model::SearchItem>>,
+    final_query_cache_lru: VecDeque<String>,
+    indexed_latency_ms: VecDeque<u128>,
 }
 
 impl OverlaySearchSession {
     fn clear(&mut self) {
         self.indexed_prefix_cache = None;
+        self.final_query_cache.clear();
+        self.final_query_cache_lru.clear();
+        self.indexed_latency_ms.clear();
     }
 }
 
@@ -564,19 +573,40 @@ fn command_status() -> Result<(), RuntimeError> {
                 ));
             }
         }
-        if let Some(summary) = load_query_profile_summary() {
+        if let Some(report) = load_query_profile_status_report() {
+            if let Some(recent) = report.recent {
+                log_info(&format!(
+                    "[swiftfind-core] status query_latency_recent samples={} p50_ms={} p95_ms={} p99_ms={} max_ms={} avg_ms={} indexed_p95_ms={} short_q_samples={} short_q_p95_ms={} short_q_app_bias_rate={}%",
+                    recent.samples,
+                    recent.p50_total_ms,
+                    recent.p95_total_ms,
+                    recent.p99_total_ms,
+                    recent.max_total_ms,
+                    recent.avg_total_ms,
+                    recent.p95_indexed_ms,
+                    recent.short_query_samples,
+                    recent.short_query_p95_total_ms,
+                    recent.short_query_app_bias_rate_pct
+                ));
+            }
+            if let Some(historical) = report.historical {
+                log_info(&format!(
+                    "[swiftfind-core] status query_latency_historical samples={} p50_ms={} p95_ms={} p99_ms={} max_ms={} avg_ms={} indexed_p95_ms={} short_q_samples={} short_q_p95_ms={} short_q_app_bias_rate={}%",
+                    historical.samples,
+                    historical.p50_total_ms,
+                    historical.p95_total_ms,
+                    historical.p99_total_ms,
+                    historical.max_total_ms,
+                    historical.avg_total_ms,
+                    historical.p95_indexed_ms,
+                    historical.short_query_samples,
+                    historical.short_query_p95_total_ms,
+                    historical.short_query_app_bias_rate_pct
+                ));
+            }
             log_info(&format!(
-                "[swiftfind-core] status query_latency samples={} p50_ms={} p95_ms={} p99_ms={} max_ms={} avg_ms={} indexed_p95_ms={} short_q_samples={} short_q_p95_ms={} short_q_app_bias_rate={}%",
-                summary.samples,
-                summary.p50_total_ms,
-                summary.p95_total_ms,
-                summary.p99_total_ms,
-                summary.max_total_ms,
-                summary.avg_total_ms,
-                summary.p95_indexed_ms,
-                summary.short_query_samples,
-                summary.short_query_p95_total_ms,
-                summary.short_query_app_bias_rate_pct
+                "[swiftfind-core] status query_guard recent_skipped_symbol_queries={} historical_skipped_symbol_queries={}",
+                report.recent_skipped_symbol_queries, report.historical_skipped_symbol_queries
             ));
         }
         return Ok(());
@@ -634,6 +664,15 @@ struct QueryProfileSummary {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct QueryProfileStatusReport {
+    recent: Option<QueryProfileSummary>,
+    historical: Option<QueryProfileSummary>,
+    recent_skipped_symbol_queries: usize,
+    historical_skipped_symbol_queries: usize,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn load_status_diagnostics_snapshot() -> Option<StatusDiagnosticsSnapshot> {
     let log_path = crate::logging::logs_dir().join("swiftfind.log");
     let content = std::fs::read_to_string(&log_path).ok()?;
@@ -641,10 +680,10 @@ fn load_status_diagnostics_snapshot() -> Option<StatusDiagnosticsSnapshot> {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn load_query_profile_summary() -> Option<QueryProfileSummary> {
+fn load_query_profile_status_report() -> Option<QueryProfileStatusReport> {
     let log_path = crate::logging::logs_dir().join("swiftfind.log");
     let content = std::fs::read_to_string(&log_path).ok()?;
-    summarize_query_profiles(&content)
+    summarize_query_profile_status_report(&content)
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -683,8 +722,40 @@ fn latest_line_with_token(content: &str, token: &str) -> Option<String> {
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn summarize_query_profile_status_report(content: &str) -> Option<QueryProfileStatusReport> {
+    let recent_samples = parse_recent_query_profile_samples(content);
+    let historical_samples = parse_query_profile_samples(content);
+    let recent = summarize_query_profile_samples(&recent_samples);
+    let historical = summarize_query_profile_samples(&historical_samples);
+    if recent.is_none() && historical.is_none() {
+        return None;
+    }
+
+    let recent_lines = recent_runtime_log_slice(content);
+    let recent_skipped_symbol_queries = count_skipped_symbol_query_guards(recent_lines);
+    let historical_skipped_symbol_queries = count_skipped_symbol_query_guards(content);
+
+    Some(QueryProfileStatusReport {
+        recent,
+        historical,
+        recent_skipped_symbol_queries,
+        historical_skipped_symbol_queries,
+    })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
-    let mut samples = parse_recent_query_profile_samples(content);
+    let samples = parse_recent_query_profile_samples(content);
+    summarize_query_profile_samples(&samples)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn summarize_query_profile_samples(samples: &[QueryProfileSample]) -> Option<QueryProfileSummary> {
+    let mut samples = samples.to_vec();
+    if samples.is_empty() {
+        return None;
+    }
+
     if samples.len() > QUERY_PROFILE_STATUS_SAMPLE_WINDOW {
         samples.drain(0..(samples.len() - QUERY_PROFILE_STATUS_SAMPLE_WINDOW));
     }
@@ -734,6 +805,23 @@ fn summarize_query_profiles(content: &str) -> Option<QueryProfileSummary> {
         short_query_p95_total_ms,
         short_query_app_bias_rate_pct,
     })
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn recent_runtime_log_slice(content: &str) -> &str {
+    let Some(pos) = content.rfind("[swiftfind-core] startup mode=") else {
+        return content;
+    };
+    let line_start = content[..pos].rfind('\n').map(|idx| idx + 1).unwrap_or(pos);
+    &content[line_start..]
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn count_skipped_symbol_query_guards(content: &str) -> usize {
+    content
+        .lines()
+        .filter(|line| line.contains("query_guard skip=non_searchable_symbol_only"))
+        .count()
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -1573,8 +1661,16 @@ fn search_overlay_results_with_session(
     let text_query = parsed_query.free_text.trim();
     let normalized_query = crate::model::normalize_for_search(text_query);
     if should_skip_non_searchable_query(parsed_query, &normalized_query) {
+        log_info(&format!(
+            "[swiftfind-core] query_guard skip=non_searchable_symbol_only q=\"{}\"",
+            sanitize_query_for_profile_log(parsed_query.raw.as_str())
+        ));
         session.clear();
         return Ok(Vec::new());
+    }
+    let cache_key = final_query_cache_key(parsed_query, &filter, &normalized_query, result_limit);
+    if let Some(cached) = cached_final_query_results(session, &cache_key) {
+        return Ok(cached);
     }
     let candidate_limit = candidate_limit_for_query(
         result_limit,
@@ -1582,7 +1678,13 @@ fn search_overlay_results_with_session(
         &normalized_query,
         parsed_query.command_mode,
     );
-    let indexed_seed_limit = indexed_seed_limit(candidate_limit, normalized_query.len());
+    let base_indexed_seed_limit = indexed_seed_limit(candidate_limit, normalized_query.len());
+    let indexed_seed_limit = adaptive_indexed_seed_limit(
+        session,
+        candidate_limit,
+        normalized_query.len(),
+        base_indexed_seed_limit,
+    );
     let short_query_app_bias =
         should_use_short_query_app_mode(parsed_query, &filter, &normalized_query);
     let mut indexed_filter = filter.clone();
@@ -1617,6 +1719,9 @@ fn search_overlay_results_with_session(
             .map_err(|error| format!("indexed search failed: {error}"))?
     };
     let indexed_ms = indexed_started.elapsed().as_millis();
+    if !indexed_cache_hit {
+        record_indexed_latency_sample(session, indexed_ms);
+    }
     let indexed_count = indexed_seed_items.len();
     merged.extend(indexed_seed_items.iter().take(candidate_limit).cloned());
     if prefix_cache_eligible && normalized_query.len() >= INDEXED_PREFIX_CACHE_MIN_QUERY_LEN {
@@ -1706,6 +1811,7 @@ fn search_overlay_results_with_session(
             total_ms
         ));
     }
+    store_final_query_results(session, cache_key, ranked.as_slice());
     Ok(ranked)
 }
 
@@ -1714,6 +1820,7 @@ fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter
     SearchFilter {
         mode,
         kind_filter: parsed_query.kind_filter.clone(),
+        extension_filter: parsed_query.extension_filter.clone(),
         include_groups: parsed_query.include_groups.clone(),
         exclude_terms: parsed_query.exclude_terms.clone(),
         modified_within: parsed_query.modified_within,
@@ -1747,6 +1854,7 @@ fn should_use_short_query_app_mode(
         return false;
     }
     parsed_query.kind_filter.is_none()
+        && parsed_query.extension_filter.is_none()
         && parsed_query.exclude_terms.is_empty()
         && parsed_query.modified_within.is_none()
         && parsed_query.created_within.is_none()
@@ -1763,6 +1871,7 @@ fn should_skip_non_searchable_query(parsed_query: &ParsedQuery, normalized_query
         return false;
     }
     parsed_query.kind_filter.is_none()
+        && parsed_query.extension_filter.is_none()
         && parsed_query.include_groups.is_empty()
         && parsed_query.exclude_terms.is_empty()
         && parsed_query.modified_within.is_none()
@@ -1844,6 +1953,119 @@ fn indexed_seed_limit(candidate_limit: usize, normalized_query_len: usize) -> us
     )
 }
 
+fn adaptive_indexed_seed_limit(
+    session: &OverlaySearchSession,
+    candidate_limit: usize,
+    normalized_query_len: usize,
+    base_seed_limit: usize,
+) -> usize {
+    let mut samples: Vec<u128> = session.indexed_latency_ms.iter().copied().collect();
+    if samples.len() < 6 {
+        return base_seed_limit;
+    }
+
+    let p95 = percentile_u128(&mut samples, 0.95);
+    let scaled = if p95 >= 160 {
+        (base_seed_limit.saturating_mul(60)) / 100
+    } else if p95 >= 120 {
+        (base_seed_limit.saturating_mul(72)) / 100
+    } else if p95 >= 95 {
+        (base_seed_limit.saturating_mul(84)) / 100
+    } else if p95 <= 50 && normalized_query_len >= 3 {
+        (base_seed_limit.saturating_mul(108)) / 100
+    } else {
+        base_seed_limit
+    };
+
+    let minimum = candidate_limit.max(INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT / 2);
+    scaled.clamp(minimum, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT)
+}
+
+fn record_indexed_latency_sample(session: &mut OverlaySearchSession, indexed_ms: u128) {
+    session.indexed_latency_ms.push_back(indexed_ms);
+    while session.indexed_latency_ms.len() > ADAPTIVE_INDEXED_LATENCY_WINDOW {
+        session.indexed_latency_ms.pop_front();
+    }
+}
+
+fn final_query_cache_key(
+    parsed_query: &ParsedQuery,
+    filter: &SearchFilter,
+    normalized_query: &str,
+    result_limit: usize,
+) -> String {
+    format!(
+        "q={};mode={:?};kind={};ext={};include={};exclude={};modified={:?};created={:?};cmd={};limit={}",
+        normalized_query,
+        filter.mode,
+        filter.kind_filter.as_deref().unwrap_or("-"),
+        filter.extension_filter.as_deref().unwrap_or("-"),
+        encode_term_groups(&filter.include_groups),
+        filter.exclude_terms.join(","),
+        filter.modified_within,
+        filter.created_within,
+        parsed_query.command_mode,
+        result_limit
+    )
+}
+
+fn encode_term_groups(groups: &[Vec<String>]) -> String {
+    if groups.is_empty() {
+        return "-".to_string();
+    }
+
+    groups
+        .iter()
+        .map(|group| group.join("+"))
+        .collect::<Vec<String>>()
+        .join("|")
+}
+
+fn cached_final_query_results(
+    session: &mut OverlaySearchSession,
+    key: &str,
+) -> Option<Vec<crate::model::SearchItem>> {
+    let cached = session.final_query_cache.get(key).cloned()?;
+    if let Some(position) = session
+        .final_query_cache_lru
+        .iter()
+        .position(|entry| entry == key)
+    {
+        session.final_query_cache_lru.remove(position);
+    }
+    session.final_query_cache_lru.push_back(key.to_string());
+    Some(cached)
+}
+
+fn store_final_query_results(
+    session: &mut OverlaySearchSession,
+    key: String,
+    results: &[crate::model::SearchItem],
+) {
+    if results.is_empty() {
+        return;
+    }
+
+    session
+        .final_query_cache
+        .insert(key.clone(), results.to_vec());
+    if let Some(position) = session
+        .final_query_cache_lru
+        .iter()
+        .position(|entry| entry == &key)
+    {
+        session.final_query_cache_lru.remove(position);
+    }
+    session.final_query_cache_lru.push_back(key);
+
+    while session.final_query_cache.len() > FINAL_QUERY_CACHE_MAX_ENTRIES {
+        let Some(oldest) = session.final_query_cache_lru.pop_front() else {
+            break;
+        };
+        session.final_query_cache.remove(&oldest);
+    }
+}
+
 fn can_use_indexed_prefix_cache(
     cache: &IndexedPrefixCache,
     prefix_cache_eligible: bool,
@@ -1866,6 +2088,7 @@ fn can_use_indexed_prefix_cache(
 fn indexed_filter_matches_for_prefix_cache(a: &SearchFilter, b: &SearchFilter) -> bool {
     a.mode == b.mode
         && a.kind_filter == b.kind_filter
+        && a.extension_filter == b.extension_filter
         && a.modified_within == b.modified_within
         && a.created_within == b.created_within
 }
@@ -1876,6 +2099,7 @@ fn is_prefix_cache_eligible_query(parsed_query: &ParsedQuery, short_query_app_bi
     }
     if parsed_query.mode_override.is_some()
         || parsed_query.kind_filter.is_some()
+        || parsed_query.extension_filter.is_some()
         || !parsed_query.exclude_terms.is_empty()
         || parsed_query.modified_within.is_some()
         || parsed_query.created_within.is_some()
@@ -2044,11 +2268,12 @@ fn log_warn(message: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        can_use_indexed_prefix_cache, candidate_limit_for_query, dedupe_overlay_results,
-        launch_overlay_selection, next_selection_index, parse_cli_args,
+        adaptive_indexed_seed_limit, can_use_indexed_prefix_cache, candidate_limit_for_query,
+        dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
-        should_skip_non_searchable_query, summarize_query_profiles, IndexedPrefixCache,
-        RuntimeCommand, RuntimeOptions,
+        search_overlay_results_with_session, should_skip_non_searchable_query,
+        summarize_query_profiles, IndexedPrefixCache, OverlaySearchSession, RuntimeCommand,
+        RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2257,6 +2482,73 @@ mod tests {
             "viv",
             &SearchFilter::default()
         ));
+    }
+
+    #[test]
+    fn repeated_overlay_query_uses_final_cache() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be valid")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("swiftfind-overlay-cache-{unique}.tmp"));
+        std::fs::write(&path, b"ok").expect("temp file should be created");
+
+        let service = CoreService::with_connection(Config::default(), open_memory().unwrap())
+            .expect("service should initialize");
+        service
+            .upsert_item(&SearchItem::new(
+                "item-1",
+                "app",
+                "Vivaldi",
+                path.to_string_lossy().as_ref(),
+            ))
+            .expect("item should upsert");
+
+        let cfg = Config::default();
+        let plugins = PluginRegistry::default();
+        let parsed = ParsedQuery::parse("vi", true);
+        let mut session = OverlaySearchSession::default();
+
+        let first = search_overlay_results_with_session(
+            &service,
+            &cfg,
+            &plugins,
+            &parsed,
+            20,
+            &mut session,
+        )
+        .expect("first query should succeed");
+        let sample_count_after_first = session.indexed_latency_ms.len();
+
+        let second = search_overlay_results_with_session(
+            &service,
+            &cfg,
+            &plugins,
+            &parsed,
+            20,
+            &mut session,
+        )
+        .expect("second query should succeed");
+
+        assert_eq!(first, second);
+        assert_eq!(session.indexed_latency_ms.len(), sample_count_after_first);
+        assert!(!session.final_query_cache.is_empty());
+
+        std::fs::remove_file(path).expect("temp file should be removed");
+    }
+
+    #[test]
+    fn adaptive_seed_limit_reduces_on_high_latency_window() {
+        let mut session = OverlaySearchSession::default();
+        session
+            .indexed_latency_ms
+            .extend(std::iter::repeat(170_u128).take(12));
+
+        let base = 320;
+        let tuned = adaptive_indexed_seed_limit(&session, 120, 1, base);
+        assert!(tuned < base);
+        assert!(tuned >= INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT / 2);
+        assert!(tuned <= INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT);
     }
 
     #[test]

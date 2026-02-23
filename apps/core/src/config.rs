@@ -4,7 +4,26 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 1;
+pub const CURRENT_CONFIG_VERSION: u32 = 2;
+const LEGACY_IDLE_CACHE_TRIM_MS_V1: u32 = 1200;
+const LEGACY_ACTIVE_MEMORY_TARGET_MB_V1: u16 = 80;
+const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
+    "hotkey",
+    "launch_at_startup",
+    "max_results",
+    "discovery_roots",
+    "discovery_exclude_roots",
+    "search_mode_default",
+    "search_dsl_enabled",
+    "clipboard_enabled",
+    "clipboard_retention_minutes",
+    "clipboard_exclude_sensitive_patterns",
+    "plugins_enabled",
+    "plugins_safe_mode",
+    "plugin_paths",
+    "idle_cache_trim_ms",
+    "active_memory_target_mb",
+];
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -178,6 +197,7 @@ pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
 
     let raw = std::fs::read_to_string(&resolved_path)?;
     let mut cfg: Config = parse_text(&raw)?;
+    let source_version = cfg.version;
     cfg.config_path = resolved_path.clone();
 
     if cfg.index_db_path.as_os_str().is_empty() {
@@ -187,7 +207,11 @@ pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
             .join("index.sqlite3");
     }
 
+    let should_persist_migration = apply_migrations(&mut cfg, &raw);
     validate(&cfg).map_err(ConfigError::Validation)?;
+    if should_persist_migration {
+        persist_migrated_config(&cfg, &resolved_path, &raw, source_version)?;
+    }
     Ok(cfg)
 }
 
@@ -534,6 +558,69 @@ fn default_for_path(path: &Path) -> Config {
             .join("index.sqlite3");
     }
     cfg
+}
+
+fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
+    let mut changed = false;
+    let source_version = cfg.version.max(1);
+
+    if cfg.version < CURRENT_CONFIG_VERSION {
+        cfg.version = CURRENT_CONFIG_VERSION;
+        changed = true;
+    }
+
+    if source_version < 2 {
+        let had_idle_key = raw_has_key(raw, "idle_cache_trim_ms");
+        let had_active_mem_key = raw_has_key(raw, "active_memory_target_mb");
+        if !had_idle_key || cfg.idle_cache_trim_ms == LEGACY_IDLE_CACHE_TRIM_MS_V1 {
+            cfg.idle_cache_trim_ms = Config::default().idle_cache_trim_ms;
+            changed = true;
+        }
+        if !had_active_mem_key || cfg.active_memory_target_mb == LEGACY_ACTIVE_MEMORY_TARGET_MB_V1 {
+            cfg.active_memory_target_mb = Config::default().active_memory_target_mb;
+            changed = true;
+        }
+    }
+
+    if TEMPLATE_REQUIRED_KEYS
+        .iter()
+        .any(|key| !raw_has_key(raw, key))
+    {
+        changed = true;
+    }
+
+    changed
+}
+
+fn persist_migrated_config(
+    cfg: &Config,
+    path: &Path,
+    original_raw: &str,
+    source_version: u32,
+) -> Result<(), ConfigError> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let backup_path = parent.join(format!(
+        "config.v{}-backup-{}.jsonc",
+        source_version.max(1),
+        stamp
+    ));
+    std::fs::write(&backup_path, original_raw)?;
+    write_user_template(cfg, path)
+}
+
+fn raw_has_key(raw: &str, key: &str) -> bool {
+    let quoted = format!("\"{key}\"");
+    if raw.contains(&quoted) {
+        return true;
+    }
+    let bare = format!("{key}:");
+    raw.contains(&bare)
 }
 
 fn parse_text(raw: &str) -> Result<Config, ConfigError> {

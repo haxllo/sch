@@ -69,6 +69,12 @@ Phase 4 execution notes (2026-02-23):
 - [x] Search pipeline now emits stage-level query profile logs for slow queries (`query_profile`) to support real-machine performance diagnosis.
 - [x] Search path now avoids unnecessary wide scans on first-character queries and reuses cached indexed seed candidates for incremental typing.
 - [x] Empty-cache startup now shows launcher immediately and performs index refresh in background (`Indexing in background...` status until first async apply).
+- [x] Query DSL now supports explicit extension filtering via `ext:` / `extension:` tokens in addition to existing filters.
+- [x] Runtime query path now uses an in-session final-query result cache and adaptive indexed seed limits from observed indexed latency.
+- [x] Status diagnostics now report both recent and historical query-latency summaries and symbol-only skip counters.
+- [x] Config migration path now backs up older config files and rewrites updated template fields while preserving user values.
+- [x] Top-hit confidence guard refined to prefer higher-confidence source/match combinations without breaking short-query app intent.
+- [x] Overlay colors now follow Windows system theme (dark/light) at startup using theme-aware palettes.
 - [ ] Run Windows field validation pass and capture startup/query timing evidence from production logs.
 
 ## Deferred Backlog (Non-Blocking)

@@ -14,6 +14,7 @@ pub struct ParsedQuery {
     pub free_text: String,
     pub mode_override: Option<SearchMode>,
     pub kind_filter: Option<String>,
+    pub extension_filter: Option<String>,
     pub include_groups: Vec<Vec<String>>,
     pub exclude_terms: Vec<String>,
     pub modified_within: Option<TimeFilterWindow>,
@@ -30,6 +31,7 @@ impl ParsedQuery {
                 free_text: String::new(),
                 mode_override: None,
                 kind_filter: None,
+                extension_filter: None,
                 include_groups: Vec::new(),
                 exclude_terms: Vec::new(),
                 modified_within: None,
@@ -44,6 +46,7 @@ impl ParsedQuery {
                 raw,
                 mode_override: None,
                 kind_filter: None,
+                extension_filter: None,
                 include_groups: Vec::new(),
                 exclude_terms: Vec::new(),
                 modified_within: None,
@@ -66,6 +69,7 @@ impl ParsedQuery {
             None
         };
         let mut kind_filter: Option<String> = None;
+        let mut extension_filter: Option<String> = None;
         let mut include_groups: Vec<Vec<String>> = vec![Vec::new()];
         let mut exclude_terms = Vec::new();
         let mut free_terms = Vec::new();
@@ -110,6 +114,16 @@ impl ParsedQuery {
                 let normalized = value.trim().to_ascii_lowercase();
                 if !normalized.is_empty() {
                     kind_filter = Some(normalized);
+                }
+                expect_not = false;
+                continue;
+            }
+            if let Some(value) = parse_prefixed(token_trimmed, "ext:")
+                .or_else(|| parse_prefixed(token_trimmed, "extension:"))
+            {
+                let normalized = normalize_extension_filter(value);
+                if !normalized.is_empty() {
+                    extension_filter = Some(normalized);
                 }
                 expect_not = false;
                 continue;
@@ -159,6 +173,7 @@ impl ParsedQuery {
             free_text,
             mode_override,
             kind_filter,
+            extension_filter,
             include_groups,
             exclude_terms,
             modified_within,
@@ -166,6 +181,15 @@ impl ParsedQuery {
             command_mode,
         }
     }
+}
+
+fn normalize_extension_filter(value: &str) -> String {
+    value
+        .trim()
+        .trim_start_matches('.')
+        .chars()
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
 }
 
 fn parse_prefixed<'a>(token: &'a str, prefix: &str) -> Option<&'a str> {
@@ -227,11 +251,12 @@ mod tests {
     #[test]
     fn parses_mode_kind_and_filters() {
         let parsed = ParsedQuery::parse(
-            r#"@apps kind:file report OR notes NOT draft -temp modified:week"#,
+            r#"@apps kind:file ext:md report OR notes NOT draft -temp modified:week"#,
             true,
         );
         assert_eq!(parsed.mode_override, Some(SearchMode::Apps));
         assert_eq!(parsed.kind_filter.as_deref(), Some("file"));
+        assert_eq!(parsed.extension_filter.as_deref(), Some("md"));
         assert_eq!(parsed.modified_within, Some(TimeFilterWindow::Week));
         assert_eq!(parsed.include_groups.len(), 2);
         assert!(parsed.exclude_terms.contains(&"draft".to_string()));

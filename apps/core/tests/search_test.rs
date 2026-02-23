@@ -1,4 +1,5 @@
 use swiftfind_core::model::SearchItem;
+use swiftfind_core::search::SearchFilter;
 
 #[test]
 fn typo_query_returns_expected_match() {
@@ -190,4 +191,21 @@ fn short_plain_query_prefers_app_top_hit() {
 
     let results = swiftfind_core::search::search(&items, "v", 10);
     assert_eq!(results[0].id, "app-prefix");
+}
+
+#[test]
+fn extension_filter_matches_only_requested_extension() {
+    let items = vec![
+        SearchItem::new("txt", "file", "Todo", "C:\\Docs\\todo.txt"),
+        SearchItem::new("md", "file", "Readme", "C:\\Docs\\readme.md"),
+        SearchItem::new("app", "app", "Markdown Tool", "C:\\Apps\\mdtool.exe"),
+    ];
+
+    let filter = SearchFilter {
+        extension_filter: Some("md".to_string()),
+        ..SearchFilter::default()
+    };
+    let results = swiftfind_core::search::search_with_filter(&items, "read", 10, &filter);
+    let ids: Vec<&str> = results.iter().map(|item| item.id.as_str()).collect();
+    assert_eq!(ids, vec!["md"]);
 }
