@@ -169,8 +169,8 @@ mod imp {
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
-    const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe MDL2 Assets";
-    const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe Fluent Icons";
+    const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
+    const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
@@ -2538,7 +2538,7 @@ mod imp {
             ActionIconKind::Clipboard => 0xE8C8,   // Clipboard List
             ActionIconKind::Settings => 0xE713,    // Settings
             ActionIconKind::Diagnostics => 0xE8A5, // Page/Report
-            ActionIconKind::Logs => 0xE8A5,        // Page
+            ActionIconKind::Logs => 0xE8A5, // Keep Open Logs + Diagnostics icon identical
             ActionIconKind::Rebuild => 0xE895,     // Sync
             ActionIconKind::Generic => 0xE756,     // Command Prompt
         }
