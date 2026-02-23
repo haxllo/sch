@@ -2538,7 +2538,7 @@ mod imp {
             ActionIconKind::Clipboard => 0xE8C8,   // Clipboard List
             ActionIconKind::Settings => 0xE713,    // Settings
             ActionIconKind::Diagnostics => 0xE8A5, // Page/Report
-            ActionIconKind::Logs => 0xE8A5, // Keep Open Logs + Diagnostics icon identical
+            ActionIconKind::Logs => 0xE8B7,        // Folder
             ActionIconKind::Rebuild => 0xE895,     // Sync
             ActionIconKind::Generic => 0xE756,     // Command Prompt
         }
