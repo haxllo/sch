@@ -59,10 +59,6 @@ pub fn launch_browser_default_search(
         return Err(LaunchError::EmptyPath);
     }
 
-    if launch_open(trimmed).is_ok() {
-        return Ok(());
-    }
-
     if let Some(url) = fallback_url {
         let fallback = url.trim();
         if !fallback.is_empty() {
@@ -70,7 +66,10 @@ pub fn launch_browser_default_search(
         }
     }
 
-    launch_open(trimmed)
+    Err(LaunchError::LaunchFailed {
+        message: "missing fallback web search URL".to_string(),
+        code: None,
+    })
 }
 
 #[cfg(target_os = "windows")]

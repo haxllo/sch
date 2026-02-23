@@ -61,3 +61,15 @@ fn rejects_empty_browser_default_search() {
     let result = launch_browser_default_search("   ", None);
     assert_eq!(result, Err(LaunchError::EmptyPath));
 }
+
+#[test]
+fn rejects_browser_default_search_without_fallback_url() {
+    let result = launch_browser_default_search("swiftfind", None);
+    assert_eq!(
+        result,
+        Err(LaunchError::LaunchFailed {
+            message: "missing fallback web search URL".to_string(),
+            code: None,
+        })
+    );
+}
