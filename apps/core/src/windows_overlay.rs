@@ -2412,6 +2412,10 @@ mod imp {
     fn icon_glyph_for_kind(kind: &str) -> &'static str {
         if kind.eq_ignore_ascii_case("app") {
             "A"
+        } else if kind.eq_ignore_ascii_case("action") {
+            ">"
+        } else if kind.eq_ignore_ascii_case("clipboard") {
+            "C"
         } else if kind.eq_ignore_ascii_case("folder") {
             "D"
         } else {

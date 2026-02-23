@@ -27,6 +27,8 @@ use std::time::Instant;
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
 #[cfg(target_os = "windows")]
+const STATUS_ROW_NO_COMMAND_RESULTS: &str = "No command matches";
+#[cfg(target_os = "windows")]
 const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_INDEXING: &str = "Indexing in background...";
@@ -414,11 +416,16 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                     } else {
                                         set_status_row_overlay_state(
                                             &overlay,
-                                            STATUS_ROW_NO_RESULTS,
+                                            if parsed_query.command_mode {
+                                                STATUS_ROW_NO_COMMAND_RESULTS
+                                            } else {
+                                                STATUS_ROW_NO_RESULTS
+                                            },
                                         );
                                     }
                                 } else {
-                                    let rows = overlay_rows(&current_results);
+                                    let rows =
+                                        overlay_rows(&current_results, parsed_query.command_mode);
                                     overlay.set_results(&rows, selected_index);
                                 }
                             }
@@ -448,7 +455,18 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             } else if should_show_indexing_status(&background_index_refresh) {
                                 set_status_row_overlay_state(&overlay, STATUS_ROW_INDEXING);
                             } else {
-                                set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
+                                let parsed_query = ParsedQuery::parse(
+                                    overlay.query_text().trim(),
+                                    config.search_dsl_enabled,
+                                );
+                                set_status_row_overlay_state(
+                                    &overlay,
+                                    if parsed_query.command_mode {
+                                        STATUS_ROW_NO_COMMAND_RESULTS
+                                    } else {
+                                        STATUS_ROW_NO_RESULTS
+                                    },
+                                );
                             }
                             return;
                         }
@@ -1210,14 +1228,28 @@ fn runtime_mode() -> &'static str {
 }
 
 #[cfg(target_os = "windows")]
-fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
+fn overlay_rows(results: &[crate::model::SearchItem], command_mode: bool) -> Vec<OverlayRow> {
     if results.is_empty() {
         return Vec::new();
     }
 
+    if command_mode {
+        let mut rows = Vec::new();
+        rows.push(section_header_row("Commands"));
+        for (index, item) in results.iter().enumerate() {
+            rows.push(result_row(item, index, OverlayRowRole::Item, command_mode));
+        }
+        return rows;
+    }
+
     let mut rows = Vec::new();
     rows.push(section_header_row("Top Hit"));
-    rows.push(result_row(&results[0], 0, OverlayRowRole::TopHit));
+    rows.push(result_row(
+        &results[0],
+        0,
+        OverlayRowRole::TopHit,
+        command_mode,
+    ));
 
     let mut app_indices = Vec::new();
     let mut file_indices = Vec::new();
@@ -1240,11 +1272,23 @@ fn overlay_rows(results: &[crate::model::SearchItem]) -> Vec<OverlayRow> {
         }
     }
 
-    append_group_rows(&mut rows, "Applications", &app_indices, results);
-    append_group_rows(&mut rows, "Files", &file_indices, results);
-    append_group_rows(&mut rows, "Actions", &action_indices, results);
-    append_group_rows(&mut rows, "Clipboard", &clipboard_indices, results);
-    append_group_rows(&mut rows, "Other", &other_indices, results);
+    append_group_rows(
+        &mut rows,
+        "Applications",
+        &app_indices,
+        results,
+        command_mode,
+    );
+    append_group_rows(&mut rows, "Files", &file_indices, results, command_mode);
+    append_group_rows(&mut rows, "Actions", &action_indices, results, command_mode);
+    append_group_rows(
+        &mut rows,
+        "Clipboard",
+        &clipboard_indices,
+        results,
+        command_mode,
+    );
+    append_group_rows(&mut rows, "Other", &other_indices, results, command_mode);
     rows
 }
 
@@ -1254,13 +1298,19 @@ fn append_group_rows(
     header: &str,
     indices: &[usize],
     results: &[crate::model::SearchItem],
+    command_mode: bool,
 ) {
     if indices.is_empty() {
         return;
     }
     rows.push(section_header_row(header));
     for index in indices {
-        rows.push(result_row(&results[*index], *index, OverlayRowRole::Item));
+        rows.push(result_row(
+            &results[*index],
+            *index,
+            OverlayRowRole::Item,
+            command_mode,
+        ));
     }
 }
 
@@ -1281,13 +1331,14 @@ fn result_row(
     item: &crate::model::SearchItem,
     result_index: usize,
     role: OverlayRowRole,
+    command_mode: bool,
 ) -> OverlayRow {
     OverlayRow {
         role,
         result_index: result_index as i32,
         kind: item.kind.clone(),
         title: item.title.clone(),
-        path: overlay_subtitle(item),
+        path: overlay_subtitle(item, command_mode),
         icon_path: item.path.clone(),
     }
 }
@@ -1372,7 +1423,10 @@ fn normalize_path_key(path: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn overlay_subtitle(item: &crate::model::SearchItem) -> String {
+fn overlay_subtitle(item: &crate::model::SearchItem, command_mode: bool) -> String {
+    if command_mode && item.kind.eq_ignore_ascii_case("action") {
+        return String::new();
+    }
     if item.kind.eq_ignore_ascii_case("app") {
         return String::new();
     }
