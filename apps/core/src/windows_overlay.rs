@@ -20,7 +20,7 @@ mod imp {
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
         GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
         SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
-        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_RIGHT,
+        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT,
         DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS,
         PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
     };
