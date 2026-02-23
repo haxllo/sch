@@ -170,7 +170,7 @@ mod imp {
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
-    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 400;
+    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 600;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
     const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe MDL2 Assets";
@@ -2065,7 +2065,7 @@ mod imp {
             };
             let old_font = SelectObject(hdc, prefix_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(hdc, state.palette.text_secondary);
+            SetTextColor(hdc, state.palette.text_hint);
             let prefix = to_wide(COMMAND_PREFIX_TEXT);
             DrawTextW(
                 hdc,
