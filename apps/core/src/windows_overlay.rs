@@ -2528,7 +2528,7 @@ mod imp {
         let kind = action_icon_kind_for_title(&row.title);
         unsafe {
             let pen = CreatePen(PS_SOLID, 2, color);
-            if pen == 0 {
+            if pen.is_null() {
                 return false;
             }
             let old_pen = SelectObject(hdc, pen as _);
