@@ -173,12 +173,13 @@ mod imp {
     const FONT_WEIGHT_COMMAND_PREFIX: i32 = 500;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
+    const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe UI Variable Text";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
-    const COMMAND_PREFIX_TEXT: &str = ">";
+    const COMMAND_PREFIX_TEXT: &str = "›";
     const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 24;
     const COMMAND_PREFIX_GAP: i32 = 8;
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 14;
@@ -1229,8 +1230,11 @@ mod imp {
                     state.top_hit_font = create_font(FONT_TOP_HIT_HEIGHT, FONT_WEIGHT_TOP_HIT);
                     state.hint_font = create_font(FONT_HINT_HEIGHT, FONT_WEIGHT_HINT);
                     state.help_tip_font = create_font(FONT_HELP_TIP_HEIGHT, FONT_WEIGHT_HELP_TIP);
-                    state.command_prefix_font =
-                        create_font(FONT_COMMAND_PREFIX_HEIGHT, FONT_WEIGHT_COMMAND_PREFIX);
+                    state.command_prefix_font = create_font_with_family(
+                        FONT_COMMAND_PREFIX_HEIGHT,
+                        FONT_WEIGHT_COMMAND_PREFIX,
+                        command_prefix_font_family_wide(),
+                    );
                     state.command_icon_font = create_font_with_family(
                         FONT_COMMAND_ICON_HEIGHT,
                         FONT_WEIGHT_COMMAND_ICON,
@@ -4302,6 +4306,13 @@ mod imp {
         static ICON_FONT_FALLBACK_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
         ICON_FONT_FALLBACK_WIDE
             .get_or_init(|| to_wide(ICON_FONT_FAMILY_FALLBACK))
+            .as_slice()
+    }
+
+    fn command_prefix_font_family_wide() -> &'static [u16] {
+        static COMMAND_PREFIX_FONT_WIDE: OnceLock<Vec<u16>> = OnceLock::new();
+        COMMAND_PREFIX_FONT_WIDE
+            .get_or_init(|| to_wide(COMMAND_PREFIX_FONT_FAMILY))
             .as_slice()
     }
 
