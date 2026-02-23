@@ -472,13 +472,34 @@ fn write_atomic(path: &Path, encoded: &str) -> Result<(), ConfigError> {
 fn default_discovery_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        if let Ok(user_profile) = std::env::var("USERPROFILE") {
-            let base = PathBuf::from(user_profile);
-            return vec![base.join("Documents"), base.join("Desktop")];
+        if let Some(profile_root) = windows_user_profile_root() {
+            return vec![profile_root];
         }
     }
 
     Vec::new()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_user_profile_root() -> Option<PathBuf> {
+    if let Ok(user_profile) = std::env::var("USERPROFILE") {
+        let trimmed = user_profile.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    let home_drive = std::env::var("HOMEDRIVE").ok();
+    let home_path = std::env::var("HOMEPATH").ok();
+    if let (Some(drive), Some(path)) = (home_drive, home_path) {
+        let combined = format!("{}{}", drive.trim(), path.trim());
+        let trimmed = combined.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed));
+        }
+    }
+
+    None
 }
 
 fn default_for_path(path: &Path) -> Config {

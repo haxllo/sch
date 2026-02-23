@@ -14,12 +14,11 @@
   "launch_at_startup": false,
   "max_results": 20,
   "discovery_roots": [
-    "C:\\Users\\<user>\\Documents",
-    "C:\\Users\\<user>\\Desktop"
+    "C:\\Users\\<user>"
   ],
   "discovery_exclude_roots": [
-    "C:\\Users\\<user>\\Documents\\node_modules",
-    "C:\\Users\\<user>\\Documents\\.git"
+    "C:\\Users\\<user>\\AppData\\Local\\Temp",
+    "C:\\Users\\<user>\\AppData\\Local\\Microsoft\\Windows\\INetCache"
   ]
 }
 ```
