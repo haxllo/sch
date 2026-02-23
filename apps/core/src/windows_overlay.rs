@@ -1530,13 +1530,23 @@ mod imp {
                         return state.help_tip_brush;
                     }
                     if target == state.help_hwnd {
+                        let base_help_color = blend_color(
+                            state.palette.input_bg,
+                            state.palette.text_hint,
+                            COMMAND_PREFIX_OPACITY,
+                        );
+                        let hover_help_color = blend_color(
+                            state.palette.input_bg,
+                            state.palette.text_primary,
+                            COMMAND_PREFIX_OPACITY,
+                        );
                         unsafe {
                             SetTextColor(
                                 wparam as _,
                                 if state.help_hovered {
-                                    state.palette.help_icon_hover
+                                    hover_help_color
                                 } else {
-                                    state.palette.help_icon
+                                    base_help_color
                                 },
                             );
                             SetBkMode(wparam as _, TRANSPARENT as i32);
