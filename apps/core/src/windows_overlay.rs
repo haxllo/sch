@@ -649,6 +649,9 @@ mod imp {
                 state.rows.clear();
                 state.rows.extend_from_slice(rows);
                 unsafe {
+                    // Batch first-render list updates so the first query does not flash
+                    // an intermediate frame while rows are being rebuilt.
+                    SendMessageW(state.list_hwnd, WM_SETREDRAW as u32, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                 }
@@ -686,6 +689,11 @@ mod imp {
                     unsafe {
                         SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     }
+                }
+                unsafe {
+                    SendMessageW(state.list_hwnd, WM_SETREDRAW as u32, 1, 0);
+                    InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
+                    InvalidateRect(self.hwnd, std::ptr::null(), 0);
                 }
             }
         }
