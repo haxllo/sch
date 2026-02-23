@@ -203,8 +203,9 @@ fn now_nanos() -> u128 {
 #[cfg(target_os = "windows")]
 fn read_system_clipboard_text() -> Result<Option<String>, String> {
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard, CF_UNICODETEXT,
+        CloseClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
     use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
 
     unsafe {
@@ -250,10 +251,12 @@ fn read_system_clipboard_text() -> Result<Option<String>, String> {
 #[cfg(target_os = "windows")]
 fn write_system_clipboard_text(value: &str) -> Result<(), String> {
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData, CF_UNICODETEXT,
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
     };
+    use windows_sys::Win32::System::Ole::CF_UNICODETEXT;
+    use windows_sys::Win32::Foundation::GlobalFree;
     use windows_sys::Win32::System::Memory::{
-        GlobalAlloc, GlobalFree, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE,
     };
 
     let wide: Vec<u16> = value.encode_utf16().chain(std::iter::once(0)).collect();
