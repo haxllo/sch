@@ -96,6 +96,10 @@ Copy-Item $coreExe (Join-Path $stageDir "bin/swiftfind-core.exe") -Force
 if (Test-Path "apps/assets/swiftfinder.svg") {
   Copy-Item "apps/assets/swiftfinder.svg" (Join-Path $stageDir "assets/swiftfinder.svg") -Force
 }
+if (Test-Path "apps/assets/fonts/Geist") {
+  New-Item -ItemType Directory -Force -Path (Join-Path $stageDir "assets/fonts") | Out-Null
+  Copy-Item "apps/assets/fonts/Geist" (Join-Path $stageDir "assets/fonts/Geist") -Recurse -Force
+}
 Copy-Item "docs/engineering/windows-runtime-validation-checklist.md" (Join-Path $stageDir "docs/windows-runtime-validation-checklist.md") -Force
 Copy-Item "docs/releases/windows-milestone-release-notes-template.md" (Join-Path $stageDir "docs/release-notes-template.md") -Force
 Copy-Item "scripts/windows/install-swiftfind.ps1" (Join-Path $stageDir "scripts/install-swiftfind.ps1") -Force

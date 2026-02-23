@@ -1,6 +1,6 @@
 # ADR-001: Core Stack and Process Model
 
-- Status: accepted
+- Status: superseded
 - Date: 2026-02-11
 
 ## Context
@@ -13,31 +13,33 @@ The product requires:
 
 ## Decision
 
-Use:
+Original decision:
 - Rust for the core service (`swiftfind-core`)
 - Tauri with React and TypeScript for UI (`swiftfind-ui`)
 - SQLite for local cache and metadata persistence
+- Two-process model (always-on core + on-demand UI process)
 
-Use a two-process model:
-- Always-on core process
-- On-demand UI process and window
+Current state (superseding update):
+- Rust core service (`swiftfind-core`) remains.
+- UI is now a native Win32 owner-draw overlay hosted directly in `swiftfind-core`.
+- Single-process runtime model is used in production.
 
 ## Rationale
 
 - Rust gives high performance and predictable memory behavior
-- Tauri allows modern UI without shipping a heavy runtime
-- Separation keeps search/indexing independent from UI rendering
+- At the time, Tauri offered fast UI iteration and clear process boundaries.
+- The project later moved to native in-process overlay for tighter latency and lifecycle control.
 
 ## Consequences
 
 Positive:
 - Better performance control
-- Easier profiling and reliability isolation
-- UI technology flexibility
+- Lower runtime/process overhead with a single process
+- Simpler install/upgrade/uninstall behavior (no secondary UI binary orchestration)
 
 Negative:
-- IPC complexity between core and UI
-- More packaging and process orchestration work
+- Native overlay rendering complexity moved into Rust/Win32 code
+- Cross-platform UI reuse from the prior web stack no longer applies
 
 ## Follow-up ADRs
 

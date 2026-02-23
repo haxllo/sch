@@ -14,8 +14,8 @@ if (-not $SkipRust) {
 }
 
 if (-not $SkipUi) {
-  Write-Host '[2/3] Running UI launcher flow tests...' -ForegroundColor Yellow
-  ./node_modules/.bin/vitest --run tests/e2e/hotkey-search-launch.spec.ts apps/ui/src/components/LauncherOverlay.test.tsx
+  Write-Host '[2/3] Running repository smoke tests...' -ForegroundColor Yellow
+  ./node_modules/.bin/vitest --run tests/smoke/scaffold.test.ts
 }
 
 Write-Host '[3/3] Checklist location:' -ForegroundColor Yellow

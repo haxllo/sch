@@ -8,7 +8,7 @@ Canonical execution/status tracker:
 Deliverables:
 - Repository scaffolding
 - Rust core service skeleton
-- Tauri UI shell with floating window
+- Native Win32 overlay shell with floating window
 - Config load and save plumbing
 
 Exit criteria:

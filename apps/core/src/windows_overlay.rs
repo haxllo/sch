@@ -3995,8 +3995,15 @@ mod imp {
                 }
             }
             if let Ok(cwd) = std::env::current_dir() {
-                candidates.push(cwd.join("apps/ui/src/fonts/Geist/otf"));
+                candidates.push(cwd.join("apps/assets/fonts/Geist/otf"));
                 candidates.push(cwd.join("fonts/Geist/otf"));
+                candidates.push(cwd.join("assets/fonts/Geist/otf"));
+            }
+            if let Ok(exe_path) = std::env::current_exe() {
+                if let Some(exe_dir) = exe_path.parent() {
+                    candidates.push(exe_dir.join("..").join("assets/fonts/Geist/otf"));
+                    candidates.push(exe_dir.join("assets/fonts/Geist/otf"));
+                }
             }
 
             let files = [

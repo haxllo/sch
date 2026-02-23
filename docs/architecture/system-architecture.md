@@ -3,7 +3,7 @@
 ## Stack Direction
 
 - Core service: Rust
-- UI shell: Tauri + React + TypeScript
+- UI shell: Native Win32 owner-draw overlay (inside `swiftfind-core`)
 - Local storage: SQLite
 - Config format: JSON
 
@@ -12,14 +12,11 @@
 - `swiftfind-core.exe`
 - Always-on background process
 - Owns hotkey registration, indexing, search, ranking, and launching
-
-- `swiftfind-ui.exe` (Tauri window)
-- Activated on demand by core
-- Renders floating search bar and settings views
+- Hosts and renders the floating search bar overlay directly (no separate UI process)
 
 Rationale:
 - Keeps heavy logic in one fast native service
-- UI can stay lightweight and restart independently
+- Removes IPC/process orchestration overhead between core and UI
 
 ## High-Level Components
 
@@ -52,8 +49,8 @@ Rationale:
 1. Core starts and loads config.
 2. Indexer initializes cached index from SQLite.
 3. Hotkey press triggers overlay open.
-4. UI sends query events to core through IPC.
-5. SearchEngine returns ranked results with minimal payload.
+4. Overlay input events are handled in-process.
+5. SearchEngine returns ranked results for direct overlay rendering.
 6. User action is sent to ActionExecutor.
 7. Core records usage event for ranking improvements.
 
