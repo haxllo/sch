@@ -1173,13 +1173,11 @@ fn search_overlay_results(
     let candidate_limit = result_limit.saturating_mul(6).max(60);
 
     let mut merged = Vec::new();
-    let indexed_items = service.cached_items_snapshot();
-    merged.extend(crate::search::search_with_filter(
-        &indexed_items,
-        text_query,
-        candidate_limit,
-        &filter,
-    ));
+    merged.extend(
+        service
+            .search_with_filter(text_query, candidate_limit, &filter)
+            .map_err(|error| format!("indexed search failed: {error}"))?,
+    );
     merged.extend(crate::search::search_with_filter(
         &plugins.provider_items,
         text_query,

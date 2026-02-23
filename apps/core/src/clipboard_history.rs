@@ -72,9 +72,12 @@ pub fn search_history(
     if entries.is_empty() {
         return Vec::new();
     }
+    let before_len = entries.len();
     let now = now_epoch_secs();
     prune_entries(cfg, &mut entries, now);
-    let _ = save_entries(cfg, &entries);
+    if entries.len() != before_len {
+        let _ = save_entries(cfg, &entries);
+    }
 
     let items: Vec<SearchItem> = entries
         .iter()

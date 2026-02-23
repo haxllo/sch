@@ -16,6 +16,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STALE_PRUNE_INTERVAL: Duration = Duration::from_secs(15);
 const PROVIDER_RECONCILE_INTERVAL_SECS: i64 = 30 * 60;
+const STALE_PRUNE_BATCH_SIZE: usize = 512;
 
 #[derive(Debug)]
 pub enum ServiceError {
@@ -71,6 +72,7 @@ pub struct CoreService {
     providers: Vec<Box<dyn DiscoveryProvider>>,
     cached_items: RwLock<Vec<SearchItem>>,
     last_stale_prune: Mutex<Option<Instant>>,
+    stale_prune_cursor: Mutex<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -112,6 +114,7 @@ impl CoreService {
             providers: Vec::new(),
             cached_items: RwLock::new(cached),
             last_stale_prune: Mutex::new(None),
+            stale_prune_cursor: Mutex::new(0),
         })
     }
 
@@ -390,13 +393,6 @@ impl CoreService {
         }
     }
 
-    fn read_cached_items(&self) -> Vec<SearchItem> {
-        match self.cached_items.read() {
-            Ok(guard) => guard.clone(),
-            Err(poisoned) => poisoned.into_inner().clone(),
-        }
-    }
-
     fn refresh_cache_from_store(&self) -> Result<(), ServiceError> {
         let latest = index_store::list_items(&self.db)?;
         match self.cached_items.write() {
@@ -462,8 +458,8 @@ impl CoreService {
             return Ok(());
         }
 
-        let snapshot = self.read_cached_items();
-        let stale_ids: Vec<String> = snapshot
+        let candidates = self.stale_prune_candidates(STALE_PRUNE_BATCH_SIZE);
+        let stale_ids: Vec<String> = candidates
             .iter()
             .filter(|item| is_stale_index_entry(item))
             .map(|item| item.id.clone())
@@ -490,6 +486,37 @@ impl CoreService {
         }
 
         Ok(())
+    }
+
+    fn stale_prune_candidates(&self, batch_size: usize) -> Vec<SearchItem> {
+        if batch_size == 0 {
+            return Vec::new();
+        }
+
+        let mut cursor = match self.stale_prune_cursor.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let guard = match self.cached_items.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        if guard.is_empty() {
+            *cursor = 0;
+            return Vec::new();
+        }
+
+        let len = guard.len();
+        let start = (*cursor).min(len - 1);
+        let take = batch_size.min(len);
+        let mut out = Vec::with_capacity(take);
+        for offset in 0..take {
+            let idx = (start + offset) % len;
+            out.push(guard[idx].clone());
+        }
+        *cursor = (start + take) % len;
+        out
     }
 }
 
