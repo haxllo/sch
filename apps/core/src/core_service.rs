@@ -216,6 +216,15 @@ impl CoreService {
         guard.clone()
     }
 
+    pub fn cached_items_len(&self) -> usize {
+        self.cached_len()
+    }
+
+    pub fn reload_cache_from_store(&self) -> Result<usize, ServiceError> {
+        self.refresh_cache_from_store()?;
+        Ok(self.cached_len())
+    }
+
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
         match target {
             LaunchTarget::Path(path) => launch_path(path).map_err(ServiceError::from),

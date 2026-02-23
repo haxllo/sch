@@ -63,10 +63,12 @@ Major tasks:
 - [x] Command-mode action UX polish: dynamic web-search action + URL launch path for action rows
 - [x] Runtime query latency hardening: short-query app bias + adaptive candidate limits + indexed prefix cache reuse
 - [x] Runtime/overlay tuning wiring: `idle_cache_trim_ms` and `active_memory_target_mb` now drive live icon-cache cleanup and cache budget behavior
+- [x] Startup critical-path hardening: overlay/hotkey boot no longer blocked by incremental indexing; indexing now applies asynchronously with cache refresh on completion
 
 Phase 4 execution notes (2026-02-23):
 - [x] Search pipeline now emits stage-level query profile logs for slow queries (`query_profile`) to support real-machine performance diagnosis.
 - [x] Search path now avoids unnecessary wide scans on first-character queries and reuses cached indexed seed candidates for incremental typing.
+- [x] Empty-cache startup now shows launcher immediately and performs index refresh in background (`Indexing in background...` status until first async apply).
 - [ ] Run Windows field validation pass and capture startup/query timing evidence from production logs.
 
 ## Deferred Backlog (Non-Blocking)

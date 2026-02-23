@@ -193,13 +193,14 @@ Completed in current pass:
 - [x] Adaptive query candidate limits by query length/mode to reduce broad-query compute spikes.
 - [x] Indexed prefix-cache reuse for incremental typing (`v` -> `vi` -> `viv`) to reduce repeated full index scoring.
 - [x] Stage-level slow-query profiling (`query_profile`) expanded with candidate/seed/cache-hit dimensions.
+- [x] Startup critical-path hardening: runtime now initializes overlay/hotkey first and performs incremental indexing asynchronously.
 - [x] Config-to-runtime tuning hookup for overlay cache behavior:
   - `idle_cache_trim_ms` now controls icon-cache idle cleanup timer.
   - `active_memory_target_mb` now controls icon-cache budget envelope.
 
 Next recommended tasks:
 1. Startup responsiveness hardening:
-   - move first-run heavy indexing off the critical startup path while preserving deterministic query behavior.
+   - completed in current pass; next step is validating cold-start UX and indexing-complete transition timing on real Windows installs.
 2. Field performance validation:
    - capture and compare `query_profile` p95 timings on large real-user indexes.
 3. Memory profile validation:

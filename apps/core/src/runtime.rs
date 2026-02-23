@@ -19,12 +19,16 @@ use crate::windows_overlay::{
     NativeOverlayShell, OverlayEvent, OverlayRow, OverlayRowRole,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "windows")]
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
 #[cfg(target_os = "windows")]
 const STATUS_ROW_TYPE_TO_SEARCH: &str = "Start typing to search";
+#[cfg(target_os = "windows")]
+const STATUS_ROW_INDEXING: &str = "Indexing in background...";
 const QUERY_PROFILE_LOG_THRESHOLD_MS: u128 = 35;
 const SHORT_QUERY_APP_BIAS_MAX_LEN: usize = 1;
 const INDEXED_PREFIX_CACHE_MIN_QUERY_LEN: usize = 1;
@@ -48,6 +52,16 @@ struct IndexedPrefixCache {
     normalized_query: String,
     indexed_filter: SearchFilter,
     seed_items: Vec<crate::model::SearchItem>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct BackgroundIndexRefresh {
+    completed: Arc<AtomicBool>,
+    result: Arc<Mutex<Option<Result<crate::core_service::IndexRefreshReport, String>>>>,
+    cache_applied: bool,
+    initial_cache_empty: bool,
+    started_at: Instant,
 }
 
 #[derive(Debug)]
@@ -204,24 +218,36 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
     ));
 
     let service = CoreService::new(config.clone())?.with_runtime_providers();
-    let index_report = service.rebuild_index_incremental_with_report()?;
-    log_info(&format!(
-        "[swiftfind-core] startup indexed_items={} discovered={} upserted={} removed={}",
-        index_report.indexed_total,
-        index_report.discovered_total,
-        index_report.upserted_total,
-        index_report.removed_total,
-    ));
-    for provider in &index_report.providers {
+    #[cfg(target_os = "windows")]
+    let mut background_index_refresh = {
+        let initial_cached_items = service.cached_items_len();
         log_info(&format!(
-            "[swiftfind-core] index_provider name={} discovered={} upserted={} removed={} skipped={} elapsed_ms={}",
-            provider.provider,
-            provider.discovered,
-            provider.upserted,
-            provider.removed,
-            provider.skipped,
-            provider.elapsed_ms,
+            "[swiftfind-core] startup cached_items={} (async indexing scheduled)",
+            initial_cached_items
         ));
+        start_background_index_refresh(&config, initial_cached_items == 0)
+    };
+    #[cfg(not(target_os = "windows"))]
+    {
+        let index_report = service.rebuild_index_incremental_with_report()?;
+        log_info(&format!(
+            "[swiftfind-core] startup indexed_items={} discovered={} upserted={} removed={}",
+            index_report.indexed_total,
+            index_report.discovered_total,
+            index_report.upserted_total,
+            index_report.removed_total,
+        ));
+        for provider in &index_report.providers {
+            log_info(&format!(
+                "[swiftfind-core] index_provider name={} discovered={} upserted={} removed={} skipped={} elapsed_ms={}",
+                provider.provider,
+                provider.discovered,
+                provider.upserted,
+                provider.removed,
+                provider.skipped,
+                provider.elapsed_ms,
+            ));
+        }
     }
     #[cfg(target_os = "windows")]
     let plugin_registry = PluginRegistry::load_from_config(&config);
@@ -281,138 +307,60 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let mut search_session = OverlaySearchSession::default();
 
         overlay
-            .run_message_loop_with_events(|event| match event {
-                OverlayEvent::Hotkey(_) => {
-                    log_info("[swiftfind-core] hotkey_event received");
-                    overlay_state.set_visible(overlay.is_visible());
-                    let action = overlay_state.on_hotkey(overlay.has_focus());
-                    match action {
-                        HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
-                            overlay.show_and_focus();
-                            if config.clipboard_enabled {
-                                let _ = clipboard_history::maybe_capture_latest(&config);
+            .run_message_loop_with_events(|event| {
+                maybe_apply_background_index_refresh(&service, &mut background_index_refresh);
+                match event {
+                    OverlayEvent::Hotkey(_) => {
+                        log_info("[swiftfind-core] hotkey_event received");
+                        overlay_state.set_visible(overlay.is_visible());
+                        let action = overlay_state.on_hotkey(overlay.has_focus());
+                        match action {
+                            HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
+                                overlay.show_and_focus();
+                                if config.clipboard_enabled {
+                                    let _ = clipboard_history::maybe_capture_latest(&config);
+                                }
+                                if overlay.query_text().trim().is_empty() {
+                                    set_idle_overlay_state(&overlay);
+                                }
                             }
-                            if overlay.query_text().trim().is_empty() {
-                                set_idle_overlay_state(&overlay);
-                            }
-                        }
-                        HotkeyAction::Hide => {
-                            overlay.hide();
-                            reset_overlay_session(
-                                &overlay,
-                                &mut current_results,
-                                &mut selected_index,
-                            );
-                            last_query.clear();
-                            search_session.clear();
-                        }
-                    }
-                }
-                OverlayEvent::ExternalShow => {
-                    overlay_state.set_visible(overlay.is_visible());
-                    overlay.show_and_focus();
-                    if config.clipboard_enabled {
-                        let _ = clipboard_history::maybe_capture_latest(&config);
-                    }
-                    if overlay.query_text().trim().is_empty() {
-                        set_idle_overlay_state(&overlay);
-                    }
-                }
-                OverlayEvent::ExternalQuit => {
-                    overlay.hide_now();
-                    last_query.clear();
-                    search_session.clear();
-                    unsafe {
-                        windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
-                    }
-                }
-                OverlayEvent::Escape => {
-                    if overlay_state.on_escape() {
-                        overlay.hide_now();
-                        reset_overlay_session(&overlay, &mut current_results, &mut selected_index);
-                        last_query.clear();
-                        search_session.clear();
-                    }
-                }
-                OverlayEvent::QueryChanged(query) => {
-                    let trimmed = query.trim();
-                    if trimmed.is_empty() {
-                        current_results.clear();
-                        selected_index = 0;
-                        last_query.clear();
-                        search_session.clear();
-                        set_idle_overlay_state(&overlay);
-                        return;
-                    }
-                    if trimmed == last_query {
-                        return;
-                    }
-                    last_query = trimmed.to_string();
-                    let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
-
-                    match search_overlay_results_with_session(
-                        &service,
-                        &config,
-                        &plugin_registry,
-                        &parsed_query,
-                        max_results,
-                        &mut search_session,
-                    ) {
-                        Ok(mut results) => {
-                            dedupe_overlay_results(&mut results);
-                            current_results = results;
-                            selected_index = 0;
-                            if current_results.is_empty() {
-                                set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
-                            } else {
-                                let rows = overlay_rows(&current_results);
-                                overlay.set_results(&rows, selected_index);
+                            HotkeyAction::Hide => {
+                                overlay.hide();
+                                reset_overlay_session(
+                                    &overlay,
+                                    &mut current_results,
+                                    &mut selected_index,
+                                );
+                                last_query.clear();
+                                search_session.clear();
+                                maybe_apply_background_index_refresh(
+                                    &service,
+                                    &mut background_index_refresh,
+                                );
                             }
                         }
-                        Err(error) => {
-                            current_results.clear();
-                            selected_index = 0;
-                            search_session.clear();
-                            overlay.set_results(&[], 0);
-                            overlay.set_status_text(&format!("Search error: {error}"));
+                    }
+                    OverlayEvent::ExternalShow => {
+                        overlay_state.set_visible(overlay.is_visible());
+                        overlay.show_and_focus();
+                        if config.clipboard_enabled {
+                            let _ = clipboard_history::maybe_capture_latest(&config);
                         }
-                    }
-                }
-                OverlayEvent::MoveSelection(direction) => {
-                    if current_results.is_empty() {
-                        return;
-                    }
-
-                    selected_index =
-                        next_selection_index(selected_index, current_results.len(), direction);
-                    overlay.set_selected_index(selected_index);
-                }
-                OverlayEvent::Submit => {
-                    if current_results.is_empty() {
                         if overlay.query_text().trim().is_empty() {
                             set_idle_overlay_state(&overlay);
-                            overlay.show_placeholder_hint(STATUS_ROW_TYPE_TO_SEARCH);
-                        } else {
-                            set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
                         }
-                        return;
                     }
-
-                    if let Some(list_selection) = overlay.selected_index() {
-                        selected_index = list_selection.min(current_results.len() - 1);
+                    OverlayEvent::ExternalQuit => {
+                        overlay.hide_now();
+                        last_query.clear();
+                        search_session.clear();
+                        unsafe {
+                            windows_sys::Win32::UI::WindowsAndMessaging::PostQuitMessage(0);
+                        }
                     }
-
-                    match launch_overlay_selection(
-                        &service,
-                        &config,
-                        &plugin_registry,
-                        &current_results,
-                        selected_index,
-                    ) {
-                        Ok(()) => {
-                            overlay.set_status_text("");
+                    OverlayEvent::Escape => {
+                        if overlay_state.on_escape() {
                             overlay.hide_now();
-                            overlay_state.on_escape();
                             reset_overlay_session(
                                 &overlay,
                                 &mut current_results,
@@ -421,8 +369,106 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             last_query.clear();
                             search_session.clear();
                         }
-                        Err(error) => {
-                            overlay.set_status_text(&format!("Launch error: {error}"));
+                    }
+                    OverlayEvent::QueryChanged(query) => {
+                        let trimmed = query.trim();
+                        if trimmed.is_empty() {
+                            current_results.clear();
+                            selected_index = 0;
+                            last_query.clear();
+                            search_session.clear();
+                            set_idle_overlay_state(&overlay);
+                            return;
+                        }
+                        if trimmed == last_query {
+                            return;
+                        }
+                        last_query = trimmed.to_string();
+                        let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
+
+                        match search_overlay_results_with_session(
+                            &service,
+                            &config,
+                            &plugin_registry,
+                            &parsed_query,
+                            max_results,
+                            &mut search_session,
+                        ) {
+                            Ok(mut results) => {
+                                dedupe_overlay_results(&mut results);
+                                current_results = results;
+                                selected_index = 0;
+                                if current_results.is_empty() {
+                                    if should_show_indexing_status(&background_index_refresh) {
+                                        set_status_row_overlay_state(&overlay, STATUS_ROW_INDEXING);
+                                    } else {
+                                        set_status_row_overlay_state(
+                                            &overlay,
+                                            STATUS_ROW_NO_RESULTS,
+                                        );
+                                    }
+                                } else {
+                                    let rows = overlay_rows(&current_results);
+                                    overlay.set_results(&rows, selected_index);
+                                }
+                            }
+                            Err(error) => {
+                                current_results.clear();
+                                selected_index = 0;
+                                search_session.clear();
+                                overlay.set_results(&[], 0);
+                                overlay.set_status_text(&format!("Search error: {error}"));
+                            }
+                        }
+                    }
+                    OverlayEvent::MoveSelection(direction) => {
+                        if current_results.is_empty() {
+                            return;
+                        }
+
+                        selected_index =
+                            next_selection_index(selected_index, current_results.len(), direction);
+                        overlay.set_selected_index(selected_index);
+                    }
+                    OverlayEvent::Submit => {
+                        if current_results.is_empty() {
+                            if overlay.query_text().trim().is_empty() {
+                                set_idle_overlay_state(&overlay);
+                                overlay.show_placeholder_hint(STATUS_ROW_TYPE_TO_SEARCH);
+                            } else if should_show_indexing_status(&background_index_refresh) {
+                                set_status_row_overlay_state(&overlay, STATUS_ROW_INDEXING);
+                            } else {
+                                set_status_row_overlay_state(&overlay, STATUS_ROW_NO_RESULTS);
+                            }
+                            return;
+                        }
+
+                        if let Some(list_selection) = overlay.selected_index() {
+                            selected_index = list_selection.min(current_results.len() - 1);
+                        }
+
+                        match launch_overlay_selection(
+                            &service,
+                            &config,
+                            &plugin_registry,
+                            &current_results,
+                            selected_index,
+                        ) {
+                            Ok(()) => {
+                                overlay.set_status_text("");
+                                overlay.hide_now();
+                                overlay_state.on_escape();
+                                reset_overlay_session(
+                                    &overlay,
+                                    &mut current_results,
+                                    &mut selected_index,
+                                );
+                                last_query.clear();
+                                search_session.clear();
+                            }
+                            Err(error) => {
+                                overlay.set_status_text(&format!("Launch error: {error}"));
+                            }
                         }
                     }
                 }
@@ -1187,6 +1233,104 @@ fn acquire_single_instance_guard() -> Result<Option<SingleInstanceGuard>, String
 #[cfg(target_os = "windows")]
 fn to_wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn start_background_index_refresh(
+    config: &Config,
+    initial_cache_empty: bool,
+) -> BackgroundIndexRefresh {
+    let completed = Arc::new(AtomicBool::new(false));
+    let result = Arc::new(Mutex::new(None));
+    let completed_worker = completed.clone();
+    let result_worker = result.clone();
+    let worker_config = config.clone();
+    std::thread::spawn(move || {
+        let outcome = CoreService::new(worker_config)
+            .map(|service| service.with_runtime_providers())
+            .and_then(|service| service.rebuild_index_incremental_with_report())
+            .map_err(|error| format!("background indexing failed: {error}"));
+        let mut slot = match result_worker.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *slot = Some(outcome);
+        completed_worker.store(true, Ordering::Release);
+    });
+
+    BackgroundIndexRefresh {
+        completed,
+        result,
+        cache_applied: false,
+        initial_cache_empty,
+        started_at: Instant::now(),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn maybe_apply_background_index_refresh(service: &CoreService, state: &mut BackgroundIndexRefresh) {
+    if state.cache_applied {
+        return;
+    }
+    if !state.completed.load(Ordering::Acquire) {
+        return;
+    }
+
+    let outcome = {
+        let mut slot = match state.result.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        slot.take()
+    };
+
+    match outcome {
+        Some(Ok(report)) => {
+            let elapsed_ms = state.started_at.elapsed().as_millis();
+            match service.reload_cache_from_store() {
+                Ok(cached_items) => {
+                    log_info(&format!(
+                        "[swiftfind-core] startup indexed_items={} discovered={} upserted={} removed={} elapsed_ms={} cached_items={}",
+                        report.indexed_total,
+                        report.discovered_total,
+                        report.upserted_total,
+                        report.removed_total,
+                        elapsed_ms,
+                        cached_items
+                    ));
+                    for provider in &report.providers {
+                        log_info(&format!(
+                            "[swiftfind-core] index_provider name={} discovered={} upserted={} removed={} skipped={} elapsed_ms={}",
+                            provider.provider,
+                            provider.discovered,
+                            provider.upserted,
+                            provider.removed,
+                            provider.skipped,
+                            provider.elapsed_ms
+                        ));
+                    }
+                }
+                Err(error) => {
+                    log_warn(&format!(
+                        "[swiftfind-core] background indexing cache refresh failed: {error}"
+                    ));
+                }
+            }
+        }
+        Some(Err(error)) => {
+            log_warn(&format!("[swiftfind-core] {error}"));
+        }
+        None => {
+            log_warn("[swiftfind-core] background indexing completed without result");
+        }
+    }
+
+    state.cache_applied = true;
+}
+
+#[cfg(target_os = "windows")]
+fn should_show_indexing_status(state: &BackgroundIndexRefresh) -> bool {
+    state.initial_cache_empty && !state.cache_applied
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
