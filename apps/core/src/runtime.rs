@@ -164,14 +164,8 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
     }
 
     let config = config::load(None)?;
-    #[cfg(target_os = "windows")]
-    let mut first_run_onboarding = false;
     if !config.config_path.exists() {
         config::write_user_template(&config, &config.config_path)?;
-        #[cfg(target_os = "windows")]
-        {
-            first_run_onboarding = true;
-        }
         log_info(&format!(
             "[swiftfind-core] wrote user config template to {}",
             config.config_path.display()
@@ -274,10 +268,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             }
                             if overlay.query_text().trim().is_empty() {
                                 set_idle_overlay_state(&overlay);
-                                if first_run_onboarding {
-                                    overlay.set_status_text(&onboarding_hint(&config.hotkey));
-                                    first_run_onboarding = false;
-                                }
                             }
                         }
                         HotkeyAction::Hide => {
@@ -299,10 +289,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
                     if overlay.query_text().trim().is_empty() {
                         set_idle_overlay_state(&overlay);
-                        if first_run_onboarding {
-                            overlay.set_status_text(&onboarding_hint(&config.hotkey));
-                            first_run_onboarding = false;
-                        }
                     }
                 }
                 OverlayEvent::ExternalQuit => {
@@ -1363,11 +1349,6 @@ fn execute_plugin_action(
             Ok(())
         }
     }
-}
-
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn onboarding_hint(hotkey: &str) -> String {
-    format!("Welcome to SwiftFind. Hotkey: {hotkey}. If this conflicts, click ? to edit config.")
 }
 
 fn configure_stdio_logging(options: RuntimeOptions) {
