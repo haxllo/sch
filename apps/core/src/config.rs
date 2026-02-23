@@ -66,7 +66,7 @@ impl Default for Config {
             index_db_path: app_dir.join("index.sqlite3"),
             config_path,
             discovery_roots: default_discovery_roots(),
-            discovery_exclude_roots: Vec::new(),
+            discovery_exclude_roots: default_discovery_exclude_roots(),
             hotkey: "Ctrl+Shift+Space".to_string(),
             launch_at_startup: false,
             hotkey_help:
@@ -213,21 +213,8 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         std::fs::create_dir_all(parent)?;
     }
 
-    let roots = if cfg.discovery_roots.is_empty() {
-        String::new()
-    } else {
-        cfg.discovery_roots
-            .iter()
-            .map(|root| format!("    {}", json_string(&root.to_string_lossy())))
-            .collect::<Vec<_>>()
-            .join(",\n")
-    };
-
-    let roots_section = if roots.is_empty() {
-        "[]".to_string()
-    } else {
-        format!("[\n{roots}\n  ]")
-    };
+    let roots_section = json5_path_array_section(&cfg.discovery_roots);
+    let excluded_roots_section = json5_path_array_section(&cfg.discovery_exclude_roots);
 
     let mut text = String::new();
     text.push_str("{\n");
@@ -276,7 +263,9 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str(",\n\n");
     text.push_str("  // Optional: folders to exclude from local-file discovery.\n");
     text.push_str("  // Any file/folder under these roots is ignored.\n");
-    text.push_str("  \"discovery_exclude_roots\": [],\n\n");
+    text.push_str("  \"discovery_exclude_roots\": ");
+    text.push_str(&excluded_roots_section);
+    text.push_str(",\n\n");
 
     text.push_str("  // Search mode default: all | apps | files | actions | clipboard\n");
     text.push_str("  \"search_mode_default\": ");
@@ -469,11 +458,44 @@ fn write_atomic(path: &Path, encoded: &str) -> Result<(), ConfigError> {
     }
 }
 
+fn json5_path_array_section(paths: &[PathBuf]) -> String {
+    let body = paths
+        .iter()
+        .map(|path| format!("    {}", json_string(&path.to_string_lossy())))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    if body.is_empty() {
+        "[]".to_string()
+    } else {
+        format!("[\n{body}\n  ]")
+    }
+}
+
 fn default_discovery_roots() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         if let Some(profile_root) = windows_user_profile_root() {
             return vec![profile_root];
+        }
+    }
+
+    Vec::new()
+}
+
+fn default_discovery_exclude_roots() -> Vec<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile_root) = windows_user_profile_root() {
+            return vec![
+                profile_root.join("AppData").join("Local").join("Temp"),
+                profile_root
+                    .join("AppData")
+                    .join("Local")
+                    .join("Microsoft")
+                    .join("Windows")
+                    .join("INetCache"),
+            ];
         }
     }
 
