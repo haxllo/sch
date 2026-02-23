@@ -2985,6 +2985,7 @@ mod imp {
         }
         if progress >= 1.0 {
             state.results_content_anim_start = None;
+            layout_children(hwnd, state);
             unsafe {
                 InvalidateRect(hwnd, std::ptr::null(), 0);
             }
@@ -3064,7 +3065,10 @@ mod imp {
         let status_len = unsafe { GetWindowTextLengthW(state.status_hwnd) };
         let status_visible = status_len > 0;
         let footer_status_mode = state.results_visible && status_visible && !no_results_inline;
-        let footer_hint_mode = state.results_visible && !footer_status_mode && !no_results_inline;
+        let footer_hint_mode = state.results_visible
+            && state.results_content_anim_start.is_none()
+            && !footer_status_mode
+            && !no_results_inline;
         let mode_strip_visible = false;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
