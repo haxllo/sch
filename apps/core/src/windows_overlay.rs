@@ -160,7 +160,7 @@ mod imp {
     const FONT_HINT_HEIGHT: i32 = -10;
     const FONT_HELP_TIP_HEIGHT: i32 = -11;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
-    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -28;
+    const FONT_COMMAND_PREFIX_HEIGHT: i32 = -34;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -170,19 +170,19 @@ mod imp {
     const FONT_WEIGHT_HINT: i32 = 400;
     const FONT_WEIGHT_HELP_TIP: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
-    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 600;
+    const FONT_WEIGHT_COMMAND_PREFIX: i32 = 400;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
-    const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe UI Variable Text";
+    const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe MDL2 Assets";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
     const INPUT_TEXT_LEFT_INSET: i32 = 19;
     const INPUT_TEXT_RIGHT_INSET: i32 = 10;
-    const COMMAND_PREFIX_TEXT: &str = "›";
-    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 32;
-    const COMMAND_PREFIX_GAP: i32 = 10;
-    const COMMAND_PREFIX_LEFT_SHIFT: i32 = 24;
+    const COMMAND_PREFIX_TEXT: &str = "\u{E76C}";
+    const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 42;
+    const COMMAND_PREFIX_GAP: i32 = 12;
+    const COMMAND_PREFIX_LEFT_SHIFT: i32 = 28;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -2039,9 +2039,13 @@ mod imp {
             return;
         }
 
+        let mut client: RECT = unsafe { std::mem::zeroed() };
+        unsafe {
+            GetClientRect(edit_hwnd, &mut client);
+        }
         let mut prefix_rect = text_rect;
-        prefix_rect.top = text_rect.top;
-        prefix_rect.bottom = text_rect.bottom;
+        prefix_rect.top = client.top;
+        prefix_rect.bottom = client.bottom;
         let reserved = COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP + COMMAND_PREFIX_LEFT_SHIFT;
         prefix_rect.left = (text_rect.left - reserved).max(0);
         prefix_rect.right = (prefix_rect.left + COMMAND_PREFIX_RESERVED_WIDTH)
@@ -2060,7 +2064,7 @@ mod imp {
             };
             let old_font = SelectObject(hdc, prefix_font as _);
             SetBkMode(hdc, TRANSPARENT as i32);
-            SetTextColor(hdc, state.palette.text_hint);
+            SetTextColor(hdc, state.palette.text_primary);
             let prefix = to_wide(COMMAND_PREFIX_TEXT);
             DrawTextW(
                 hdc,
