@@ -125,12 +125,14 @@ mod imp {
     const TIMER_WINDOW_ANIM: usize = 0xBEF1;
     const TIMER_HELP_HOVER: usize = 0xBEF3;
     const TIMER_ICON_CACHE_IDLE: usize = 0xBEF4;
+    const TIMER_RESULTS_CONTENT_FADE: usize = 0xBEF5;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
     const OVERLAY_ALPHA_OPAQUE: u8 = 255;
     // Results panel expand/collapse animation (scroll behavior remains immediate).
     const RESULTS_ANIM_MS: u32 = 110;
+    const RESULTS_CONTENT_FADE_MS: u32 = 120;
     const ANIM_FRAME_MS: u64 = 8;
     const WHEEL_LINES_PER_NOTCH: i32 = 3;
     const MAX_PENDING_WHEEL_DELTA: i32 = 120 * 8;
@@ -291,6 +293,7 @@ mod imp {
         wheel_delta_remainder: i32,
         pending_wheel_delta: i32,
         suppress_next_hover_sync: bool,
+        results_content_anim_start: Option<Instant>,
 
         window_anim: Option<WindowAnimation>,
         rows: Vec<OverlayRow>,
@@ -358,6 +361,7 @@ mod imp {
                 wheel_delta_remainder: 0,
                 pending_wheel_delta: 0,
                 suppress_next_hover_sync: false,
+                results_content_anim_start: None,
                 window_anim: None,
                 rows: Vec::new(),
                 icon_cache: HashMap::new(),
@@ -619,6 +623,10 @@ mod imp {
 
                 if rows.is_empty() {
                     schedule_icon_cache_idle_cleanup(self.hwnd);
+                    state.results_content_anim_start = None;
+                    unsafe {
+                        KillTimer(self.hwnd, TIMER_RESULTS_CONTENT_FADE);
+                    }
                     if state.results_visible && !state.rows.is_empty() {
                         self.collapse_results();
                         return;
@@ -645,6 +653,7 @@ mod imp {
 
                 cancel_icon_cache_idle_cleanup(self.hwnd);
                 let _ = had_rows;
+                let should_animate_content = !had_rows || !state.results_visible;
 
                 state.rows.clear();
                 state.rows.extend_from_slice(rows);
@@ -688,6 +697,22 @@ mod imp {
                 if selected_index == 0 || status_only_row {
                     unsafe {
                         SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
+                    }
+                }
+                if should_animate_content {
+                    state.results_content_anim_start = Some(Instant::now());
+                    unsafe {
+                        SetTimer(
+                            self.hwnd,
+                            TIMER_RESULTS_CONTENT_FADE,
+                            ANIM_FRAME_MS as u32,
+                            None,
+                        );
+                    }
+                } else {
+                    state.results_content_anim_start = None;
+                    unsafe {
+                        KillTimer(self.hwnd, TIMER_RESULTS_CONTENT_FADE);
                     }
                 }
                 unsafe {
@@ -843,12 +868,14 @@ mod imp {
                 state.expanded_rows = 0;
                 state.hover_index = -1;
                 state.suppress_next_hover_sync = false;
+                state.results_content_anim_start = None;
                 unsafe {
                     ShowWindow(state.list_hwnd, SW_HIDE);
                     ShowWindow(state.footer_hint_hwnd, SW_HIDE);
                     ShowWindow(state.mode_strip_hwnd, SW_HIDE);
                     SendMessageW(state.list_hwnd, LB_SETTOPINDEX, 0, 0);
                     SendMessageW(state.list_hwnd, LB_RESETCONTENT, 0, 0);
+                    KillTimer(self.hwnd, TIMER_RESULTS_CONTENT_FADE);
                 }
                 state.rows.clear();
             }
@@ -1464,6 +1491,20 @@ mod imp {
                         }
                     }
                 }
+                if wparam == TIMER_RESULTS_CONTENT_FADE {
+                    if let Some(state) = state_for(hwnd) {
+                        let running = results_content_animation_tick(hwnd, state);
+                        if !running {
+                            unsafe {
+                                KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
+                        }
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -1482,6 +1523,7 @@ mod imp {
                 unsafe {
                     KillTimer(hwnd, TIMER_HELP_HOVER);
                     KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
+                    KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
                 }
                 let state_ptr =
                     unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
@@ -1811,7 +1853,8 @@ mod imp {
                 icon_path: String::new(),
             });
 
-        let offset_y = 0;
+        let content_progress = results_content_progress(state);
+        let offset_y = ((1.0 - content_progress) * 4.0).round() as i32;
         let status_row = matches!(row.role, OverlayRowRole::Status);
         let section_row = matches!(row.role, OverlayRowRole::Header);
         let selected_flag = (dis.itemState & ODS_SELECTED as u32) != 0;
@@ -1831,7 +1874,10 @@ mod imp {
                 };
                 let old_font = SelectObject(dis.hDC, state.header_font as _);
                 SetBkMode(dis.hDC, TRANSPARENT as i32);
-                SetTextColor(dis.hDC, COLOR_TEXT_SECTION);
+                SetTextColor(
+                    dis.hDC,
+                    blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECTION, content_progress),
+                );
                 DrawTextW(
                     dis.hDC,
                     to_wide(&row.title.to_ascii_uppercase()).as_ptr(),
@@ -1858,7 +1904,8 @@ mod imp {
                     ROW_ACTIVE_RADIUS,
                     ROW_ACTIVE_RADIUS,
                 );
-                let fill_brush = CreateSolidBrush(COLOR_ROW_HOVER);
+                let hover_color = blend_color(COLOR_RESULTS_BG, COLOR_ROW_HOVER, content_progress);
+                let fill_brush = CreateSolidBrush(hover_color);
                 FillRgn(dis.hDC, region, fill_brush);
                 DeleteObject(fill_brush as _);
                 DeleteObject(region as _);
@@ -1866,9 +1913,10 @@ mod imp {
 
             let old_font = SelectObject(dis.hDC, state.title_font as _);
             SetBkMode(dis.hDC, TRANSPARENT as i32);
-            let primary_text = COLOR_TEXT_PRIMARY;
-            let secondary_text = COLOR_TEXT_SECONDARY;
-            let highlight_text = COLOR_TEXT_HIGHLIGHT;
+            let primary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_PRIMARY, content_progress);
+            let secondary_text = blend_color(COLOR_RESULTS_BG, COLOR_TEXT_SECONDARY, content_progress);
+            let highlight_text =
+                blend_color(COLOR_RESULTS_BG, COLOR_TEXT_HIGHLIGHT, content_progress);
             SetTextColor(dis.hDC, primary_text);
 
             let has_meta = !row.path.trim().is_empty();
@@ -2930,6 +2978,30 @@ mod imp {
         scroll_list_by_wheel_delta(state, pending);
     }
 
+    fn results_content_animation_tick(hwnd: HWND, state: &mut OverlayShellState) -> bool {
+        let progress = results_content_progress(state);
+        unsafe {
+            InvalidateRect(state.list_hwnd, std::ptr::null(), 0);
+        }
+        if progress >= 1.0 {
+            state.results_content_anim_start = None;
+            unsafe {
+                InvalidateRect(hwnd, std::ptr::null(), 0);
+            }
+            return false;
+        }
+        true
+    }
+
+    fn results_content_progress(state: &OverlayShellState) -> f32 {
+        let Some(start) = state.results_content_anim_start.as_ref() else {
+            return 1.0;
+        };
+        let elapsed_ms = start.elapsed().as_millis() as u32;
+        let t = (elapsed_ms as f32 / RESULTS_CONTENT_FADE_MS as f32).clamp(0.0, 1.0);
+        ease_out(t)
+    }
+
     fn apply_window_state(hwnd: HWND, left: i32, top: i32, width: i32, height: i32, alpha: u8) {
         unsafe {
             SetWindowPos(
@@ -2952,6 +3024,7 @@ mod imp {
             state.help_tip_visible = false;
             state.help_hovered = false;
             state.suppress_next_hover_sync = false;
+            state.results_content_anim_start = None;
             state.placeholder_hint.clear();
             unsafe {
                 ShowWindow(state.help_tip_hwnd, SW_HIDE);
@@ -2961,6 +3034,7 @@ mod imp {
         unsafe {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
+            KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
             SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }
@@ -3829,6 +3903,23 @@ mod imp {
 
     fn lerp_i32(from: i32, to: i32, t: f32) -> i32 {
         (from as f32 + (to - from) as f32 * t).round() as i32
+    }
+
+    fn blend_color(from: u32, to: u32, t: f32) -> u32 {
+        let t = t.clamp(0.0, 1.0);
+        let fr = (from & 0xFF) as f32;
+        let fg = ((from >> 8) & 0xFF) as f32;
+        let fb = ((from >> 16) & 0xFF) as f32;
+
+        let tr = (to & 0xFF) as f32;
+        let tg = ((to >> 8) & 0xFF) as f32;
+        let tb = ((to >> 16) & 0xFF) as f32;
+
+        let r = (fr + (tr - fr) * t).round() as u32;
+        let g = (fg + (tg - fg) * t).round() as u32;
+        let b = (fb + (tb - fb) * t).round() as u32;
+
+        (r & 0xFF) | ((g & 0xFF) << 8) | ((b & 0xFF) << 16)
     }
 
     fn ease_out(t: f32) -> f32 {
