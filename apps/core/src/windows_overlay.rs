@@ -183,6 +183,7 @@ mod imp {
     const COMMAND_PREFIX_RESERVED_WIDTH: i32 = 34;
     const COMMAND_PREFIX_GAP: i32 = 12;
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 20;
+    const COMMAND_PREFIX_INPUT_PAD: i32 = 16;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -3715,7 +3716,7 @@ mod imp {
         let max_top = (height - line_height).max(0);
         let top = centered_top.clamp(0, max_top);
         let prefix_left_pad = if command_mode_input {
-            COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP
+            COMMAND_PREFIX_INPUT_PAD
         } else {
             0
         };
