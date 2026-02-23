@@ -547,11 +547,7 @@ mod imp {
                 let wide = to_wide(&resolved);
                 unsafe {
                     SetWindowTextW(state.mode_strip_hwnd, wide.as_ptr());
-                    InvalidateRect(state.mode_strip_hwnd, std::ptr::null(), 1);
-                }
-                layout_children(self.hwnd, state);
-                unsafe {
-                    InvalidateRect(self.hwnd, std::ptr::null(), 1);
+                    ShowWindow(state.mode_strip_hwnd, SW_HIDE);
                 }
             }
         }
@@ -839,8 +835,7 @@ mod imp {
         fn expand_results(&self, visible_row_count: usize) {
             let rows = visible_row_count.max(1) as i32;
             let animate = RESULTS_ANIM_MS;
-            let list_top =
-                COMPACT_HEIGHT + INPUT_TO_LIST_GAP + MODE_STRIP_HEIGHT + MODE_STRIP_TO_LIST_GAP;
+            let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
             // Keep enough vertical space for list rows plus bottom breathing room.
             // This must mirror layout_children() non-inline list bottom reserve.
             let list_bottom_reserve = PANEL_MARGIN_X + FOOTER_HINT_HEIGHT + 4;
@@ -2878,7 +2873,7 @@ mod imp {
         let status_visible = status_len > 0;
         let footer_status_mode = state.results_visible && status_visible && !no_results_inline;
         let footer_hint_mode = state.results_visible && !footer_status_mode && !no_results_inline;
-        let mode_strip_visible = state.results_visible && !no_results_inline;
+        let mode_strip_visible = false;
         // Keep input exactly centered in compact mode and stable across states.
         let input_top = INPUT_TOP.max(0);
         let status_top = if footer_status_mode {
@@ -2891,13 +2886,7 @@ mod imp {
         let status_height = STATUS_HEIGHT;
 
         let mode_strip_top = COMPACT_HEIGHT + DIVIDER_TOP_SPACING + 1;
-        let list_top = COMPACT_HEIGHT
-            + INPUT_TO_LIST_GAP
-            + if mode_strip_visible {
-                MODE_STRIP_HEIGHT + MODE_STRIP_TO_LIST_GAP
-            } else {
-                0
-            };
+        let list_top = COMPACT_HEIGHT + INPUT_TO_LIST_GAP;
         let list_left = PANEL_MARGIN_X + 1;
         let list_width = (input_width - 2).max(0);
         let list_bottom_reserved = if footer_status_mode {
