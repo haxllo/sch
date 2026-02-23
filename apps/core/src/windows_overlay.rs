@@ -173,7 +173,7 @@ mod imp {
     const FONT_WEIGHT_COMMAND_PREFIX: i32 = 800;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
-    const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe MDL2 Assets";
+    const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe Fluent Icons";
     const INPUT_TEXT_SHIFT_X: i32 = 10;
     const INPUT_TEXT_SHIFT_Y: i32 = 0;
     const INPUT_TEXT_LINE_HEIGHT_FALLBACK: i32 = 20;
