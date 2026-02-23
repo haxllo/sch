@@ -16,13 +16,13 @@ mod imp {
         DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
     };
     use windows_sys::Win32::Graphics::Gdi::{
-        AddFontResourceExW, BeginPaint, CreateFontW, CreateRoundRectRgn, CreateSolidBrush,
-        DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
-        GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
-        SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
-        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
-        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
-        TEXTMETRICW, TRANSPARENT,
+        AddFontResourceExW, BeginPaint, CreateFontW, CreatePen, CreateRoundRectRgn,
+        CreateSolidBrush, DeleteObject, DrawTextW, Ellipse, EndPaint, FillRect, FillRgn, FrameRgn,
+        GetDC, GetStockObject, GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, LineTo,
+        MoveToEx, Rectangle, ReleaseDC, SelectObject, SetBkColor, SetBkMode, SetTextColor,
+        SetWindowRgn, TextOutW, DEFAULT_CHARSET, DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL,
+        DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC,
+        NULL_BRUSH, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT, PS_SOLID, TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -2096,15 +2096,19 @@ mod imp {
                 let icon_drawn = draw_row_icon(dis.hDC, &icon_rect, &row, state);
                 if !icon_drawn {
                     FillRect(dis.hDC, &icon_rect, state.icon_brush as _);
-                    let mut icon_text_rect = icon_rect;
-                    SetTextColor(dis.hDC, palette.icon_text);
-                    DrawTextW(
-                        dis.hDC,
-                        to_wide(icon_glyph_for_row(&row)).as_ptr(),
-                        -1,
-                        &mut icon_text_rect,
-                        DT_CENTER | DT_SINGLELINE | DT_VCENTER,
-                    );
+                    let icon_tint =
+                        blend_color(palette.results_bg, palette.icon_text, content_progress);
+                    if !draw_action_icon(dis.hDC, &icon_rect, &row, icon_tint) {
+                        let mut icon_text_rect = icon_rect;
+                        SetTextColor(dis.hDC, icon_tint);
+                        DrawTextW(
+                            dis.hDC,
+                            to_wide(icon_glyph_for_row(&row)).as_ptr(),
+                            -1,
+                            &mut icon_text_rect,
+                            DT_CENTER | DT_SINGLELINE | DT_VCENTER,
+                        );
+                    }
                 }
                 SetTextColor(dis.hDC, primary_text);
                 icon_rect.right + ROW_ICON_GAP
@@ -2473,6 +2477,129 @@ mod imp {
         } else {
             ">"
         }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum ActionIconKind {
+        WebSearch,
+        Clipboard,
+        Settings,
+        Diagnostics,
+        Logs,
+        Rebuild,
+        Generic,
+    }
+
+    fn action_icon_kind_for_title(title: &str) -> ActionIconKind {
+        let lower = title.to_ascii_lowercase();
+        if lower.contains("web") || lower.contains("search") {
+            ActionIconKind::WebSearch
+        } else if lower.contains("clipboard") {
+            ActionIconKind::Clipboard
+        } else if lower.contains("config") || lower.contains("setting") || lower.contains("prefer")
+        {
+            ActionIconKind::Settings
+        } else if lower.contains("diagnostic")
+            || lower.contains("bundle")
+            || lower.contains("support")
+        {
+            ActionIconKind::Diagnostics
+        } else if lower.contains("log") {
+            ActionIconKind::Logs
+        } else if lower.contains("rebuild") || lower.contains("index") || lower.contains("refresh")
+        {
+            ActionIconKind::Rebuild
+        } else {
+            ActionIconKind::Generic
+        }
+    }
+
+    fn draw_icon_line(hdc: HDC, from_x: i32, from_y: i32, to_x: i32, to_y: i32) {
+        unsafe {
+            MoveToEx(hdc, from_x, from_y, std::ptr::null_mut());
+            LineTo(hdc, to_x, to_y);
+        }
+    }
+
+    fn draw_action_icon(hdc: HDC, icon_rect: &RECT, row: &OverlayRow, color: u32) -> bool {
+        if !row.kind.eq_ignore_ascii_case("action") {
+            return false;
+        }
+        let kind = action_icon_kind_for_title(&row.title);
+        unsafe {
+            let pen = CreatePen(PS_SOLID, 2, color);
+            if pen == 0 {
+                return false;
+            }
+            let old_pen = SelectObject(hdc, pen as _);
+            let old_brush = SelectObject(hdc, GetStockObject(NULL_BRUSH));
+
+            let left = icon_rect.left + 7;
+            let right = icon_rect.right - 7;
+            let top = icon_rect.top + 7;
+            let bottom = icon_rect.bottom - 7;
+            let center_x = (left + right) / 2;
+            let center_y = (top + bottom) / 2;
+
+            match kind {
+                ActionIconKind::WebSearch => {
+                    Ellipse(hdc, left, top, center_x + 3, center_y + 3);
+                    draw_icon_line(hdc, center_x + 1, center_y + 1, right, bottom);
+                }
+                ActionIconKind::Clipboard => {
+                    Rectangle(hdc, left + 2, top + 2, right, bottom);
+                    draw_icon_line(hdc, left + 6, top, right - 6, top);
+                    draw_icon_line(hdc, left + 6, top, left + 6, top + 2);
+                    draw_icon_line(hdc, right - 6, top, right - 6, top + 2);
+                    draw_icon_line(hdc, left + 6, center_y, right - 4, center_y);
+                    draw_icon_line(hdc, left + 6, center_y + 4, right - 7, center_y + 4);
+                }
+                ActionIconKind::Settings => {
+                    draw_icon_line(hdc, left, top + 2, right, top + 2);
+                    draw_icon_line(hdc, left, center_y, right, center_y);
+                    draw_icon_line(hdc, left, bottom - 2, right, bottom - 2);
+                    Ellipse(hdc, left + 3, top, left + 9, top + 6);
+                    Ellipse(hdc, center_x + 1, center_y - 3, center_x + 7, center_y + 3);
+                    Ellipse(hdc, right - 9, bottom - 5, right - 3, bottom + 1);
+                }
+                ActionIconKind::Diagnostics => {
+                    Rectangle(hdc, left + 1, top + 1, right, bottom);
+                    draw_icon_line(hdc, left + 3, center_y, left + 6, center_y);
+                    draw_icon_line(hdc, left + 6, center_y, left + 8, center_y + 3);
+                    draw_icon_line(hdc, left + 8, center_y + 3, left + 10, center_y - 4);
+                    draw_icon_line(hdc, left + 10, center_y - 4, left + 13, center_y + 4);
+                    draw_icon_line(hdc, left + 13, center_y + 4, left + 16, center_y);
+                    draw_icon_line(hdc, left + 16, center_y, right - 3, center_y);
+                }
+                ActionIconKind::Logs => {
+                    Rectangle(hdc, left + 2, top + 1, right - 1, bottom);
+                    draw_icon_line(hdc, right - 7, top + 1, right - 1, top + 7);
+                    draw_icon_line(hdc, right - 7, top + 1, right - 7, top + 7);
+                    draw_icon_line(hdc, right - 7, top + 7, right - 1, top + 7);
+                    draw_icon_line(hdc, left + 5, center_y - 1, right - 9, center_y - 1);
+                    draw_icon_line(hdc, left + 5, center_y + 3, right - 11, center_y + 3);
+                }
+                ActionIconKind::Rebuild => {
+                    draw_icon_line(hdc, left + 2, top + 3, right - 6, top + 3);
+                    draw_icon_line(hdc, right - 6, top + 3, right - 9, top + 1);
+                    draw_icon_line(hdc, right - 6, top + 3, right - 9, top + 5);
+                    draw_icon_line(hdc, right - 2, bottom - 3, left + 6, bottom - 3);
+                    draw_icon_line(hdc, left + 6, bottom - 3, left + 9, bottom - 1);
+                    draw_icon_line(hdc, left + 6, bottom - 3, left + 9, bottom - 5);
+                    draw_icon_line(hdc, right - 2, top + 3, right - 2, center_y);
+                    draw_icon_line(hdc, left + 2, bottom - 3, left + 2, center_y);
+                }
+                ActionIconKind::Generic => {
+                    draw_icon_line(hdc, left + 4, top + 2, right - 5, center_y);
+                    draw_icon_line(hdc, left + 4, bottom - 2, right - 5, center_y);
+                }
+            }
+
+            SelectObject(hdc, old_pen);
+            SelectObject(hdc, old_brush);
+            DeleteObject(pen as _);
+        }
+        true
     }
 
     fn draw_row_icon(
