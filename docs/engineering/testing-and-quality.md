@@ -43,7 +43,7 @@
 
 ## MVP Smoke and Performance Baseline
 
-- UI flow smoke test added: `tests/e2e/hotkey-search-launch.spec.ts`
+- Repository scaffold smoke test added: `tests/smoke/scaffold.test.ts`
 - Perf latency test added: `tests/perf/query_latency_test.rs`
 - Rust integration entrypoint for perf test: `apps/core/tests/perf_query_latency_test.rs`
 - Warm query p95 is measured at test runtime against a 10k-item warm dataset and must stay `<= 15ms`

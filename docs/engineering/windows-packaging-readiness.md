@@ -46,6 +46,8 @@ Expected outputs:
 
 ## Included Payload
 
+Paths below are inside the staged artifact layout:
+
 - `bin/swiftfind-core.exe`
 - `assets/swiftfinder.svg`
 - `docs/windows-runtime-validation-checklist.md`

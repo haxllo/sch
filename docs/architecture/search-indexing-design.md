@@ -73,7 +73,7 @@ Tie-breaking:
 - Query parsing and normalization: <= 1ms
 - Candidate retrieval from in-memory index: <= 5ms
 - Fuzzy scoring and ranking top N: <= 7ms
-- IPC serialization and response: <= 2ms
+- In-process overlay result projection and dispatch: <= 2ms
 
 Target P95 end-to-end warm query: <= 15ms
 

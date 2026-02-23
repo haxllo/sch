@@ -15,7 +15,7 @@ The product requires:
 
 Original decision:
 - Rust for the core service (`swiftfind-core`)
-- Tauri with React and TypeScript for UI (`swiftfind-ui`)
+- Legacy UI choice at that time: Tauri with React and TypeScript (`swiftfind-ui`, now removed)
 - SQLite for local cache and metadata persistence
 - Two-process model (always-on core + on-demand UI process)
 
@@ -43,6 +43,4 @@ Negative:
 
 ## Follow-up ADRs
 
-- `ADR-002`: IPC protocol and versioning strategy
-- `ADR-003`: Index storage schema and migration approach
-- `ADR-004`: Plugin or extension model boundaries
+No additional ADR files are maintained in this repository today.

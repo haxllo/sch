@@ -38,7 +38,8 @@ Decisions:
 - `docs/decisions/ADR-001-core-stack.md`: initial architecture decision record
 
 Plan:
-- `docs/plans/2026-02-11-windows-fuzzy-finder-mvp.md`: detailed implementation sequence
+- `docs/engineering/master-phase-task-tracker.md`: active source of truth for completed and pending work
+- `docs/plans/2026-02-13-flow-launcher-parity-plan.md`: focused historical plan for launcher parity milestones
 
 ## Recommended Reading Order
 
@@ -46,4 +47,4 @@ Plan:
 2. `docs/product/requirements.md`
 3. `docs/architecture/system-architecture.md`
 4. `docs/architecture/search-indexing-design.md`
-5. `docs/plans/2026-02-11-windows-fuzzy-finder-mvp.md`
+5. `docs/engineering/master-phase-task-tracker.md`

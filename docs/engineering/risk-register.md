@@ -39,6 +39,6 @@
 - Impact: memory budget misses
 - Likelihood: medium
 - Mitigation:
-- Keep UI process idle/offscreen when not active
-- Shift ranking and indexing to core service
-- Profile memory early in Phase 1
+- Keep overlay icon/image caches bounded and aggressively trim on hide
+- Keep ranking and indexing in the core runtime hot path
+- Profile active and idle memory envelopes continuously

@@ -8,8 +8,8 @@ Apply these standards in all follow-up work:
 2. Do not hardcode performance values in tests.
 - Perf tests must measure runtime and assert budget.
 
-3. Avoid jsdom-specific attribute hacks.
-- Test behavior (`toHaveFocus`) instead of forcing DOM attributes in component code.
+3. Avoid test-environment-specific attribute hacks.
+- Test behavior directly instead of forcing implementation-specific attributes.
 
 4. Keep smoke tests meaningful.
 - Smoke tests should assert rendered UI state or behavior, not placeholder string checks.

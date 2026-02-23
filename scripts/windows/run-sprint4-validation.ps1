@@ -1,5 +1,5 @@
 param(
-  [switch]$SkipUi = $false,
+  [switch]$SkipSmoke = $false,
   [switch]$SkipRust = $false
 )
 
@@ -13,7 +13,7 @@ if (-not $SkipRust) {
   cargo test -p swiftfind-core --test windows_runtime_smoke_test -- --exact windows_runtime_smoke_registers_hotkey_and_transport_roundtrip
 }
 
-if (-not $SkipUi) {
+if (-not $SkipSmoke) {
   Write-Host '[2/3] Running repository smoke tests...' -ForegroundColor Yellow
   ./node_modules/.bin/vitest --run tests/smoke/scaffold.test.ts
 }
