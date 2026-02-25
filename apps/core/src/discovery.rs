@@ -491,6 +491,9 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| path.to_string_lossy().to_string());
+        if is_documentation_like_start_entry_title(&title) {
+            continue;
+        }
         let id = format!("app:{}", path.to_string_lossy());
 
         items.push(SearchItem::new(&id, "app", &title, &path.to_string_lossy()));
@@ -558,6 +561,9 @@ Get-StartApps | ForEach-Object {
         if title.is_empty() || app_id.is_empty() {
             continue;
         }
+        if is_documentation_like_start_entry_title(title) {
+            continue;
+        }
 
         let path = format!("shell:AppsFolder\\{app_id}");
         let id = format!("app:{}", normalize_id_path(&path));
@@ -614,18 +620,37 @@ fn normalize_id_path(path: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn shortcut_has_launch_target(shortcut_path: &Path) -> bool {
-    use windows_sys::Win32::UI::Shell::FindExecutableW;
+    use windows_sys::Win32::UI::Shell::HlinkResolveShortcutToString;
 
     let wide_shortcut = to_wide(shortcut_path.to_string_lossy().as_ref());
-    let mut executable_out = vec![0u16; 260];
-    let result = unsafe {
-        FindExecutableW(
-            wide_shortcut.as_ptr(),
-            std::ptr::null(),
-            executable_out.as_mut_ptr(),
-        )
-    };
-    (result as isize) > 32
+    let mut target: windows_sys::core::PWSTR = std::ptr::null_mut();
+    let mut location: windows_sys::core::PWSTR = std::ptr::null_mut();
+
+    let hr =
+        unsafe { HlinkResolveShortcutToString(wide_shortcut.as_ptr(), &mut target, &mut location) };
+    if hr < 0 {
+        return false;
+    }
+
+    let resolved_target = pwstr_to_string_and_free(target);
+    let resolved_location = pwstr_to_string_and_free(location);
+
+    if shortcut_resolves_to_web_target(&resolved_target)
+        || shortcut_resolves_to_web_target(&resolved_location)
+    {
+        return false;
+    }
+
+    let resolved_target = normalize_shortcut_target_path(resolved_target.as_str());
+    if resolved_target.is_empty() {
+        return false;
+    }
+
+    if looks_like_filesystem_path(resolved_target.as_str()) {
+        return Path::new(resolved_target.as_str()).exists();
+    }
+
+    true
 }
 
 #[cfg(target_os = "windows")]
@@ -793,4 +818,74 @@ fn join_windows_paths_for_powershell(paths: &[PathBuf]) -> String {
 #[cfg(target_os = "windows")]
 fn to_wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn pwstr_to_string_and_free(ptr: windows_sys::core::PWSTR) -> String {
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+
+    if ptr.is_null() {
+        return String::new();
+    }
+
+    let mut len = 0usize;
+    unsafe {
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(ptr, len);
+        let out = String::from_utf16_lossy(slice);
+        CoTaskMemFree(ptr as _);
+        out
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn shortcut_resolves_to_web_target(raw: &str) -> bool {
+    let lowered = raw.trim().trim_matches('"').to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    lowered.starts_with("http://")
+        || lowered.starts_with("https://")
+        || lowered.starts_with("microsoft-edge:")
+        || lowered.starts_with("msedge:")
+        || lowered.starts_with("www.")
+        || lowered.contains("://")
+}
+
+#[cfg(target_os = "windows")]
+fn normalize_shortcut_target_path(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('"')
+        .trim_start_matches('@')
+        .trim()
+        .to_string()
+}
+
+#[cfg(target_os = "windows")]
+fn looks_like_filesystem_path(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with('\\') {
+        return true;
+    }
+    let bytes = path.as_bytes();
+    bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
+#[cfg(target_os = "windows")]
+fn is_documentation_like_start_entry_title(title: &str) -> bool {
+    let lower = title.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+
+    let has_docs = lower.contains("documentation") || lower.contains(" docs");
+    let has_sample = lower.contains("sample");
+    let has_app_word = lower.contains(" app") || lower.contains("apps");
+    let has_platform = lower.contains("uwp")
+        || lower.contains("desktop")
+        || lower.contains("winui")
+        || lower.contains("windows sdk");
+
+    (has_docs && has_app_word) || (has_sample && (has_app_word || has_platform))
 }
