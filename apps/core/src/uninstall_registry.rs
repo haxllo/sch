@@ -40,6 +40,10 @@ pub fn search_uninstall_actions(query: &str, limit: usize) -> Vec<SearchItem> {
     search_uninstall_actions_with_entries(search_term.as_str(), limit, &entries)
 }
 
+pub fn has_uninstall_intent(query: &str) -> bool {
+    extract_uninstall_search_term(query).is_some()
+}
+
 pub fn execute_uninstall_action(action_id: &str) -> Result<(), String> {
     let token = action_id
         .strip_prefix(ACTION_UNINSTALL_PREFIX)
@@ -149,7 +153,7 @@ fn extract_uninstall_search_term(query: &str) -> Option<String> {
     let first = parts.next()?.to_ascii_lowercase();
     if !matches!(
         first.as_str(),
-        "uninstall" | "remove" | "delete" | "del" | "rm"
+        "uninstall" | "remove" | "delete" | "del" | "rm" | "u"
     ) {
         return None;
     }
@@ -676,6 +680,10 @@ mod tests {
         assert_eq!(
             extract_uninstall_search_term("remove VLC"),
             Some("VLC".to_string())
+        );
+        assert_eq!(
+            extract_uninstall_search_term("u Notepad"),
+            Some("Notepad".to_string())
         );
         assert_eq!(extract_uninstall_search_term("delete"), Some(String::new()));
     }

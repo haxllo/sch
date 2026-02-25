@@ -40,6 +40,8 @@ const INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT: usize = 480;
 const QUERY_PROFILE_STATUS_SAMPLE_WINDOW: usize = 400;
 const FINAL_QUERY_CACHE_MAX_ENTRIES: usize = 32;
 const ADAPTIVE_INDEXED_LATENCY_WINDOW: usize = 24;
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+const UNINSTALL_QUERY_RESULT_LIMIT: usize = 160;
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Default)]
@@ -405,6 +407,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         }
                     }
                     OverlayEvent::QueryChanged(query) => {
+                        let mut query = query;
+                        if let Some(expanded) = maybe_expand_uninstall_quick_shortcut(&query) {
+                            overlay.set_query_text(&expanded);
+                            query = expanded;
+                        }
+
                         let trimmed = query.trim();
                         pending_uninstall_action_id = None;
                         if trimmed.is_empty() {
@@ -420,13 +428,14 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         }
                         last_query = trimmed.to_string();
                         let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
+                        let query_result_limit = result_limit_for_query(max_results, &parsed_query);
 
                         match search_overlay_results_with_session(
                             &service,
                             &config,
                             &plugin_registry,
                             &parsed_query,
-                            max_results,
+                            query_result_limit,
                             &mut search_session,
                         ) {
                             Ok(mut results) => {
@@ -2007,6 +2016,29 @@ fn should_skip_non_searchable_query(parsed_query: &ParsedQuery, normalized_query
         && parsed_query.created_within.is_none()
 }
 
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+fn result_limit_for_query(base_limit: usize, parsed_query: &ParsedQuery) -> usize {
+    if base_limit == 0 {
+        return 0;
+    }
+    if parsed_query.command_mode
+        && crate::uninstall_registry::has_uninstall_intent(parsed_query.free_text.as_str())
+    {
+        return base_limit.max(UNINSTALL_QUERY_RESULT_LIMIT);
+    }
+    base_limit
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn maybe_expand_uninstall_quick_shortcut(query: &str) -> Option<String> {
+    let raw = query.trim_start();
+    let remainder = raw.strip_prefix('>')?;
+    if remainder.eq_ignore_ascii_case("u") {
+        return Some(">u ".to_string());
+    }
+    None
+}
+
 fn candidate_limit_for_query(
     result_limit: usize,
     filter: &SearchFilter,
@@ -2407,10 +2439,11 @@ mod tests {
     use super::{
         adaptive_indexed_seed_limit, can_use_indexed_prefix_cache, candidate_limit_for_query,
         dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
-        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, search_overlay_results,
-        search_overlay_results_with_session, should_skip_non_searchable_query,
-        summarize_query_profiles, IndexedPrefixCache, OverlaySearchSession, RuntimeCommand,
-        RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
+        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, result_limit_for_query,
+        search_overlay_results, search_overlay_results_with_session,
+        should_skip_non_searchable_query, summarize_query_profiles, IndexedPrefixCache,
+        OverlaySearchSession, RuntimeCommand, RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT,
+        INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT, UNINSTALL_QUERY_RESULT_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2569,6 +2602,17 @@ mod tests {
         };
         let short_actions = candidate_limit_for_query(20, &actions, "v", true);
         assert!(short_actions < long_all);
+    }
+
+    #[test]
+    fn uninstall_queries_use_expanded_result_limit() {
+        let parsed = ParsedQuery::parse(">uninstall", true);
+        let limit = result_limit_for_query(20, &parsed);
+        assert_eq!(limit, UNINSTALL_QUERY_RESULT_LIMIT);
+
+        let non_uninstall = ParsedQuery::parse(">web rust", true);
+        let non_limit = result_limit_for_query(20, &non_uninstall);
+        assert_eq!(non_limit, 20);
     }
 
     #[test]

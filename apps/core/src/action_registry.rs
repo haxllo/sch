@@ -1,6 +1,6 @@
 use crate::config::{Config, WebSearchProvider};
 use crate::model::{normalize_for_search, SearchItem};
-use crate::uninstall_registry::search_uninstall_actions;
+use crate::uninstall_registry::{has_uninstall_intent, search_uninstall_actions};
 
 pub const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
 pub const ACTION_REBUILD_INDEX_ID: &str = "__swiftfind_action_rebuild_index__";
@@ -68,12 +68,15 @@ pub fn search_actions_with_mode(
     let trimmed_query = query.trim();
     let normalized = normalize_for_search(trimmed_query);
     let mut out = Vec::new();
+    let uninstall_intent = cfg.uninstall_actions_enabled && has_uninstall_intent(trimmed_query);
 
     if command_mode {
-        if let Some(web_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
-            out.push(web_action);
-            if out.len() >= limit {
-                return out;
+        if !uninstall_intent {
+            if let Some(web_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
+                out.push(web_action);
+                if out.len() >= limit {
+                    return out;
+                }
             }
         }
 
@@ -207,5 +210,14 @@ mod tests {
             .find(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX))
             .expect("provider web action should exist");
         assert!(provider.path.contains("google.com/search?q="));
+    }
+
+    #[test]
+    fn uninstall_intent_hides_web_action() {
+        let cfg = Config::default();
+        let actions = search_actions_with_mode("u notepad", 20, true, &cfg);
+        assert!(!actions
+            .iter()
+            .any(|action| action.id.starts_with(ACTION_WEB_SEARCH_PREFIX)));
     }
 }

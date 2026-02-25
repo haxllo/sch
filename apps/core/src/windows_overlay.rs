@@ -640,6 +640,31 @@ mod imp {
             text
         }
 
+        pub fn set_query_text(&self, query: &str) {
+            let Some(state) = state_for(self.hwnd) else {
+                return;
+            };
+
+            let raw = query;
+            let (command_mode, edit_text) = if let Some(rest) = raw.strip_prefix('>') {
+                (true, rest.to_string())
+            } else {
+                (false, raw.to_string())
+            };
+
+            state.command_mode_input = command_mode;
+            unsafe {
+                SetWindowTextW(state.edit_hwnd, to_wide(&edit_text).as_ptr());
+            }
+            apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+
+            let caret = edit_text.encode_utf16().count() as isize;
+            unsafe {
+                SendMessageW(state.edit_hwnd, EM_SETSEL, caret as usize, caret);
+                InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+            }
+        }
+
         pub fn set_status_text(&self, message: &str) {
             if let Some(state) = state_for(self.hwnd) {
                 let trimmed = message.trim();
