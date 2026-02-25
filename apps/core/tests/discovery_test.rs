@@ -175,6 +175,49 @@ fn runtime_providers_respect_show_files_and_folders_toggles() {
 }
 
 #[test]
+fn runtime_providers_prune_existing_file_entries_when_disabled() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("swiftfind-runtime-prune-roots-{unique}"));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut config = swiftfind_core::config::Config::default();
+    config.discovery_roots = vec![root.clone()];
+    config.discovery_exclude_roots = vec![];
+    config.show_files = false;
+    config.show_folders = false;
+
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db)
+        .unwrap()
+        .with_runtime_providers();
+
+    let stale_path = root.join("StaleDoc.txt");
+    std::fs::write(&stale_path, b"stale").unwrap();
+
+    service
+        .upsert_item(&swiftfind_core::model::SearchItem::new(
+            "file:stale-doc",
+            "file",
+            "StaleDoc.txt",
+            stale_path.to_string_lossy().as_ref(),
+        ))
+        .unwrap();
+
+    let before = service.search("staledoc", 10).unwrap();
+    assert!(!before.is_empty());
+
+    let _ = service.rebuild_index().unwrap();
+    let after = service.search("staledoc", 10).unwrap();
+    assert!(after.is_empty());
+
+    std::fs::remove_file(&stale_path).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn file_system_provider_excludes_configured_roots() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

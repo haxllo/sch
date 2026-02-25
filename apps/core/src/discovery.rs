@@ -483,6 +483,9 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
         if ext != "lnk" && ext != "exe" {
             continue;
         }
+        if ext == "lnk" && !shortcut_has_launch_target(path) {
+            continue;
+        }
 
         let title = path
             .file_stem()
@@ -607,6 +610,22 @@ fn app_quality_rank(item: &SearchItem) -> u8 {
 #[cfg(target_os = "windows")]
 fn normalize_id_path(path: &str) -> String {
     path.trim().replace('/', "\\").to_ascii_lowercase()
+}
+
+#[cfg(target_os = "windows")]
+fn shortcut_has_launch_target(shortcut_path: &Path) -> bool {
+    use windows_sys::Win32::UI::Shell::FindExecutableW;
+
+    let wide_shortcut = to_wide(shortcut_path.to_string_lossy().as_ref());
+    let mut executable_out = vec![0u16; 260];
+    let result = unsafe {
+        FindExecutableW(
+            wide_shortcut.as_ptr(),
+            std::ptr::null(),
+            executable_out.as_mut_ptr(),
+        )
+    };
+    (result as isize) > 32
 }
 
 #[cfg(target_os = "windows")]
@@ -769,4 +788,9 @@ fn join_windows_paths_for_powershell(paths: &[PathBuf]) -> String {
         }
     }
     out.join("\u{1f}")
+}
+
+#[cfg(target_os = "windows")]
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
 }
