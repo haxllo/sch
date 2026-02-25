@@ -14,6 +14,7 @@ struct UninstallEntry {
     display_name: String,
     publisher: String,
     uninstall_command: String,
+    fallback_uninstall_command: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -207,10 +208,21 @@ fn load_entries() -> Result<Vec<UninstallEntry>, String> {
 
 #[cfg(target_os = "windows")]
 fn execute_entry(entry: &UninstallEntry) -> Result<(), String> {
-    launch_uninstall_command(
-        entry.display_name.as_str(),
-        entry.uninstall_command.as_str(),
-    )
+    match launch_uninstall_command(entry.display_name.as_str(), entry.uninstall_command.as_str()) {
+        Ok(()) => Ok(()),
+        Err(primary_error) => {
+            if let Some(fallback_command) = entry.fallback_uninstall_command.as_deref() {
+                match launch_uninstall_command(entry.display_name.as_str(), fallback_command) {
+                    Ok(()) => Ok(()),
+                    Err(fallback_error) => Err(format!(
+                        "{primary_error}; fallback_error={fallback_error}"
+                    )),
+                }
+            } else {
+                Err(primary_error)
+            }
+        }
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -237,10 +249,11 @@ fn load_entries_windows() -> Result<Vec<UninstallEntry>, String> {
     let mut seen = HashSet::new();
     entries.retain(|entry| {
         let key = format!(
-            "{}|{}|{}",
+            "{}|{}|{}|{}",
             normalize_for_search(entry.display_name.as_str()),
             normalize_for_search(entry.publisher.as_str()),
             normalize_for_search(entry.uninstall_command.as_str()),
+            normalize_for_search(entry.fallback_uninstall_command.as_deref().unwrap_or_default()),
         );
         seen.insert(key)
     });
@@ -397,8 +410,12 @@ fn read_uninstall_entry(
     let Some(display_name) = display_name else {
         return Ok(None);
     };
-    let uninstall_command = quiet_uninstall.or(uninstall).unwrap_or_default();
-    if display_name.trim().is_empty() || uninstall_command.trim().is_empty() {
+    let uninstall_candidates = dedupe_uninstall_candidates(quiet_uninstall, uninstall);
+    let mut usable_commands = uninstall_candidates
+        .into_iter()
+        .filter(|candidate| is_uninstall_command_usable(candidate.as_str()))
+        .collect::<Vec<_>>();
+    if display_name.trim().is_empty() || usable_commands.is_empty() {
         return Ok(None);
     }
     if system_component == 1 {
@@ -411,11 +428,15 @@ fn read_uninstall_entry(
         return Ok(None);
     }
 
+    let uninstall_command = usable_commands.remove(0);
+    let fallback_uninstall_command = usable_commands.into_iter().next();
+
     Ok(Some(UninstallEntry {
         token: format!("{hive_label}:{subkey_name}"),
         display_name: display_name.trim().to_string(),
         publisher: publisher.trim().to_string(),
         uninstall_command: uninstall_command.trim().to_string(),
+        fallback_uninstall_command,
     }))
 }
 
@@ -523,6 +544,50 @@ fn looks_like_update_entry(display_name: &str, release_type: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
+fn dedupe_uninstall_candidates(
+    quiet_uninstall: Option<String>,
+    uninstall: Option<String>,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    for candidate in [quiet_uninstall, uninstall].into_iter().flatten() {
+        let trimmed = candidate.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if out
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(trimmed))
+        {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    out
+}
+
+#[cfg(target_os = "windows")]
+fn is_uninstall_command_usable(command: &str) -> bool {
+    let Ok((program_raw, _)) = split_uninstall_command(command) else {
+        return false;
+    };
+    let program = expand_environment_strings(program_raw.as_str());
+    let trimmed = program.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let has_path_hint = trimmed.contains('\\')
+        || trimmed.contains('/')
+        || trimmed.contains(':')
+        || trimmed.starts_with('.');
+    if !has_path_hint {
+        return true;
+    }
+
+    std::path::Path::new(trimmed).exists()
+}
+
+#[cfg(target_os = "windows")]
 fn launch_uninstall_command(display_name: &str, command: &str) -> Result<(), String> {
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
@@ -557,10 +622,24 @@ fn launch_uninstall_command(display_name: &str, command: &str) -> Result<(), Str
         return Ok(());
     }
 
+    let shell_hint = match result {
+        0 => "out_of_memory_or_resources",
+        2 => "file_not_found",
+        3 => "path_not_found",
+        5 => "access_denied",
+        8 => "out_of_memory",
+        26 => "sharing_violation",
+        27 => "association_incomplete",
+        28 => "dde_timeout",
+        29 => "dde_failed",
+        30 => "dde_busy",
+        31 => "no_association",
+        _ => "unknown_shell_error",
+    };
     let fallback_err = launch_uninstall_via_cmd(command).err().unwrap_or_default();
     Err(format!(
-        "failed to launch uninstall command for '{}' (shell_code={result}); fallback={fallback_err}",
-        display_name
+        "failed to launch uninstall command for '{}' (shell_code={result}:{shell_hint}); fallback={fallback_err}",
+        display_name,
     ))
 }
 
@@ -770,18 +849,21 @@ mod tests {
                 display_name: "Discord".to_string(),
                 publisher: "Discord Inc.".to_string(),
                 uninstall_command: "C:\\Tools\\uninstall_discord.exe".to_string(),
+                fallback_uninstall_command: None,
             },
             UninstallEntry {
                 token: "2".to_string(),
                 display_name: "Visual Studio Code".to_string(),
                 publisher: "Microsoft".to_string(),
                 uninstall_command: "C:\\Tools\\uninstall_vscode.exe".to_string(),
+                fallback_uninstall_command: None,
             },
             UninstallEntry {
                 token: "3".to_string(),
                 display_name: "Codium".to_string(),
                 publisher: "VSCodium".to_string(),
                 uninstall_command: "C:\\Tools\\uninstall_codium.exe".to_string(),
+                fallback_uninstall_command: None,
             },
         ];
 

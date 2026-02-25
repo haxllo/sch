@@ -23,6 +23,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "windows")]
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+#[cfg(target_os = "windows")]
+use std::time::{Duration, SystemTime};
 
 #[cfg(target_os = "windows")]
 const STATUS_ROW_NO_RESULTS: &str = "No results";
@@ -42,6 +44,8 @@ const FINAL_QUERY_CACHE_MAX_ENTRIES: usize = 32;
 const ADAPTIVE_INDEXED_LATENCY_WINDOW: usize = 24;
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
 const UNINSTALL_QUERY_RESULT_LIMIT: usize = 160;
+#[cfg(target_os = "windows")]
+const CONFIG_RELOAD_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const ACTION_UNINSTALL_CONFIRM_ID: &str = "action:uninstall:confirm";
 const ACTION_UNINSTALL_CANCEL_ID: &str = "action:uninstall:cancel";
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
@@ -77,6 +81,14 @@ struct PendingUninstallConfirmation {
     previous_results: Vec<crate::model::SearchItem>,
     previous_selected_index: usize,
     previous_command_mode: bool,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug)]
+struct RuntimeConfigWatcher {
+    path: std::path::PathBuf,
+    last_checked: Instant,
+    last_modified: Option<SystemTime>,
 }
 
 #[cfg(target_os = "windows")]
@@ -244,23 +256,24 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         RuntimeCommand::Run => {}
     }
 
-    let config = config::load(None)?;
-    if !config.config_path.exists() {
-        config::write_user_template(&config, &config.config_path)?;
+    #[cfg_attr(not(target_os = "windows"), allow(unused_mut))]
+    let mut runtime_config = config::load(None)?;
+    if !runtime_config.config_path.exists() {
+        config::write_user_template(&runtime_config, &runtime_config.config_path)?;
         log_info(&format!(
             "[swiftfind-core] wrote user config template to {}",
-            config.config_path.display()
+            runtime_config.config_path.display()
         ));
     }
     log_info(&format!(
         "[swiftfind-core] startup mode={} hotkey={} config_path={} index_db_path={}",
         runtime_mode(),
-        config.hotkey,
-        config.config_path.display(),
-        config.index_db_path.display(),
+        runtime_config.hotkey,
+        runtime_config.config_path.display(),
+        runtime_config.index_db_path.display(),
     ));
 
-    let service = CoreService::new(config.clone())?.with_runtime_providers();
+    let service = CoreService::new(runtime_config.clone())?.with_runtime_providers();
     #[cfg(target_os = "windows")]
     let mut background_index_refresh = {
         let initial_cached_items = service.cached_items_len();
@@ -268,7 +281,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
             "[swiftfind-core] startup cached_items={} (async indexing scheduled)",
             initial_cached_items
         ));
-        start_background_index_refresh(&config, initial_cached_items == 0)
+        start_background_index_refresh(&runtime_config, initial_cached_items == 0)
     };
     #[cfg(not(target_os = "windows"))]
     {
@@ -293,7 +306,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         }
     }
     #[cfg(target_os = "windows")]
-    let plugin_registry = PluginRegistry::load_from_config(&config);
+    let mut plugin_registry = PluginRegistry::load_from_config(&runtime_config);
     #[cfg(target_os = "windows")]
     {
         for warning in &plugin_registry.load_warnings {
@@ -316,7 +329,8 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         }
 
         if let Ok(exe) = std::env::current_exe() {
-            if let Err(error) = crate::startup::set_enabled(config.launch_at_startup, &exe) {
+            if let Err(error) = crate::startup::set_enabled(runtime_config.launch_at_startup, &exe)
+            {
                 log_warn(&format!("[swiftfind-core] startup sync warning: {error}"));
             }
         }
@@ -333,17 +347,25 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
         let mut overlay_state = OverlayState::default();
         let overlay = NativeOverlayShell::create().map_err(RuntimeError::Overlay)?;
-        overlay.set_help_config_path(config.config_path.to_string_lossy().as_ref());
-        overlay.set_hotkey_hint(&config.hotkey);
-        overlay.set_performance_tuning(config.idle_cache_trim_ms, config.active_memory_target_mb);
+        overlay.set_help_config_path(runtime_config.config_path.to_string_lossy().as_ref());
+        overlay.set_hotkey_hint(&runtime_config.hotkey);
+        overlay.set_performance_tuning(
+            runtime_config.idle_cache_trim_ms,
+            runtime_config.active_memory_target_mb,
+        );
         log_info("[swiftfind-core] native overlay shell initialized (hidden)");
 
         let mut registrar = default_hotkey_registrar();
-        let registration = registrar.register_hotkey(&config.hotkey)?;
+        let registration = registrar.register_hotkey(&runtime_config.hotkey)?;
         log_registration(&registration);
         log_info("[swiftfind-core] event loop running (native overlay)");
 
-        let max_results = config.max_results as usize;
+        let mut max_results = runtime_config.max_results as usize;
+        let mut config_watcher = RuntimeConfigWatcher {
+            path: runtime_config.config_path.clone(),
+            last_checked: Instant::now(),
+            last_modified: config_file_modified_time(runtime_config.config_path.as_path()),
+        };
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
         let mut suppressed_uninstall_titles: Vec<String> = Vec::new();
         let mut pending_uninstall_confirmation: Option<PendingUninstallConfirmation> = None;
@@ -353,6 +375,15 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
         overlay
             .run_message_loop_with_events(|event| {
+                maybe_apply_runtime_config_reload(
+                    &overlay,
+                    &mut runtime_config,
+                    &mut plugin_registry,
+                    &mut search_session,
+                    &mut pending_uninstall_confirmation,
+                    &mut max_results,
+                    &mut config_watcher,
+                );
                 maybe_apply_background_index_refresh(&service, &mut background_index_refresh);
                 match event {
                     OverlayEvent::Hotkey(_) => {
@@ -365,8 +396,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                     &mut suppressed_uninstall_titles,
                                 );
                                 overlay.show_and_focus();
-                                if config.clipboard_enabled {
-                                    let _ = clipboard_history::maybe_capture_latest(&config);
+                                if runtime_config.clipboard_enabled {
+                                    let _ =
+                                        clipboard_history::maybe_capture_latest(&runtime_config);
                                 }
                                 if overlay.query_text().trim().is_empty() {
                                     set_idle_overlay_state(&overlay);
@@ -393,8 +425,8 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         overlay_state.set_visible(overlay.is_visible());
                         reconcile_suppressed_uninstall_titles(&mut suppressed_uninstall_titles);
                         overlay.show_and_focus();
-                        if config.clipboard_enabled {
-                            let _ = clipboard_history::maybe_capture_latest(&config);
+                        if runtime_config.clipboard_enabled {
+                            let _ = clipboard_history::maybe_capture_latest(&runtime_config);
                         }
                         if overlay.query_text().trim().is_empty() {
                             set_idle_overlay_state(&overlay);
@@ -445,12 +477,13 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             return;
                         }
                         last_query = trimmed.to_string();
-                        let parsed_query = ParsedQuery::parse(trimmed, config.search_dsl_enabled);
+                        let parsed_query =
+                            ParsedQuery::parse(trimmed, runtime_config.search_dsl_enabled);
                         let query_result_limit = result_limit_for_query(max_results, &parsed_query);
 
                         match search_overlay_results_with_session(
                             &service,
-                            &config,
+                            &runtime_config,
                             &plugin_registry,
                             &parsed_query,
                             query_result_limit,
@@ -513,7 +546,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             } else {
                                 let parsed_query = ParsedQuery::parse(
                                     overlay.query_text().trim(),
-                                    config.search_dsl_enabled,
+                                    runtime_config.search_dsl_enabled,
                                 );
                                 set_status_row_overlay_state(
                                     &overlay,
@@ -542,7 +575,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 overlay_state.on_escape();
                                 match execute_action_selection(
                                     &service,
-                                    &config,
+                                    &runtime_config,
                                     &plugin_registry,
                                     &pending.uninstall_action,
                                 ) {
@@ -561,9 +594,44 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                         search_session.clear();
                                     }
                                     Err(error) => {
-                                        pending_uninstall_confirmation = Some(pending);
-                                        overlay.show_and_focus();
-                                        overlay.set_status_text(&format!("Launch error: {error}"));
+                                        if should_suppress_failed_uninstall(error.as_str()) {
+                                            track_uninstall_title_suppression(
+                                                &mut suppressed_uninstall_titles,
+                                                pending.uninstall_action.title.as_str(),
+                                            );
+                                            current_results = pending.previous_results;
+                                            filter_suppressed_uninstall_results(
+                                                &mut current_results,
+                                                &suppressed_uninstall_titles,
+                                            );
+                                            selected_index = pending
+                                                .previous_selected_index
+                                                .min(current_results.len().saturating_sub(1));
+                                            if current_results.is_empty() {
+                                                set_status_row_overlay_state(
+                                                    &overlay,
+                                                    if pending.previous_command_mode {
+                                                        STATUS_ROW_NO_COMMAND_RESULTS
+                                                    } else {
+                                                        STATUS_ROW_NO_RESULTS
+                                                    },
+                                                );
+                                            } else {
+                                                let rows = overlay_rows(
+                                                    &current_results,
+                                                    pending.previous_command_mode,
+                                                );
+                                                overlay.set_results(&rows, selected_index);
+                                            }
+                                            overlay.set_status_text(
+                                                "Uninstall entry is stale and was hidden",
+                                            );
+                                        } else {
+                                            pending_uninstall_confirmation = Some(pending);
+                                            overlay.show_and_focus();
+                                            overlay
+                                                .set_status_text(&format!("Launch error: {error}"));
+                                        }
                                     }
                                 }
                                 return;
@@ -607,7 +675,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         if selected_is_uninstall {
                             let parsed_query = ParsedQuery::parse(
                                 overlay.query_text().trim(),
-                                config.search_dsl_enabled,
+                                runtime_config.search_dsl_enabled,
                             );
                             pending_uninstall_confirmation = Some(PendingUninstallConfirmation {
                                 uninstall_action: selected.clone(),
@@ -625,7 +693,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
                         match launch_overlay_selection(
                             &service,
-                            &config,
+                            &runtime_config,
                             &plugin_registry,
                             &current_results,
                             selected_index,
@@ -1688,7 +1756,9 @@ fn reconcile_suppressed_uninstall_titles(suppressed_uninstall_titles: &mut Vec<S
 
     suppressed_uninstall_titles.retain(|title| {
         match crate::uninstall_registry::is_display_name_registered(title.as_str()) {
-            Ok(still_registered) => !still_registered,
+            // Keep suppression while the uninstall entry still exists in the registry.
+            // Drop suppression only after the entry disappears.
+            Ok(still_registered) => still_registered,
             Err(error) => {
                 log_warn(&format!(
                     "[swiftfind-core] uninstall suppression registry check failed for '{}': {}",
@@ -2323,6 +2393,97 @@ fn maybe_expand_uninstall_quick_shortcut(query: &str, last_query: &str) -> Optio
         }
     }
     None
+}
+
+#[cfg(target_os = "windows")]
+fn config_file_modified_time(path: &std::path::Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+#[cfg(target_os = "windows")]
+fn maybe_apply_runtime_config_reload(
+    overlay: &NativeOverlayShell,
+    runtime_config: &mut Config,
+    plugin_registry: &mut PluginRegistry,
+    search_session: &mut OverlaySearchSession,
+    pending_uninstall_confirmation: &mut Option<PendingUninstallConfirmation>,
+    max_results: &mut usize,
+    watcher: &mut RuntimeConfigWatcher,
+) {
+    if watcher.last_checked.elapsed() < CONFIG_RELOAD_POLL_INTERVAL {
+        return;
+    }
+    watcher.last_checked = Instant::now();
+
+    let modified = config_file_modified_time(watcher.path.as_path());
+    if modified == watcher.last_modified {
+        return;
+    }
+    watcher.last_modified = modified;
+
+    match config::load(Some(watcher.path.as_path())) {
+        Ok(next_config) => {
+            let previous = runtime_config.clone();
+            *runtime_config = next_config;
+            *max_results = runtime_config.max_results as usize;
+
+            overlay.set_performance_tuning(
+                runtime_config.idle_cache_trim_ms,
+                runtime_config.active_memory_target_mb,
+            );
+            *plugin_registry = PluginRegistry::load_from_config(runtime_config);
+            for warning in &plugin_registry.load_warnings {
+                log_warn(&format!("[swiftfind-core] plugin_warning {warning}"));
+            }
+            search_session.clear();
+            *pending_uninstall_confirmation = None;
+
+            if runtime_config.hotkey != previous.hotkey {
+                log_warn(&format!(
+                    "[swiftfind-core] config hotkey changed ({} -> {}), restart required to apply",
+                    previous.hotkey, runtime_config.hotkey
+                ));
+            }
+            if runtime_config.index_db_path != previous.index_db_path
+                || runtime_config.discovery_roots != previous.discovery_roots
+                || runtime_config.discovery_exclude_roots != previous.discovery_exclude_roots
+                || runtime_config.windows_search_enabled != previous.windows_search_enabled
+                || runtime_config.windows_search_fallback_filesystem
+                    != previous.windows_search_fallback_filesystem
+            {
+                log_warn(
+                    "[swiftfind-core] discovery/index config changed; restart (or manual rebuild) recommended",
+                );
+            }
+
+            log_info(&format!(
+                "[swiftfind-core] config reloaded max_results={} mode={:?} show_files={} show_folders={} dsl={} clipboard={} uninstall_actions={} plugins_enabled={} plugins_actions={}",
+                runtime_config.max_results,
+                runtime_config.search_mode_default,
+                runtime_config.show_files,
+                runtime_config.show_folders,
+                runtime_config.search_dsl_enabled,
+                runtime_config.clipboard_enabled,
+                runtime_config.uninstall_actions_enabled,
+                runtime_config.plugins_enabled,
+                plugin_registry.action_items.len(),
+            ));
+        }
+        Err(error) => {
+            log_warn(&format!(
+                "[swiftfind-core] config reload skipped due to invalid config: {error}"
+            ));
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn should_suppress_failed_uninstall(error: &str) -> bool {
+    let lower = error.to_ascii_lowercase();
+    lower.contains("shell_code=2")
+        || lower.contains(" code 2")
+        || lower.contains("no longer available")
+        || lower.contains("file not found")
 }
 
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
