@@ -163,6 +163,7 @@ mod imp {
     const FONT_HELP_ICON_HEIGHT: i32 = -14;
     const FONT_COMMAND_ICON_HEIGHT: i32 = -16;
     const FONT_COMMAND_PREFIX_HEIGHT: i32 = -22;
+    const FONT_COMMAND_BADGE_HEIGHT: i32 = -24;
     const FONT_WEIGHT_INPUT: i32 = 400;
     const FONT_WEIGHT_TITLE: i32 = 500;
     const FONT_WEIGHT_META: i32 = 400;
@@ -174,6 +175,7 @@ mod imp {
     const FONT_WEIGHT_HELP_ICON: i32 = 400;
     const FONT_WEIGHT_COMMAND_ICON: i32 = 400;
     const FONT_WEIGHT_COMMAND_PREFIX: i32 = 800;
+    const FONT_WEIGHT_COMMAND_BADGE: i32 = 800;
     const ICON_FONT_FAMILY_PRIMARY: &str = "Segoe Fluent Icons";
     const ICON_FONT_FAMILY_FALLBACK: &str = "Segoe MDL2 Assets";
     const COMMAND_PREFIX_FONT_FAMILY: &str = "Segoe Fluent Icons";
@@ -187,12 +189,12 @@ mod imp {
     const COMMAND_PREFIX_GAP: i32 = 12;
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 20;
     const COMMAND_PREFIX_INPUT_PAD: i32 = 16;
-    const COMMAND_BADGE_INPUT_PAD: i32 = 12;
+    const COMMAND_BADGE_INPUT_PAD: i32 = 20;
     const COMMAND_PREFIX_OPACITY: f32 = 0.60;
     const COMMAND_PREFIX_EMBOLDEN_OPACITY: f32 = 0.40;
     const COMMAND_PREFIX_EMBOLDEN_OFFSET_PX: i32 = 1;
-    const COMMAND_BADGE_TEXT: &str = "u";
-    const COMMAND_BADGE_GAP_FROM_PREFIX: i32 = 4;
+    const COMMAND_BADGE_TEXT: &str = "U";
+    const COMMAND_BADGE_GAP_FROM_PREFIX: i32 = 1;
     const COMMAND_BADGE_ANIM_MS: u32 = 110;
     const COMMAND_BADGE_SLIDE_PX: i32 = 6;
     const HELP_ICON_SIZE: i32 = 14;
@@ -384,6 +386,7 @@ mod imp {
         help_tip_font: isize,
         help_icon_font: isize,
         command_prefix_font: isize,
+        command_badge_font: isize,
         command_icon_font: isize,
         command_icon_fallback_font: isize,
 
@@ -464,6 +467,7 @@ mod imp {
                 help_tip_font: 0,
                 help_icon_font: 0,
                 command_prefix_font: 0,
+                command_badge_font: 0,
                 command_icon_font: 0,
                 command_icon_fallback_font: 0,
                 panel_brush: 0,
@@ -1320,6 +1324,8 @@ mod imp {
                         FONT_WEIGHT_COMMAND_PREFIX,
                         command_prefix_font_family_wide(),
                     );
+                    state.command_badge_font =
+                        create_font(FONT_COMMAND_BADGE_HEIGHT, FONT_WEIGHT_COMMAND_BADGE);
                     state.command_icon_font = create_font_with_family(
                         FONT_COMMAND_ICON_HEIGHT,
                         FONT_WEIGHT_COMMAND_ICON,
@@ -2280,7 +2286,9 @@ mod imp {
                 badge_rect.left += slide_px;
                 badge_rect.right += slide_px;
                 let badge = to_wide(COMMAND_BADGE_TEXT);
-                let badge_font = if state.input_font != 0 {
+                let badge_font = if state.command_badge_font != 0 {
+                    state.command_badge_font
+                } else if state.input_font != 0 {
                     state.input_font
                 } else {
                     prefix_font
@@ -4548,6 +4556,9 @@ mod imp {
             }
             if state.command_prefix_font != 0 {
                 DeleteObject(state.command_prefix_font as _);
+            }
+            if state.command_badge_font != 0 {
+                DeleteObject(state.command_badge_font as _);
             }
             if state.command_icon_font != 0 {
                 DeleteObject(state.command_icon_font as _);
