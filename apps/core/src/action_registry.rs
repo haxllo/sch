@@ -1,5 +1,6 @@
 use crate::config::{Config, WebSearchProvider};
 use crate::model::{normalize_for_search, SearchItem};
+use crate::uninstall_registry::search_uninstall_actions;
 
 pub const ACTION_OPEN_LOGS_ID: &str = "__swiftfind_action_open_logs__";
 pub const ACTION_REBUILD_INDEX_ID: &str = "__swiftfind_action_rebuild_index__";
@@ -71,6 +72,15 @@ pub fn search_actions_with_mode(
     if command_mode {
         if let Some(web_action) = dynamic_provider_web_search_action(trimmed_query, cfg) {
             out.push(web_action);
+            if out.len() >= limit {
+                return out;
+            }
+        }
+
+        let remaining = limit.saturating_sub(out.len());
+        if remaining > 0 {
+            let uninstall_actions = search_uninstall_actions(trimmed_query, remaining);
+            out.extend(uninstall_actions);
             if out.len() >= limit {
                 return out;
             }

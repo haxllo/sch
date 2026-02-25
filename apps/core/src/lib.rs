@@ -18,5 +18,6 @@ pub mod search;
 pub mod settings;
 pub mod startup;
 pub mod transport;
+pub mod uninstall_registry;
 #[cfg(target_os = "windows")]
 pub mod windows_overlay;

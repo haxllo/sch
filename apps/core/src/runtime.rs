@@ -2265,6 +2265,14 @@ fn execute_action_selection(
     plugins: &PluginRegistry,
     selected: &crate::model::SearchItem,
 ) -> Result<(), String> {
+    if selected
+        .id
+        .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX)
+    {
+        return crate::uninstall_registry::execute_uninstall_action(&selected.id)
+            .map_err(|error| format!("uninstall launch failed: {error}"));
+    }
+
     if selected.id.starts_with(ACTION_WEB_SEARCH_PREFIX) {
         return crate::action_executor::launch_open_target(selected.path.trim())
             .map_err(|error| format!("web search launch failed: {error}"));

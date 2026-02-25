@@ -2683,6 +2683,7 @@ mod imp {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     enum ActionIconKind {
         WebSearch,
+        Uninstall,
         Clipboard,
         Settings,
         Diagnostics,
@@ -2695,6 +2696,8 @@ mod imp {
         let lower = title.to_ascii_lowercase();
         if lower.contains("web") || lower.contains("search") {
             ActionIconKind::WebSearch
+        } else if lower.contains("uninstall") || lower.contains("remove") {
+            ActionIconKind::Uninstall
         } else if lower.contains("clipboard") {
             ActionIconKind::Clipboard
         } else if lower.contains("config") || lower.contains("setting") || lower.contains("prefer")
@@ -2718,6 +2721,7 @@ mod imp {
     fn action_icon_codepoint(kind: ActionIconKind) -> u32 {
         match kind {
             ActionIconKind::WebSearch => 0xE721,   // Search
+            ActionIconKind::Uninstall => 0xE74D,   // Delete
             ActionIconKind::Clipboard => 0xE8C8,   // Clipboard List
             ActionIconKind::Settings => 0xE713,    // Settings
             ActionIconKind::Diagnostics => 0xE8A5, // Page/Report
