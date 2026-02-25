@@ -337,7 +337,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let mut selected_index = 0_usize;
         let mut last_query = String::new();
         let mut search_session = OverlaySearchSession::default();
-        let mut pending_uninstall_action_id: Option<String> = None;
 
         overlay
             .run_message_loop_with_events(|event| {
@@ -364,7 +363,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                     &mut current_results,
                                     &mut selected_index,
                                 );
-                                pending_uninstall_action_id = None;
                                 last_query.clear();
                                 search_session.clear();
                                 maybe_apply_background_index_refresh(
@@ -386,7 +384,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
                     OverlayEvent::ExternalQuit => {
                         overlay.hide_now();
-                        pending_uninstall_action_id = None;
                         last_query.clear();
                         search_session.clear();
                         unsafe {
@@ -401,7 +398,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut current_results,
                                 &mut selected_index,
                             );
-                            pending_uninstall_action_id = None;
                             last_query.clear();
                             search_session.clear();
                         }
@@ -414,7 +410,6 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         }
 
                         let trimmed = query.trim();
-                        pending_uninstall_action_id = None;
                         if trimmed.is_empty() {
                             current_results.clear();
                             selected_index = 0;
@@ -477,12 +472,10 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
                         selected_index =
                             next_selection_index(selected_index, current_results.len(), direction);
-                        pending_uninstall_action_id = None;
                         overlay.set_selected_index(selected_index);
                     }
                     OverlayEvent::Submit => {
                         if current_results.is_empty() {
-                            pending_uninstall_action_id = None;
                             if overlay.query_text().trim().is_empty() {
                                 set_idle_overlay_state(&overlay);
                                 overlay.show_placeholder_hint(STATUS_ROW_TYPE_TO_SEARCH);
@@ -510,23 +503,16 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         }
 
                         let selected = &current_results[selected_index];
-                        if selected
+                        let selected_is_uninstall = selected
                             .id
-                            .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX)
-                        {
-                            let already_armed = pending_uninstall_action_id
-                                .as_deref()
-                                .is_some_and(|armed_id| armed_id == selected.id);
-                            if !already_armed {
-                                pending_uninstall_action_id = Some(selected.id.clone());
-                                overlay.set_status_text(&format!(
-                                    "Press Enter again to confirm: {}",
-                                    selected.title.trim()
-                                ));
-                                return;
-                            }
+                            .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX);
+
+                        if selected_is_uninstall {
+                            // Close immediately for destructive actions to avoid visible relayout jitter
+                            // and keep interaction feeling snappy.
+                            overlay.hide_now();
+                            overlay_state.on_escape();
                         }
-                        pending_uninstall_action_id = None;
 
                         match launch_overlay_selection(
                             &service,
@@ -537,8 +523,10 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         ) {
                             Ok(()) => {
                                 overlay.set_status_text("");
-                                overlay.hide_now();
-                                overlay_state.on_escape();
+                                if !selected_is_uninstall {
+                                    overlay.hide_now();
+                                    overlay_state.on_escape();
+                                }
                                 reset_overlay_session(
                                     &overlay,
                                     &mut current_results,
@@ -548,6 +536,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 search_session.clear();
                             }
                             Err(error) => {
+                                if selected_is_uninstall {
+                                    overlay.show_and_focus();
+                                }
                                 overlay.set_status_text(&format!("Launch error: {error}"));
                             }
                         }
