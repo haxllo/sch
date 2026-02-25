@@ -1487,6 +1487,11 @@ fn should_hide_known_start_menu_doc_sample_entry(item: &crate::model::SearchItem
         return false;
     }
 
+    let path_lower = item.path.trim().replace('/', "\\").to_ascii_lowercase();
+    if path_lower.contains("\\windows kits\\10\\shortcuts\\") && path_lower.ends_with(".url") {
+        return true;
+    }
+
     let lower = item.title.trim().to_ascii_lowercase();
     if lower.is_empty() {
         return false;

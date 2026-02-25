@@ -489,6 +489,13 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
         if ext != "lnk" && ext != "exe" {
             continue;
         }
+        if ext == "lnk" {
+            if let Some(shortcut_target) = resolve_shortcut_target_for_discovery(path) {
+                if is_excluded_windows_kits_shortcut_reference(shortcut_target.as_str()) {
+                    continue;
+                }
+            }
+        }
         if ext == "lnk" && !shortcut_has_launch_target(path) {
             continue;
         }
@@ -565,6 +572,9 @@ Get-StartApps | ForEach-Object {
         let title = name.trim();
         let app_id = app_id.trim();
         if title.is_empty() || app_id.is_empty() {
+            continue;
+        }
+        if is_excluded_windows_kits_shortcut_reference(app_id) {
             continue;
         }
         if is_documentation_like_start_entry_title(title) {
@@ -657,6 +667,33 @@ fn shortcut_has_launch_target(shortcut_path: &Path) -> bool {
     }
 
     true
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_shortcut_target_for_discovery(shortcut_path: &Path) -> Option<String> {
+    use windows_sys::Win32::UI::Shell::HlinkResolveShortcutToString;
+
+    let wide_shortcut = to_wide(shortcut_path.to_string_lossy().as_ref());
+    let mut target: windows_sys::core::PWSTR = std::ptr::null_mut();
+    let mut location: windows_sys::core::PWSTR = std::ptr::null_mut();
+    let hr =
+        unsafe { HlinkResolveShortcutToString(wide_shortcut.as_ptr(), &mut target, &mut location) };
+    if hr < 0 {
+        return None;
+    }
+
+    let resolved_target = pwstr_to_string_and_free(target);
+    let resolved_location = pwstr_to_string_and_free(location);
+    let preferred = normalize_shortcut_target_path(resolved_target.as_str());
+    if !preferred.is_empty() {
+        return Some(preferred);
+    }
+    let fallback = normalize_shortcut_target_path(resolved_location.as_str());
+    if fallback.is_empty() {
+        None
+    } else {
+        Some(fallback)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -897,4 +934,21 @@ fn is_documentation_like_start_entry_title(title: &str) -> bool {
     (has_docs && has_app_word)
         || (has_sample && (has_app_word || has_platform))
         || (has_tools_for && has_app_word && has_platform)
+}
+
+#[cfg(target_os = "windows")]
+fn is_excluded_windows_kits_shortcut_reference(value: &str) -> bool {
+    let lower = value.trim().replace('/', "\\").to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    if !lower.contains("\\windows kits\\10\\shortcuts\\") {
+        return false;
+    }
+    if !lower.ends_with(".url") {
+        return false;
+    }
+    lower.contains("sample")
+        || lower.contains("documentation")
+        || lower.contains("toolsdocumentation")
 }
