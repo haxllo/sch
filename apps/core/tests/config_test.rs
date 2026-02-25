@@ -21,7 +21,7 @@ fn accepts_default_config() {
     assert!(!cfg.hotkey_recommended.is_empty());
     assert_eq!(
         cfg.web_search_provider,
-        swiftfind_core::config::WebSearchProvider::Duckduckgo
+        swiftfind_core::config::WebSearchProvider::Google
     );
     assert!(cfg.windows_search_enabled);
     assert!(cfg.windows_search_fallback_filesystem);
@@ -173,7 +173,7 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("\"show_files\": true"));
     assert!(raw.contains("\"show_folders\": true"));
     assert!(raw.contains("\"uninstall_actions_enabled\": true"));
-    assert!(raw.contains("\"web_search_provider\": \"duckduckgo\""));
+    assert!(raw.contains("\"web_search_provider\": \"google\""));
     if cfg.discovery_exclude_roots.is_empty() {
         assert!(raw.contains("\"discovery_exclude_roots\": []"));
     } else {

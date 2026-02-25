@@ -60,8 +60,8 @@ impl SearchMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WebSearchProvider {
-    #[default]
     Duckduckgo,
+    #[default]
     Google,
     Bing,
     Brave,
@@ -148,7 +148,7 @@ impl Default for Config {
             search_mode_default: SearchMode::All,
             search_dsl_enabled: true,
             uninstall_actions_enabled: true,
-            web_search_provider: WebSearchProvider::Duckduckgo,
+            web_search_provider: WebSearchProvider::Google,
             web_search_custom_template: String::new(),
             clipboard_enabled: true,
             clipboard_retention_minutes: 8 * 60,
@@ -392,9 +392,10 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
         "false"
     });
     text.push_str(",\n\n");
-    text.push_str("  // Web search command action (opens in your default browser)\n");
+    text.push_str("  // Web search in command mode (press > then type your query)\n");
+    text.push_str("  // Default is google for most users.\n");
     text.push_str(
-        "  // Provider: duckduckgo | google | bing | brave | startpage | ecosia | yahoo | custom\n",
+        "  // Options: google | duckduckgo | bing | brave | startpage | ecosia | yahoo | custom\n",
     );
     text.push_str("  \"web_search_provider\": ");
     text.push_str(&json_string(match cfg.web_search_provider {
@@ -409,6 +410,7 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     }));
     text.push_str(",\n");
     text.push_str("  // Used only when provider is custom. Must include {query}.\n");
+    text.push_str("  // Example: \"https://example.com/search?q={query}\"\n");
     text.push_str("  \"web_search_custom_template\": ");
     text.push_str(&json_string(&cfg.web_search_custom_template));
     text.push_str(",\n\n");
