@@ -15,7 +15,7 @@ fn accepts_default_config() {
     let cfg = swiftfind_core::config::Config::default();
     assert_eq!(cfg.max_results, 20);
     assert_eq!(cfg.version, swiftfind_core::config::CURRENT_CONFIG_VERSION);
-    assert_eq!(cfg.hotkey, "Ctrl+Shift+Space");
+    assert_eq!(cfg.hotkey, "Ctrl+Space");
     assert!(!cfg.launch_at_startup);
     assert!(!cfg.hotkey_help.trim().is_empty());
     assert!(!cfg.hotkey_recommended.is_empty());
@@ -136,7 +136,7 @@ fn loads_partial_config_with_migration_safe_defaults() {
         loaded.version,
         swiftfind_core::config::CURRENT_CONFIG_VERSION
     );
-    assert_eq!(loaded.hotkey, "Ctrl+Shift+Space");
+    assert_eq!(loaded.hotkey, "Ctrl+Space");
     assert!(!loaded.launch_at_startup);
     assert_eq!(loaded.config_path, config_path);
     assert!(!loaded.index_db_path.as_os_str().is_empty());
@@ -164,7 +164,7 @@ fn writes_user_template_with_comments_and_loads_it() {
     swiftfind_core::config::write_user_template(&cfg, &config_path).unwrap();
     let raw = std::fs::read_to_string(&config_path).unwrap();
     assert!(raw.contains("// SwiftFind config (comments are allowed)."));
-    assert!(raw.contains("\"hotkey\": \"Ctrl+Shift+Space\""));
+    assert!(raw.contains("\"hotkey\": \"Ctrl+Space\""));
     assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
     assert!(raw.contains("\"discovery_exclude_roots\":"));

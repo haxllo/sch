@@ -10,7 +10,7 @@
 
 ```json5
 {
-  "hotkey": "Ctrl+Shift+Space",
+  "hotkey": "Ctrl+Space",
   "launch_at_startup": false,
   "max_results": 20,
   "discovery_roots": [

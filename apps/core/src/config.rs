@@ -133,12 +133,13 @@ impl Default for Config {
             windows_search_fallback_filesystem: true,
             show_files: true,
             show_folders: true,
-            hotkey: "Ctrl+Shift+Space".to_string(),
+            hotkey: "Ctrl+Space".to_string(),
             launch_at_startup: false,
             hotkey_help:
-                "Set `hotkey` as Modifier+Modifier+Key (example: Ctrl+Shift+Space), then restart SwiftFind."
+                "Set `hotkey` as Modifier+Key (example: Ctrl+Space), then restart SwiftFind."
                     .to_string(),
             hotkey_recommended: vec![
+                "Ctrl+Space".to_string(),
                 "Ctrl+Shift+Space".to_string(),
                 "Ctrl+Alt+Space".to_string(),
                 "Alt+Shift+Space".to_string(),
