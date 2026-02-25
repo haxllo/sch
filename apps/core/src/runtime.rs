@@ -42,6 +42,8 @@ const FINAL_QUERY_CACHE_MAX_ENTRIES: usize = 32;
 const ADAPTIVE_INDEXED_LATENCY_WINDOW: usize = 24;
 #[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
 const UNINSTALL_QUERY_RESULT_LIMIT: usize = 160;
+const ACTION_UNINSTALL_CONFIRM_ID: &str = "action:uninstall:confirm";
+const ACTION_UNINSTALL_CANCEL_ID: &str = "action:uninstall:cancel";
 static STDIO_LOGGING_ENABLED: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug, Clone, Default)]
@@ -66,6 +68,15 @@ struct IndexedPrefixCache {
     normalized_query: String,
     indexed_filter: SearchFilter,
     seed_items: Vec<crate::model::SearchItem>,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+struct PendingUninstallConfirmation {
+    uninstall_action: crate::model::SearchItem,
+    previous_results: Vec<crate::model::SearchItem>,
+    previous_selected_index: usize,
+    previous_command_mode: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -335,6 +346,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         let max_results = config.max_results as usize;
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
         let mut suppressed_uninstall_titles: Vec<String> = Vec::new();
+        let mut pending_uninstall_confirmation: Option<PendingUninstallConfirmation> = None;
         let mut selected_index = 0_usize;
         let mut last_query = String::new();
         let mut search_session = OverlaySearchSession::default();
@@ -364,6 +376,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                     &mut current_results,
                                     &mut selected_index,
                                 );
+                                pending_uninstall_confirmation = None;
                                 last_query.clear();
                                 search_session.clear();
                                 maybe_apply_background_index_refresh(
@@ -400,12 +413,14 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 &mut current_results,
                                 &mut selected_index,
                             );
+                            pending_uninstall_confirmation = None;
                             last_query.clear();
                             search_session.clear();
                         }
                     }
                     OverlayEvent::QueryChanged(query) => {
                         let mut query = query;
+                        pending_uninstall_confirmation = None;
                         if let Some(expanded) =
                             maybe_expand_uninstall_quick_shortcut(&query, last_query.as_str())
                         {
@@ -419,6 +434,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             selected_index = 0;
                             last_query.clear();
                             search_session.clear();
+                            pending_uninstall_confirmation = None;
                             set_idle_overlay_state(&overlay);
                             return;
                         }
@@ -513,15 +529,95 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         }
 
                         let selected = &current_results[selected_index];
+                        if pending_uninstall_confirmation.is_some() {
+                            let selected_id = selected.id.clone();
+                            if selected_id == ACTION_UNINSTALL_CONFIRM_ID {
+                                let Some(pending) = pending_uninstall_confirmation.take() else {
+                                    return;
+                                };
+                                overlay.hide_now();
+                                overlay_state.on_escape();
+                                match execute_action_selection(
+                                    &service,
+                                    &config,
+                                    &plugin_registry,
+                                    &pending.uninstall_action,
+                                ) {
+                                    Ok(()) => {
+                                        track_uninstall_title_suppression(
+                                            &mut suppressed_uninstall_titles,
+                                            pending.uninstall_action.title.as_str(),
+                                        );
+                                        overlay.set_status_text("");
+                                        reset_overlay_session(
+                                            &overlay,
+                                            &mut current_results,
+                                            &mut selected_index,
+                                        );
+                                        last_query.clear();
+                                        search_session.clear();
+                                    }
+                                    Err(error) => {
+                                        pending_uninstall_confirmation = Some(pending);
+                                        overlay.show_and_focus();
+                                        overlay.set_status_text(&format!("Launch error: {error}"));
+                                    }
+                                }
+                                return;
+                            }
+
+                            if selected_id == ACTION_UNINSTALL_CANCEL_ID {
+                                let Some(pending) = pending_uninstall_confirmation.take() else {
+                                    return;
+                                };
+                                current_results = pending.previous_results;
+                                selected_index = pending
+                                    .previous_selected_index
+                                    .min(current_results.len().saturating_sub(1));
+                                if current_results.is_empty() {
+                                    set_status_row_overlay_state(
+                                        &overlay,
+                                        if pending.previous_command_mode {
+                                            STATUS_ROW_NO_COMMAND_RESULTS
+                                        } else {
+                                            STATUS_ROW_NO_RESULTS
+                                        },
+                                    );
+                                } else {
+                                    let rows = overlay_rows(
+                                        &current_results,
+                                        pending.previous_command_mode,
+                                    );
+                                    overlay.set_results(&rows, selected_index);
+                                }
+                                overlay.set_status_text("");
+                                return;
+                            }
+
+                            pending_uninstall_confirmation = None;
+                        }
+
                         let selected_is_uninstall = selected
                             .id
                             .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX);
 
                         if selected_is_uninstall {
-                            // Close immediately for destructive actions to avoid visible relayout jitter
-                            // and keep interaction feeling snappy.
-                            overlay.hide_now();
-                            overlay_state.on_escape();
+                            let parsed_query = ParsedQuery::parse(
+                                overlay.query_text().trim(),
+                                config.search_dsl_enabled,
+                            );
+                            pending_uninstall_confirmation = Some(PendingUninstallConfirmation {
+                                uninstall_action: selected.clone(),
+                                previous_results: current_results.clone(),
+                                previous_selected_index: selected_index,
+                                previous_command_mode: parsed_query.command_mode,
+                            });
+                            current_results = uninstall_confirmation_results(selected);
+                            selected_index = 0;
+                            let rows = overlay_rows(&current_results, true);
+                            overlay.set_results(&rows, selected_index);
+                            overlay.set_status_text("");
+                            return;
                         }
 
                         match launch_overlay_selection(
@@ -532,29 +628,19 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             selected_index,
                         ) {
                             Ok(()) => {
-                                if selected_is_uninstall {
-                                    track_uninstall_title_suppression(
-                                        &mut suppressed_uninstall_titles,
-                                        selected.title.as_str(),
-                                    );
-                                }
                                 overlay.set_status_text("");
-                                if !selected_is_uninstall {
-                                    overlay.hide_now();
-                                    overlay_state.on_escape();
-                                }
+                                overlay.hide_now();
+                                overlay_state.on_escape();
                                 reset_overlay_session(
                                     &overlay,
                                     &mut current_results,
                                     &mut selected_index,
                                 );
+                                pending_uninstall_confirmation = None;
                                 last_query.clear();
                                 search_session.clear();
                             }
                             Err(error) => {
-                                if selected_is_uninstall {
-                                    overlay.show_and_focus();
-                                }
                                 overlay.set_status_text(&format!("Launch error: {error}"));
                             }
                         }
@@ -2223,6 +2309,34 @@ fn maybe_expand_uninstall_quick_shortcut(query: &str, last_query: &str) -> Optio
     None
 }
 
+#[cfg_attr(not(any(test, target_os = "windows")), allow(dead_code))]
+fn uninstall_confirmation_results(
+    uninstall_action: &crate::model::SearchItem,
+) -> Vec<crate::model::SearchItem> {
+    let target = uninstall_target_title_from_action_title(uninstall_action.title.as_str())
+        .unwrap_or_else(|| uninstall_action.title.trim().to_string());
+    let confirm_title = if target.is_empty() {
+        "Confirm uninstall".to_string()
+    } else {
+        format!("Confirm uninstall {}", target.trim())
+    };
+
+    vec![
+        crate::model::SearchItem::new(
+            ACTION_UNINSTALL_CONFIRM_ID,
+            "action",
+            confirm_title.as_str(),
+            "Open app uninstaller",
+        ),
+        crate::model::SearchItem::new(
+            ACTION_UNINSTALL_CANCEL_ID,
+            "action",
+            "Cancel",
+            "Return to previous results",
+        ),
+    ]
+}
+
 fn candidate_limit_for_query(
     result_limit: usize,
     filter: &SearchFilter,
@@ -2628,9 +2742,11 @@ mod tests {
         search_overlay_results, search_overlay_results_with_session,
         should_hide_known_start_menu_doc_sample_entry, should_skip_non_searchable_query,
         summarize_query_profiles, track_uninstall_title_suppression,
-        uninstall_target_title_from_action_title, IndexedPrefixCache, OverlaySearchSession,
-        RuntimeCommand, RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT,
-        INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT, UNINSTALL_QUERY_RESULT_LIMIT,
+        uninstall_confirmation_results, uninstall_target_title_from_action_title,
+        IndexedPrefixCache, OverlaySearchSession, RuntimeCommand, RuntimeOptions,
+        ACTION_UNINSTALL_CANCEL_ID, ACTION_UNINSTALL_CONFIRM_ID,
+        INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
+        UNINSTALL_QUERY_RESULT_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2838,6 +2954,22 @@ mod tests {
         track_uninstall_title_suppression(&mut suppressed, "uninstall discord");
         track_uninstall_title_suppression(&mut suppressed, "Open Discord");
         assert_eq!(suppressed, vec!["Discord".to_string()]);
+    }
+
+    #[test]
+    fn uninstall_confirmation_results_are_confirm_then_cancel() {
+        let uninstall_action = SearchItem::new(
+            "action:uninstall:discord",
+            "action",
+            "Uninstall Discord",
+            "shell:AppsFolder\\Discord",
+        );
+        let results = uninstall_confirmation_results(&uninstall_action);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, ACTION_UNINSTALL_CONFIRM_ID);
+        assert_eq!(results[1].id, ACTION_UNINSTALL_CANCEL_ID);
+        assert!(results[0].title.contains("Discord"));
+        assert_eq!(results[1].title, "Cancel");
     }
 
     #[test]
