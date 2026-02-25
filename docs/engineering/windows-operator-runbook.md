@@ -62,7 +62,7 @@ Notes:
 - `--status` reports running/stopped and degraded process-without-window state.
 - `--quit` attempts graceful stop and falls back to force stop if runtime is stuck.
 - `--restart` performs the same stop flow then starts runtime again.
-- `--ensure-config` creates `%APPDATA%\SwiftFind\config.json` if missing.
+- `--ensure-config` creates `%APPDATA%\SwiftFind\config.toml` if missing.
 - `--sync-startup` applies `launch_at_startup` from config to HKCU Run.
 - `--diagnostics-bundle` writes a support bundle with summary, sanitized config, and recent logs.
 
@@ -87,7 +87,7 @@ Updater behavior:
 ## Default Hotkey and Config
 
 - Default hotkey: `Ctrl+Shift+Space`
-- Config file: `%APPDATA%\SwiftFind\config.json`
+- Config file: `%APPDATA%\SwiftFind\config.toml`
 - Index DB: `%APPDATA%\SwiftFind\index.sqlite3`
 - Install root (scripted install): `%LOCALAPPDATA%\Programs\SwiftFind\`
 
@@ -100,13 +100,13 @@ Current behavior:
 
 1. Open launcher with your configured hotkey.
 2. Click `?` in the right side of the input area.
-3. SwiftFind opens `%APPDATA%\SwiftFind\config.json`.
+3. SwiftFind opens `%APPDATA%\SwiftFind\config.toml`.
 4. Edit and save config.
 5. Restart `swiftfind-core` to apply hotkey changes.
 
 ## Change Hotkey via Config File
 
-1. Open `%APPDATA%\SwiftFind\config.json` directly.
+1. Open `%APPDATA%\SwiftFind\config.toml` directly.
 2. Update the `hotkey` value.
 3. Restart `swiftfind-core`.
 
@@ -119,7 +119,7 @@ Notes:
 ## Settings Direction
 
 Settings are intentionally file-driven in the current product direction.
-`?` opens `%APPDATA%\SwiftFind\config.json`, and this remains the supported path for:
+`?` opens `%APPDATA%\SwiftFind\config.toml`, and this remains the supported path for:
 
 - hotkey changes
 - startup toggle (`launch_at_startup`)
@@ -252,7 +252,7 @@ Recommended capture points:
 
 1. Hotkey does not trigger:
    - Check startup log for `hotkey registered native_id=...`.
-   - Try changing hotkey in `%APPDATA%\SwiftFind\config.json` to avoid OS/app conflicts.
+   - Try changing hotkey in `%APPDATA%\SwiftFind\config.toml` to avoid OS/app conflicts.
    - Restart runtime after config change.
    - Check if another launcher utility (PowerToys, Flow Launcher, etc.) is intercepting your chosen hotkey.
 2. Overlay does not focus or appears behind apps:
@@ -286,7 +286,7 @@ Recommended capture points:
 7. JS tests flaky on Windows:
    - Use `pnpm vitest --run` with repo `vitest.config.ts` (single-fork mode configured).
 8. Config open/edit issues:
-   - Ensure `%APPDATA%\SwiftFind\config.json` is writable.
+   - Ensure `%APPDATA%\SwiftFind\config.toml` is writable.
    - Check if the config file is locked by another process/editor.
 
 ## Validation Commands
@@ -308,7 +308,7 @@ Run these on a Windows host before publishing a release.
 2. Upgrade-over-existing:
    - run `scripts/windows/update-swiftfind.ps1 -Channel stable -Version "<newer-version>"`.
    - verify checksum verification passes and install completes without manual cleanup.
-   - verify `%APPDATA%\SwiftFind\config.json` remains intact.
+   - verify `%APPDATA%\SwiftFind\config.toml` remains intact.
 
 3. Uninstall + reinstall:
    - uninstall from Windows Apps settings (or uninstaller).

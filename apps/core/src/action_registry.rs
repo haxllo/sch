@@ -40,7 +40,7 @@ pub fn built_in_actions() -> &'static [BuiltInAction] {
         BuiltInAction {
             id: ACTION_OPEN_CONFIG_ID,
             title: "Open SwiftFind Config",
-            subtitle: "Open config.json",
+            subtitle: "Open config.toml",
             keywords: &["config", "settings", "preferences"],
         },
         BuiltInAction {

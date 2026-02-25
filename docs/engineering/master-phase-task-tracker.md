@@ -33,7 +33,7 @@ Major tasks:
 - [x] Keyboard/mouse parity hardening (Enter/Esc/Up/Down/click)
 - [x] Result dedupe + first-keystroke list stability fixes
 - [x] Deterministic first-wheel scrolling + unified hover/selection active-row behavior
-- [x] Config-file settings workflow finalized (`?` -> config.json)
+- [x] Config-file settings workflow finalized (`?` -> config.toml)
 
 ## Phase 3: Beta Hardening
 Status: `COMPLETED`

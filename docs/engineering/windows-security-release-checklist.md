@@ -27,7 +27,7 @@ Use this checklist before publishing any Windows release (`stable` or `beta`).
 - No raw query text exfiltration path introduced.
 - Logs remain local under `%APPDATA%\SwiftFind\logs`.
 - Logs do not include secrets/tokens/passwords.
-- Config remains local under `%APPDATA%\SwiftFind\config.json`.
+- Config remains local under `%APPDATA%\SwiftFind\config.toml`.
 
 ## 4. Dependency and Test Gates
 

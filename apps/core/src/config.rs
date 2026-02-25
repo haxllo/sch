@@ -121,7 +121,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         let app_dir = stable_app_data_dir();
-        let config_path = app_dir.join("config.json");
+        let config_path = app_dir.join("config.toml");
         Self {
             version: CURRENT_CONFIG_VERSION,
             max_results: 20,
@@ -232,7 +232,18 @@ pub fn stable_app_data_dir() -> PathBuf {
 }
 
 pub fn stable_config_path() -> PathBuf {
+    stable_app_data_dir().join("config.toml")
+}
+
+fn stable_legacy_config_path() -> PathBuf {
     stable_app_data_dir().join("config.json")
+}
+
+fn is_toml_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("toml"))
+        .unwrap_or(false)
 }
 
 pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
@@ -241,6 +252,28 @@ pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
         .unwrap_or_else(stable_config_path);
 
     if !resolved_path.exists() {
+        if path.is_none() {
+            let legacy_path = stable_legacy_config_path();
+            if legacy_path.exists() {
+                let raw = std::fs::read_to_string(&legacy_path)?;
+                let mut cfg: Config = parse_text(&raw)?;
+                let source_version = cfg.version;
+                cfg.config_path = resolved_path.clone();
+
+                if cfg.index_db_path.as_os_str().is_empty() {
+                    cfg.index_db_path = resolved_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join("index.sqlite3");
+                }
+
+                let _ = apply_migrations(&mut cfg, &raw);
+                validate(&cfg).map_err(ConfigError::Validation)?;
+                persist_migrated_config(&cfg, &resolved_path, &raw, source_version, &legacy_path)?;
+                return Ok(cfg);
+            }
+        }
+
         let cfg = default_for_path(&resolved_path);
         validate(&cfg).map_err(ConfigError::Validation)?;
         return Ok(cfg);
@@ -261,7 +294,7 @@ pub fn load(path: Option<&Path>) -> Result<Config, ConfigError> {
     let should_persist_migration = apply_migrations(&mut cfg, &raw);
     validate(&cfg).map_err(ConfigError::Validation)?;
     if should_persist_migration {
-        persist_migrated_config(&cfg, &resolved_path, &raw, source_version)?;
+        persist_migrated_config(&cfg, &resolved_path, &raw, source_version, &resolved_path)?;
     }
     Ok(cfg)
 }
@@ -277,7 +310,12 @@ pub fn save_to_path(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let encoded = serde_json::to_string_pretty(cfg)?;
+    let encoded = if is_toml_path(path) {
+        toml::to_string_pretty(cfg)
+            .map_err(|error| ConfigError::Parse(format!("toml encode error: {error}")))?
+    } else {
+        serde_json::to_string_pretty(cfg)?
+    };
     write_atomic(path, &encoded)
 }
 
@@ -286,6 +324,10 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
 
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+    }
+
+    if is_toml_path(path) {
+        return write_user_template_toml(cfg, path);
     }
 
     let roots_section = json5_path_array_section(&cfg.discovery_roots);
@@ -480,6 +522,179 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     Ok(())
 }
 
+fn write_user_template_toml(cfg: &Config, path: &Path) -> Result<(), ConfigError> {
+    let roots_section = toml_path_array_section(&cfg.discovery_roots);
+    let excluded_roots_section = toml_path_array_section(&cfg.discovery_exclude_roots);
+    let plugin_paths_section = toml_path_array_section(&cfg.plugin_paths);
+    let clipboard_patterns_section =
+        toml_string_array_section(&cfg.clipboard_exclude_sensitive_patterns);
+
+    let mut text = String::new();
+    text.push_str("# SwiftFind config (TOML format).\n");
+    text.push_str("#\n");
+    text.push_str("# Quick setup:\n");
+    text.push_str("# 1) Keep exactly ONE hotkey value.\n");
+    text.push_str("# 2) Save file.\n");
+    text.push_str("# 3) Restart SwiftFind.\n");
+    text.push_str("#\n");
+    text.push_str("# Safer Windows-friendly hotkeys you can use:\n");
+    for option in &cfg.hotkey_recommended {
+        text.push_str("# hotkey = ");
+        text.push_str(&json_string(option));
+        text.push('\n');
+    }
+    text.push_str("# Avoid common OS-reserved shortcuts like Win+..., Alt+Tab, Ctrl+Esc.\n");
+    text.push_str("hotkey = ");
+    text.push_str(&json_string(&cfg.hotkey));
+    text.push_str("\n\n");
+
+    text.push_str("# Start SwiftFind automatically when you sign in (true/false)\n");
+    text.push_str("launch_at_startup = ");
+    text.push_str(if cfg.launch_at_startup {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str("\n\n");
+
+    text.push_str("# Number of results shown per query (valid range: 5..100)\n");
+    text.push_str("max_results = ");
+    text.push_str(&cfg.max_results.to_string());
+    text.push_str("\n\n");
+
+    text.push_str("# Folders scanned for local files.\n");
+    text.push_str("discovery_roots = ");
+    text.push_str(&roots_section);
+    text.push_str("\n\n");
+    text.push_str("# Folders excluded from local-file discovery.\n");
+    text.push_str("discovery_exclude_roots = ");
+    text.push_str(&excluded_roots_section);
+    text.push_str("\n\n");
+
+    text.push_str("# Use Windows Search index for file/folder discovery when available.\n");
+    text.push_str("windows_search_enabled = ");
+    text.push_str(if cfg.windows_search_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push('\n');
+    text.push_str("# Fall back to direct filesystem scan when Windows Search is unavailable.\n");
+    text.push_str("windows_search_fallback_filesystem = ");
+    text.push_str(if cfg.windows_search_fallback_filesystem {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str("\n\n");
+
+    text.push_str("# Toggle file and folder visibility in results.\n");
+    text.push_str("show_files = ");
+    text.push_str(if cfg.show_files { "true" } else { "false" });
+    text.push('\n');
+    text.push_str("show_folders = ");
+    text.push_str(if cfg.show_folders { "true" } else { "false" });
+    text.push_str("\n\n");
+
+    text.push_str("# Search mode default: all | apps | files | actions | clipboard\n");
+    text.push_str("search_mode_default = ");
+    text.push_str(&json_string(match cfg.search_mode_default {
+        SearchMode::All => "all",
+        SearchMode::Apps => "apps",
+        SearchMode::Files => "files",
+        SearchMode::Actions => "actions",
+        SearchMode::Clipboard => "clipboard",
+    }));
+    text.push('\n');
+    text.push_str(
+        "# Enable query operators like kind:, modified:, created:, AND/OR/NOT and -term\n",
+    );
+    text.push_str("search_dsl_enabled = ");
+    text.push_str(if cfg.search_dsl_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push('\n');
+    text.push_str("# Enable command mode uninstall actions (e.g. > uninstall appname)\n");
+    text.push_str("uninstall_actions_enabled = ");
+    text.push_str(if cfg.uninstall_actions_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str("\n\n");
+
+    text.push_str("# Web search in command mode (press > then type your query)\n");
+    text.push_str("# Default is google for most users.\n");
+    text.push_str(
+        "# Options: google | duckduckgo | bing | brave | startpage | ecosia | yahoo | custom\n",
+    );
+    text.push_str("web_search_provider = ");
+    text.push_str(&json_string(match cfg.web_search_provider {
+        WebSearchProvider::Duckduckgo => "duckduckgo",
+        WebSearchProvider::Google => "google",
+        WebSearchProvider::Bing => "bing",
+        WebSearchProvider::Brave => "brave",
+        WebSearchProvider::Startpage => "startpage",
+        WebSearchProvider::Ecosia => "ecosia",
+        WebSearchProvider::Yahoo => "yahoo",
+        WebSearchProvider::Custom => "custom",
+    }));
+    text.push('\n');
+    text.push_str("# Used only when provider is custom. Must include {query}.\n");
+    text.push_str("# Example: \"https://example.com/search?q={query}\"\n");
+    text.push_str("web_search_custom_template = ");
+    text.push_str(&json_string(&cfg.web_search_custom_template));
+    text.push_str("\n\n");
+
+    text.push_str("# Clipboard history provider settings\n");
+    text.push_str("clipboard_enabled = ");
+    text.push_str(if cfg.clipboard_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push('\n');
+    text.push_str("# Retention in minutes (valid range: 5..43200)\n");
+    text.push_str("clipboard_retention_minutes = ");
+    text.push_str(&cfg.clipboard_retention_minutes.to_string());
+    text.push('\n');
+    text.push_str("# Substring patterns skipped when capturing clipboard entries\n");
+    text.push_str("clipboard_exclude_sensitive_patterns = ");
+    text.push_str(&clipboard_patterns_section);
+    text.push_str("\n\n");
+
+    text.push_str("# Plugin SDK settings\n");
+    text.push_str("plugins_enabled = ");
+    text.push_str(if cfg.plugins_enabled { "true" } else { "false" });
+    text.push('\n');
+    text.push_str("# Keep safe mode true to prevent plugin command execution.\n");
+    text.push_str("plugins_safe_mode = ");
+    text.push_str(if cfg.plugins_safe_mode {
+        "true"
+    } else {
+        "false"
+    });
+    text.push('\n');
+    text.push_str("plugin_paths = ");
+    text.push_str(&plugin_paths_section);
+    text.push_str("\n\n");
+
+    text.push_str("# Runtime performance targets\n");
+    text.push_str("# cache trim after hide in milliseconds (valid range: 100..10000)\n");
+    text.push_str("idle_cache_trim_ms = ");
+    text.push_str(&cfg.idle_cache_trim_ms.to_string());
+    text.push('\n');
+    text.push_str("# active memory target in MB (valid range: 20..512)\n");
+    text.push_str("active_memory_target_mb = ");
+    text.push_str(&cfg.active_memory_target_mb.to_string());
+    text.push('\n');
+
+    std::fs::write(path, text)?;
+    Ok(())
+}
+
 pub fn validate(cfg: &Config) -> Result<(), String> {
     if cfg.max_results < 5 || cfg.max_results > 100 {
         return Err("max_results out of range".into());
@@ -610,6 +825,27 @@ fn json5_path_array_section(paths: &[PathBuf]) -> String {
     } else {
         format!("[\n{body}\n  ]")
     }
+}
+
+fn toml_path_array_section(paths: &[PathBuf]) -> String {
+    let values = paths
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect::<Vec<_>>();
+    toml_string_array_section(&values)
+}
+
+fn toml_string_array_section(values: &[String]) -> String {
+    if values.is_empty() {
+        return "[]".to_string();
+    }
+
+    let body = values
+        .iter()
+        .map(|value| format!("  {}", json_string(value)))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    format!("[\n{body},\n]")
 }
 
 fn default_discovery_roots() -> Vec<PathBuf> {
@@ -752,6 +988,7 @@ fn persist_migrated_config(
     path: &Path,
     original_raw: &str,
     source_version: u32,
+    source_path: &Path,
 ) -> Result<(), ConfigError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent)?;
@@ -760,10 +997,16 @@ fn persist_migrated_config(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let backup_ext = source_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .filter(|ext| !ext.trim().is_empty())
+        .unwrap_or("txt");
     let backup_path = parent.join(format!(
-        "config.v{}-backup-{}.jsonc",
+        "config.v{}-backup-{}.{}",
         source_version.max(1),
-        stamp
+        stamp,
+        backup_ext
     ));
     std::fs::write(&backup_path, original_raw)?;
     write_user_template(cfg, path)
@@ -774,18 +1017,25 @@ fn raw_has_key(raw: &str, key: &str) -> bool {
     if raw.contains(&quoted) {
         return true;
     }
+    let toml_key = format!("{key} =");
+    if raw.contains(&toml_key) {
+        return true;
+    }
     let bare = format!("{key}:");
     raw.contains(&bare)
 }
 
 fn parse_text(raw: &str) -> Result<Config, ConfigError> {
-    match serde_json::from_str::<Config>(raw) {
+    match toml::from_str::<Config>(raw) {
         Ok(cfg) => Ok(cfg),
-        Err(json_err) => match json5::from_str::<Config>(raw) {
+        Err(toml_err) => match serde_json::from_str::<Config>(raw) {
             Ok(cfg) => Ok(cfg),
-            Err(json5_err) => Err(ConfigError::Parse(format!(
-                "invalid config format. json error: {json_err}; json5 error: {json5_err}"
-            ))),
+            Err(json_err) => match json5::from_str::<Config>(raw) {
+                Ok(cfg) => Ok(cfg),
+                Err(json5_err) => Err(ConfigError::Parse(format!(
+                    "invalid config format. toml error: {toml_err}; json error: {json_err}; json5 error: {json5_err}"
+                ))),
+            },
         },
     }
 }

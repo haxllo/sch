@@ -2,7 +2,7 @@
 
 ## Config File Location
 
-- Path: `%APPDATA%\\SwiftFind\\config.json`
+- Path: `%APPDATA%\\SwiftFind\\config.toml`
 - Write strategy: atomic temp-write + replace
 - Format: JSON5-compatible (inline `//` comments are allowed)
 
@@ -49,5 +49,5 @@ Additional generated fields may also exist in persisted config (for example `ver
 ## Settings Direction
 
 - Settings are file-driven in current product direction.
-- `?` in launcher opens `%APPDATA%\\SwiftFind\\config.json`.
+- `?` in launcher opens `%APPDATA%\\SwiftFind\\config.toml`.
 - No native settings window is required for this phase.

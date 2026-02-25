@@ -6,7 +6,7 @@ Last updated: 2026-02-23
 
 Define the post-`v1.0.0` execution roadmap to improve runtime reliability, installer safety, search quality, and release discipline without regressing performance.
 
-This roadmap is Windows-first and keeps `config.json` as the source of truth.
+This roadmap is Windows-first and keeps `config.toml` as the source of truth.
 
 ## Baseline (Starting Point)
 

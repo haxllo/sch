@@ -21,10 +21,10 @@ Current hotkey-to-launcher behavior in `swiftfind-core`:
    - `Esc` hides launcher
    - clicking outside launcher hides launcher
    - any close path clears query/results so next open starts fresh
-   - clicking `?` opens `%APPDATA%\SwiftFind\config.json` for manual edits
+   - clicking `?` opens `%APPDATA%\SwiftFind\config.toml` for manual edits
 7. Search and launch errors are surfaced inside launcher status text.
 8. Settings persistence behavior:
-   - config remains source of truth (`%APPDATA%\SwiftFind\config.json`)
+   - config remains source of truth (`%APPDATA%\SwiftFind\config.toml`)
    - save path uses safe temp-write + replace flow
    - startup behavior is controlled by config values
    - local file discovery honors include/exclude roots (`discovery_roots`, `discovery_exclude_roots`)

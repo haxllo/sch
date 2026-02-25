@@ -133,7 +133,7 @@ else {
   & $installedExe --set-launch-at-startup=false
 }
 
-Write-Host "Note: launch-at-startup can be changed later in $env:APPDATA\SwiftFind\config.json"
+Write-Host "Note: launch-at-startup can be changed later in $env:APPDATA\SwiftFind\config.toml"
 
 if ($StartAfterInstall) {
   Write-Host "[5/5] Starting SwiftFind in background..."
@@ -145,4 +145,4 @@ else {
 
 Write-Host "Install complete." -ForegroundColor Green
 Write-Host "Executable: $installedExe"
-Write-Host "Config: $env:APPDATA\SwiftFind\config.json"
+Write-Host "Config: $env:APPDATA\SwiftFind\config.toml"

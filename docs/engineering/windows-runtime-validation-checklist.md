@@ -57,7 +57,7 @@ Expected:
 
 9. Settings access checks.
 - Click `?` in launcher input area.
-- Expected: `%APPDATA%\SwiftFind\config.json` opens for manual edits.
+- Expected: `%APPDATA%\SwiftFind\config.toml` opens for manual edits.
 - Edit `hotkey` or `max_results`, save, restart runtime, verify behavior updates.
 
 10. Future settings UI note.
@@ -79,7 +79,7 @@ Expected:
 - Install a newer build over an existing installed build.
 - Expected: install succeeds without manual uninstall.
 - Expected: runtime restarts cleanly and hotkey registration remains valid.
-- Expected: config file in `%APPDATA%\SwiftFind\config.json` is preserved.
+- Expected: config file in `%APPDATA%\SwiftFind\config.toml` is preserved.
 
 14. Channel updater checks.
 - Run `scripts/windows/update-swiftfind.ps1 -Channel stable`.

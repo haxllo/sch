@@ -4376,7 +4376,7 @@ mod imp {
         let cfg_path = state.help_config_path.trim().to_string();
         let target = if cfg_path.is_empty() {
             if let Ok(appdata) = std::env::var("APPDATA") {
-                format!("{appdata}\\SwiftFind\\config.json")
+                format!("{appdata}\\SwiftFind\\config.toml")
             } else {
                 return Err("APPDATA is not set; cannot locate config path.".to_string());
             }
