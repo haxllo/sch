@@ -167,11 +167,13 @@ pub struct FileSystemDiscoveryProvider {
     max_depth: usize,
     windows_search_enabled: bool,
     windows_search_fallback_filesystem: bool,
+    show_files: bool,
+    show_folders: bool,
 }
 
 impl FileSystemDiscoveryProvider {
     pub fn new(roots: Vec<PathBuf>, max_depth: usize, excluded_roots: Vec<PathBuf>) -> Self {
-        Self::with_windows_search_options(roots, max_depth, excluded_roots, true, true)
+        Self::with_options(roots, max_depth, excluded_roots, true, true, true, true)
     }
 
     pub fn with_windows_search_options(
@@ -181,12 +183,34 @@ impl FileSystemDiscoveryProvider {
         windows_search_enabled: bool,
         windows_search_fallback_filesystem: bool,
     ) -> Self {
+        Self::with_options(
+            roots,
+            max_depth,
+            excluded_roots,
+            windows_search_enabled,
+            windows_search_fallback_filesystem,
+            true,
+            true,
+        )
+    }
+
+    pub fn with_options(
+        roots: Vec<PathBuf>,
+        max_depth: usize,
+        excluded_roots: Vec<PathBuf>,
+        windows_search_enabled: bool,
+        windows_search_fallback_filesystem: bool,
+        show_files: bool,
+        show_folders: bool,
+    ) -> Self {
         Self {
             roots,
             excluded_roots,
             max_depth,
             windows_search_enabled,
             windows_search_fallback_filesystem,
+            show_files,
+            show_folders,
         }
     }
 }
@@ -197,9 +221,18 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
     }
 
     fn discover(&self) -> Result<Vec<SearchItem>, ProviderError> {
+        if !self.show_files && !self.show_folders {
+            return Ok(Vec::new());
+        }
+
         #[cfg(target_os = "windows")]
         if self.windows_search_enabled {
-            match discover_windows_search_items(&self.roots, &self.excluded_roots) {
+            match discover_windows_search_items(
+                &self.roots,
+                &self.excluded_roots,
+                self.show_files,
+                self.show_folders,
+            ) {
                 Ok(items) if !items.is_empty() => return Ok(items),
                 Ok(_) if !self.windows_search_fallback_filesystem => return Ok(Vec::new()),
                 Ok(_) => {}
@@ -208,7 +241,13 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
             }
         }
 
-        discover_filesystem_walk(&self.roots, &self.excluded_roots, self.max_depth)
+        discover_filesystem_walk(
+            &self.roots,
+            &self.excluded_roots,
+            self.max_depth,
+            self.show_files,
+            self.show_folders,
+        )
     }
 
     fn change_stamp(&self) -> Option<String> {
@@ -231,6 +270,10 @@ impl DiscoveryProvider for FileSystemDiscoveryProvider {
         } else {
             "none"
         });
+        stamp.push_str(";show_files=");
+        stamp.push_str(if self.show_files { "true" } else { "false" });
+        stamp.push_str(";show_folders=");
+        stamp.push_str(if self.show_folders { "true" } else { "false" });
         Some(stamp)
     }
 }
@@ -239,6 +282,8 @@ fn discover_filesystem_walk(
     roots: &[PathBuf],
     excluded_roots: &[PathBuf],
     max_depth: usize,
+    show_files: bool,
+    show_folders: bool,
 ) -> Result<Vec<SearchItem>, ProviderError> {
     let mut out = Vec::new();
     let excluded = normalized_exclusion_roots(excluded_roots);
@@ -256,6 +301,9 @@ fn discover_filesystem_walk(
         {
             let path = entry.path();
             if path.is_dir() {
+                if !show_folders {
+                    continue;
+                }
                 if path == root {
                     continue;
                 }
@@ -276,6 +324,9 @@ fn discover_filesystem_walk(
             }
 
             if !path.is_file() {
+                continue;
+            }
+            if !show_files {
                 continue;
             }
 
@@ -553,6 +604,8 @@ fn normalize_id_path(path: &str) -> String {
 fn discover_windows_search_items(
     roots: &[PathBuf],
     excluded_roots: &[PathBuf],
+    show_files: bool,
+    show_folders: bool,
 ) -> Result<Vec<SearchItem>, ProviderError> {
     use std::collections::HashSet;
     use std::process::Command;
@@ -663,6 +716,12 @@ $conn.Close()
         };
         let kind = kind_raw.trim().to_ascii_lowercase();
         if kind != "file" && kind != "folder" {
+            continue;
+        }
+        if kind == "file" && !show_files {
+            continue;
+        }
+        if kind == "folder" && !show_folders {
             continue;
         }
         let path = path_raw.trim();

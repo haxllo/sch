@@ -209,3 +209,43 @@ fn extension_filter_matches_only_requested_extension() {
     let ids: Vec<&str> = results.iter().map(|item| item.id.as_str()).collect();
     assert_eq!(ids, vec!["md"]);
 }
+
+#[test]
+fn visibility_filter_can_hide_files() {
+    let items = vec![
+        SearchItem::new("file", "file", "Readme.md", "C:\\Docs\\Readme.md"),
+        SearchItem::new("folder", "folder", "Docs", "C:\\Docs"),
+        SearchItem::new("app", "app", "Docs Viewer", "C:\\Apps\\viewer.exe"),
+    ];
+
+    let filter = SearchFilter {
+        include_files: false,
+        include_folders: true,
+        ..SearchFilter::default()
+    };
+    let results = swiftfind_core::search::search_with_filter(&items, "doc", 10, &filter);
+    let ids: Vec<&str> = results.iter().map(|item| item.id.as_str()).collect();
+    assert!(!ids.contains(&"file"));
+    assert!(ids.contains(&"folder"));
+    assert!(ids.contains(&"app"));
+}
+
+#[test]
+fn visibility_filter_can_hide_folders() {
+    let items = vec![
+        SearchItem::new("file", "file", "Readme.md", "C:\\Docs\\Readme.md"),
+        SearchItem::new("folder", "folder", "Docs", "C:\\Docs"),
+        SearchItem::new("app", "app", "Docs Viewer", "C:\\Apps\\viewer.exe"),
+    ];
+
+    let filter = SearchFilter {
+        include_files: true,
+        include_folders: false,
+        ..SearchFilter::default()
+    };
+    let results = swiftfind_core::search::search_with_filter(&items, "doc", 10, &filter);
+    let ids: Vec<&str> = results.iter().map(|item| item.id.as_str()).collect();
+    assert!(ids.contains(&"file"));
+    assert!(!ids.contains(&"folder"));
+    assert!(ids.contains(&"app"));
+}

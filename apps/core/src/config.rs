@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 4;
+pub const CURRENT_CONFIG_VERSION: u32 = 5;
 const LEGACY_IDLE_CACHE_TRIM_MS_V1: u32 = 1200;
 const LEGACY_ACTIVE_MEMORY_TARGET_MB_V1: u16 = 80;
 const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
@@ -15,6 +15,8 @@ const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
     "discovery_exclude_roots",
     "windows_search_enabled",
     "windows_search_fallback_filesystem",
+    "show_files",
+    "show_folders",
     "search_mode_default",
     "search_dsl_enabled",
     "web_search_provider",
@@ -94,6 +96,8 @@ pub struct Config {
     pub discovery_exclude_roots: Vec<PathBuf>,
     pub windows_search_enabled: bool,
     pub windows_search_fallback_filesystem: bool,
+    pub show_files: bool,
+    pub show_folders: bool,
     pub hotkey: String,
     pub launch_at_startup: bool,
     pub hotkey_help: String,
@@ -125,6 +129,8 @@ impl Default for Config {
             discovery_exclude_roots: default_discovery_exclude_roots(),
             windows_search_enabled: true,
             windows_search_fallback_filesystem: true,
+            show_files: true,
+            show_folders: true,
             hotkey: "Ctrl+Shift+Space".to_string(),
             launch_at_startup: false,
             hotkey_help:
@@ -346,6 +352,13 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     } else {
         "false"
     });
+    text.push_str(",\n\n");
+    text.push_str("  // Toggle file and folder visibility in results.\n");
+    text.push_str("  \"show_files\": ");
+    text.push_str(if cfg.show_files { "true" } else { "false" });
+    text.push_str(",\n");
+    text.push_str("  \"show_folders\": ");
+    text.push_str(if cfg.show_folders { "true" } else { "false" });
     text.push_str(",\n\n");
 
     text.push_str("  // Search mode default: all | apps | files | actions | clipboard\n");
@@ -690,6 +703,17 @@ fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
         if !raw_has_key(raw, "windows_search_fallback_filesystem") {
             cfg.windows_search_fallback_filesystem =
                 Config::default().windows_search_fallback_filesystem;
+            changed = true;
+        }
+    }
+
+    if source_version < 5 {
+        if !raw_has_key(raw, "show_files") {
+            cfg.show_files = Config::default().show_files;
+            changed = true;
+        }
+        if !raw_has_key(raw, "show_folders") {
+            cfg.show_folders = Config::default().show_folders;
             changed = true;
         }
     }

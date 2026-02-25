@@ -145,6 +145,36 @@ fn runtime_providers_use_configured_roots() {
 }
 
 #[test]
+fn runtime_providers_respect_show_files_and_folders_toggles() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("swiftfind-runtime-hidden-roots-{unique}"));
+    std::fs::create_dir_all(&root).unwrap();
+    let file_path = root.join("HiddenDoc.txt");
+    std::fs::write(&file_path, b"runtime").unwrap();
+
+    let mut config = swiftfind_core::config::Config::default();
+    config.discovery_roots = vec![root.clone()];
+    config.discovery_exclude_roots = vec![];
+    config.show_files = false;
+    config.show_folders = false;
+
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db)
+        .unwrap()
+        .with_runtime_providers();
+
+    let _ = service.rebuild_index().unwrap();
+    let results = service.search("hiddendoc", 10).unwrap();
+    assert!(results.is_empty());
+
+    std::fs::remove_file(&file_path).unwrap();
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
 fn file_system_provider_excludes_configured_roots() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

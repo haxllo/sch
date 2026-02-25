@@ -1132,7 +1132,9 @@ fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, 
         "discovery_roots_count": cfg.discovery_roots.len(),
         "discovery_exclude_roots_count": cfg.discovery_exclude_roots.len(),
         "windows_search_enabled": cfg.windows_search_enabled,
-        "windows_search_fallback_filesystem": cfg.windows_search_fallback_filesystem
+        "windows_search_fallback_filesystem": cfg.windows_search_fallback_filesystem,
+        "show_files": cfg.show_files,
+        "show_folders": cfg.show_folders
     });
     let encoded = serde_json::to_string_pretty(&sanitized_cfg)
         .map_err(|e| RuntimeError::Args(format!("failed to encode sanitized config: {e}")))?;
@@ -1878,6 +1880,8 @@ fn build_search_filter(cfg: &Config, parsed_query: &ParsedQuery) -> SearchFilter
         mode,
         kind_filter: parsed_query.kind_filter.clone(),
         extension_filter: parsed_query.extension_filter.clone(),
+        include_files: cfg.show_files,
+        include_folders: cfg.show_folders,
         include_groups: parsed_query.include_groups.clone(),
         exclude_terms: parsed_query.exclude_terms.clone(),
         modified_within: parsed_query.modified_within,

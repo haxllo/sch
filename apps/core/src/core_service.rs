@@ -129,16 +129,18 @@ impl CoreService {
     pub fn with_runtime_providers(mut self) -> Self {
         let mut providers: Vec<Box<dyn DiscoveryProvider>> = Vec::new();
         providers.push(Box::new(StartMenuAppDiscoveryProvider::default()));
-        if !self.config.discovery_roots.is_empty() {
-            providers.push(Box::new(
-                FileSystemDiscoveryProvider::with_windows_search_options(
-                    self.config.discovery_roots.clone(),
-                    5,
-                    self.config.discovery_exclude_roots.clone(),
-                    self.config.windows_search_enabled,
-                    self.config.windows_search_fallback_filesystem,
-                ),
-            ));
+        if !self.config.discovery_roots.is_empty()
+            && (self.config.show_files || self.config.show_folders)
+        {
+            providers.push(Box::new(FileSystemDiscoveryProvider::with_options(
+                self.config.discovery_roots.clone(),
+                5,
+                self.config.discovery_exclude_roots.clone(),
+                self.config.windows_search_enabled,
+                self.config.windows_search_fallback_filesystem,
+                self.config.show_files,
+                self.config.show_folders,
+            )));
         }
         self.providers = providers;
         self

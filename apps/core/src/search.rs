@@ -64,6 +64,8 @@ pub struct SearchFilter {
     pub mode: SearchMode,
     pub kind_filter: Option<String>,
     pub extension_filter: Option<String>,
+    pub include_files: bool,
+    pub include_folders: bool,
     pub include_groups: Vec<Vec<String>>,
     pub exclude_terms: Vec<String>,
     pub modified_within: Option<TimeFilterWindow>,
@@ -76,6 +78,8 @@ impl Default for SearchFilter {
             mode: SearchMode::All,
             kind_filter: None,
             extension_filter: None,
+            include_files: true,
+            include_folders: true,
             include_groups: Vec::new(),
             exclude_terms: Vec::new(),
             modified_within: None,
@@ -107,6 +111,7 @@ pub fn search_with_filter(
     let now_epoch_secs = now_epoch_secs();
     let mut scored: Vec<ScoredItem<'_>> = items
         .iter()
+        .filter(|item| matches_visibility(item, filter))
         .filter_map(|item| {
             let score = if fast_path {
                 score_item_fast(item, &normalized_query, now_epoch_secs, app_intent_query)
@@ -518,6 +523,8 @@ fn is_default_filter(filter: &SearchFilter) -> bool {
     filter.mode == SearchMode::All
         && filter.kind_filter.is_none()
         && filter.extension_filter.is_none()
+        && filter.include_files
+        && filter.include_folders
         && filter.include_groups.is_empty()
         && filter.exclude_terms.is_empty()
         && filter.modified_within.is_none()
@@ -557,6 +564,16 @@ fn matches_kind_filter(item: &SearchItem, kind_filter: &str) -> bool {
         return item.kind.eq_ignore_ascii_case("clipboard");
     }
     item.kind.eq_ignore_ascii_case(&normalized)
+}
+
+fn matches_visibility(item: &SearchItem, filter: &SearchFilter) -> bool {
+    if item.kind.eq_ignore_ascii_case("file") && !filter.include_files {
+        return false;
+    }
+    if item.kind.eq_ignore_ascii_case("folder") && !filter.include_folders {
+        return false;
+    }
+    true
 }
 
 fn matches_extension_filter(item: &SearchItem, extension_filter: &str) -> bool {
