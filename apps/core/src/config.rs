@@ -337,6 +337,15 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str("{\n");
     text.push_str("  // SwiftFind config (comments are allowed).\n");
     text.push_str("  //\n");
+    text.push_str("  // How to use this file:\n");
+    text.push_str("  // - Edit values, save, then restart SwiftFind.\n");
+    text.push_str("  // - Keep strings in double quotes.\n");
+    text.push_str(
+        "  // - Use double backslashes for Windows paths (C:\\\\Users\\\\Admin\\\\...).\n",
+    );
+    text.push_str("  // - true/false and numbers must not be quoted.\n");
+    text.push_str("  // - This file is the active config while using .json format.\n");
+    text.push_str("  //\n");
     text.push_str("  // Quick setup:\n");
     text.push_str("  // 1) Keep exactly ONE `hotkey` line uncommented.\n");
     text.push_str("  // 2) Save file.\n");
@@ -531,6 +540,13 @@ fn write_user_template_toml(cfg: &Config, path: &Path) -> Result<(), ConfigError
 
     let mut text = String::new();
     text.push_str("# SwiftFind config (TOML format).\n");
+    text.push_str("#\n");
+    text.push_str("# How to use this file:\n");
+    text.push_str("# - Edit values, save, then restart SwiftFind.\n");
+    text.push_str("# - Strings must be in quotes (example: hotkey = \"Ctrl+Space\").\n");
+    text.push_str("# - Use double backslashes for Windows paths (C:\\\\Users\\\\Admin\\\\...).\n");
+    text.push_str("# - true/false and numbers are not quoted.\n");
+    text.push_str("# - This is the active config. Legacy config.json is kept only as backup.\n");
     text.push_str("#\n");
     text.push_str("# Quick setup:\n");
     text.push_str("# 1) Keep exactly ONE hotkey value.\n");
