@@ -53,3 +53,9 @@ fn accepts_web_open_target() {
     let result = launch_open_target("https://duckduckgo.com/?q=swiftfind");
     assert!(result.is_ok());
 }
+
+#[test]
+fn accepts_shell_open_target_via_launch_path() {
+    let result = launch_path("shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App");
+    assert!(result.is_ok());
+}

@@ -20,9 +20,9 @@ mod imp {
         DeleteObject, DrawTextW, EndPaint, FillRect, FillRgn, FrameRgn, GetDC,
         GetTextExtentPoint32W, GetTextMetricsW, InvalidateRect, ReleaseDC, SelectObject,
         SetBkColor, SetBkMode, SetTextColor, SetWindowRgn, TextOutW, DEFAULT_CHARSET,
-        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT,
-        DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS,
-        PAINTSTRUCT, TEXTMETRICW, TRANSPARENT,
+        DEFAULT_QUALITY, DT_CENTER, DT_EDITCONTROL, DT_END_ELLIPSIS, DT_LEFT, DT_SINGLELINE,
+        DT_VCENTER, FF_DONTCARE, FR_PRIVATE, HDC, OPAQUE, OUT_DEFAULT_PRECIS, PAINTSTRUCT,
+        TEXTMETRICW, TRANSPARENT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
@@ -2079,7 +2079,8 @@ mod imp {
         let mut prefix_rect = text_rect;
         prefix_rect.top = client.top;
         prefix_rect.bottom = client.bottom;
-        let reserved = COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP + COMMAND_PREFIX_LEFT_SHIFT;
+        let reserved =
+            COMMAND_PREFIX_RESERVED_WIDTH + COMMAND_PREFIX_GAP + COMMAND_PREFIX_LEFT_SHIFT;
         prefix_rect.left = (text_rect.left - reserved).max(0);
         prefix_rect.right = (prefix_rect.left + COMMAND_PREFIX_RESERVED_WIDTH)
             .min((text_rect.left - COMMAND_PREFIX_GAP).max(prefix_rect.left + 1));
@@ -2857,6 +2858,9 @@ mod imp {
         }
 
         if !source.is_empty() {
+            if let Some(icon) = shell_icon_from_appsfolder_target(source) {
+                return Some(icon);
+            }
             if is_app_shortcut {
                 if let Some(icon) = executable_icon_from_shortcut_hlink(source) {
                     return Some(icon);

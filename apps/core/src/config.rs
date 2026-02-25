@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 3;
+pub const CURRENT_CONFIG_VERSION: u32 = 4;
 const LEGACY_IDLE_CACHE_TRIM_MS_V1: u32 = 1200;
 const LEGACY_ACTIVE_MEMORY_TARGET_MB_V1: u16 = 80;
 const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
@@ -13,6 +13,8 @@ const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
     "max_results",
     "discovery_roots",
     "discovery_exclude_roots",
+    "windows_search_enabled",
+    "windows_search_fallback_filesystem",
     "search_mode_default",
     "search_dsl_enabled",
     "web_search_provider",
@@ -90,6 +92,8 @@ pub struct Config {
     pub config_path: PathBuf,
     pub discovery_roots: Vec<PathBuf>,
     pub discovery_exclude_roots: Vec<PathBuf>,
+    pub windows_search_enabled: bool,
+    pub windows_search_fallback_filesystem: bool,
     pub hotkey: String,
     pub launch_at_startup: bool,
     pub hotkey_help: String,
@@ -119,6 +123,8 @@ impl Default for Config {
             config_path,
             discovery_roots: default_discovery_roots(),
             discovery_exclude_roots: default_discovery_exclude_roots(),
+            windows_search_enabled: true,
+            windows_search_fallback_filesystem: true,
             hotkey: "Ctrl+Shift+Space".to_string(),
             launch_at_startup: false,
             hotkey_help:
@@ -324,6 +330,22 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     text.push_str("  // Any file/folder under these roots is ignored.\n");
     text.push_str("  \"discovery_exclude_roots\": ");
     text.push_str(&excluded_roots_section);
+    text.push_str(",\n\n");
+    text.push_str("  // Use Windows Search index for file/folder discovery when available.\n");
+    text.push_str("  \"windows_search_enabled\": ");
+    text.push_str(if cfg.windows_search_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n");
+    text.push_str("  // Fall back to direct filesystem scan when Windows Search is unavailable.\n");
+    text.push_str("  \"windows_search_fallback_filesystem\": ");
+    text.push_str(if cfg.windows_search_fallback_filesystem {
+        "true"
+    } else {
+        "false"
+    });
     text.push_str(",\n\n");
 
     text.push_str("  // Search mode default: all | apps | files | actions | clipboard\n");
@@ -656,6 +678,18 @@ fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
         }
         if !raw_has_key(raw, "web_search_custom_template") {
             cfg.web_search_custom_template = Config::default().web_search_custom_template;
+            changed = true;
+        }
+    }
+
+    if source_version < 4 {
+        if !raw_has_key(raw, "windows_search_enabled") {
+            cfg.windows_search_enabled = Config::default().windows_search_enabled;
+            changed = true;
+        }
+        if !raw_has_key(raw, "windows_search_fallback_filesystem") {
+            cfg.windows_search_fallback_filesystem =
+                Config::default().windows_search_fallback_filesystem;
             changed = true;
         }
     }

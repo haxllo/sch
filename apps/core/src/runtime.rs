@@ -1130,7 +1130,9 @@ fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, 
         "idle_cache_trim_ms": cfg.idle_cache_trim_ms,
         "active_memory_target_mb": cfg.active_memory_target_mb,
         "discovery_roots_count": cfg.discovery_roots.len(),
-        "discovery_exclude_roots_count": cfg.discovery_exclude_roots.len()
+        "discovery_exclude_roots_count": cfg.discovery_exclude_roots.len(),
+        "windows_search_enabled": cfg.windows_search_enabled,
+        "windows_search_fallback_filesystem": cfg.windows_search_fallback_filesystem
     });
     let encoded = serde_json::to_string_pretty(&sanitized_cfg)
         .map_err(|e| RuntimeError::Args(format!("failed to encode sanitized config: {e}")))?;

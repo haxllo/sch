@@ -130,11 +130,15 @@ impl CoreService {
         let mut providers: Vec<Box<dyn DiscoveryProvider>> = Vec::new();
         providers.push(Box::new(StartMenuAppDiscoveryProvider::default()));
         if !self.config.discovery_roots.is_empty() {
-            providers.push(Box::new(FileSystemDiscoveryProvider::new(
-                self.config.discovery_roots.clone(),
-                5,
-                self.config.discovery_exclude_roots.clone(),
-            )));
+            providers.push(Box::new(
+                FileSystemDiscoveryProvider::with_windows_search_options(
+                    self.config.discovery_roots.clone(),
+                    5,
+                    self.config.discovery_exclude_roots.clone(),
+                    self.config.windows_search_enabled,
+                    self.config.windows_search_fallback_filesystem,
+                ),
+            ));
         }
         self.providers = providers;
         self
@@ -679,13 +683,20 @@ fn provider_manages_kind(provider_name: &str, kind: &str) -> bool {
 }
 
 fn should_prune_after_launch_error(item: &SearchItem, error: &LaunchError) -> bool {
+    let is_filesystem_target = looks_like_filesystem_path(item.path.trim());
     match error {
-        LaunchError::MissingPath(_) => true,
+        LaunchError::MissingPath(_) => {
+            is_filesystem_target
+                && (item.kind.eq_ignore_ascii_case("app")
+                    || item.kind.eq_ignore_ascii_case("file")
+                    || item.kind.eq_ignore_ascii_case("folder"))
+        }
         LaunchError::LaunchFailed {
             code: Some(code), ..
         } => {
             // ShellExecute missing-file/path errors: remove stale entries immediately.
             (*code == 2 || *code == 3)
+                && is_filesystem_target
                 && (item.kind.eq_ignore_ascii_case("app")
                     || item.kind.eq_ignore_ascii_case("file")
                     || item.kind.eq_ignore_ascii_case("folder"))

@@ -23,6 +23,8 @@ fn accepts_default_config() {
         cfg.web_search_provider,
         swiftfind_core::config::WebSearchProvider::Duckduckgo
     );
+    assert!(cfg.windows_search_enabled);
+    assert!(cfg.windows_search_fallback_filesystem);
     assert!(
         cfg.index_db_path.to_string_lossy().contains("swiftfind")
             || cfg.index_db_path.to_string_lossy().contains("SwiftFind")
@@ -163,6 +165,8 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("// \"hotkey\": \"Ctrl+Alt+Space\""));
     assert!(!raw.contains("\"index_db_path\""));
     assert!(raw.contains("\"discovery_exclude_roots\":"));
+    assert!(raw.contains("\"windows_search_enabled\": true"));
+    assert!(raw.contains("\"windows_search_fallback_filesystem\": true"));
     assert!(raw.contains("\"web_search_provider\": \"duckduckgo\""));
     if cfg.discovery_exclude_roots.is_empty() {
         assert!(raw.contains("\"discovery_exclude_roots\": []"));
@@ -230,12 +234,16 @@ fn migrates_legacy_config_and_preserves_user_values() {
     assert!(loaded.launch_at_startup);
     assert_eq!(loaded.idle_cache_trim_ms, 900);
     assert_eq!(loaded.active_memory_target_mb, 72);
+    assert!(loaded.windows_search_enabled);
+    assert!(loaded.windows_search_fallback_filesystem);
 
     let updated_raw = std::fs::read_to_string(&config_path).unwrap();
     assert!(updated_raw.contains("\"hotkey\": \"Ctrl+Alt+P\""));
     assert!(updated_raw.contains("\"max_results\": 33"));
     assert!(updated_raw.contains("\"idle_cache_trim_ms\": 900"));
     assert!(updated_raw.contains("\"active_memory_target_mb\": 72"));
+    assert!(updated_raw.contains("\"windows_search_enabled\": true"));
+    assert!(updated_raw.contains("\"windows_search_fallback_filesystem\": true"));
 
     let backups: Vec<_> = std::fs::read_dir(&config_dir)
         .unwrap()

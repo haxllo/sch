@@ -32,6 +32,10 @@ pub fn launch_path(path: &str) -> Result<(), LaunchError> {
         return Err(LaunchError::EmptyPath);
     }
 
+    if is_non_filesystem_open_target(trimmed) {
+        return launch_open(trimmed);
+    }
+
     let candidate = Path::new(trimmed);
     if !candidate.exists() {
         return Err(LaunchError::MissingPath(candidate.to_path_buf()));
@@ -96,4 +100,31 @@ fn launch_open(_target: &str) -> Result<(), LaunchError> {
 #[cfg(target_os = "windows")]
 fn to_wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+fn is_non_filesystem_open_target(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let lowered = trimmed.to_ascii_lowercase();
+    if lowered.starts_with("shell:") || lowered.starts_with("ms-") {
+        return true;
+    }
+
+    if trimmed.contains("://") {
+        return true;
+    }
+
+    !looks_like_filesystem_path(trimmed)
+}
+
+fn looks_like_filesystem_path(path: &str) -> bool {
+    if path.starts_with('/') || path.starts_with('\\') {
+        return true;
+    }
+
+    let bytes = path.as_bytes();
+    bytes.len() >= 3 && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
