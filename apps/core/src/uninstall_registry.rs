@@ -540,11 +540,32 @@ fn launch_uninstall_command(display_name: &str, command: &str) -> Result<(), Str
         )
     } as isize;
 
-    if result <= 32 {
-        return Err(format!(
-            "failed to launch uninstall command for '{}' (code={})",
-            display_name, result
-        ));
+    if result > 32 {
+        return Ok(());
+    }
+
+    let fallback_err = launch_uninstall_via_cmd(command).err().unwrap_or_default();
+    Err(format!(
+        "failed to launch uninstall command for '{}' (shell_code={result}); fallback={fallback_err}",
+        display_name
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn launch_uninstall_via_cmd(raw_command: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+    let status = Command::new("cmd.exe")
+        .args(["/C", raw_command.trim()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|error| format!("cmd fallback spawn failed: {error}"))?;
+
+    if status.id() == 0 {
+        return Err("cmd fallback returned invalid process id".to_string());
     }
 
     Ok(())
@@ -568,6 +589,10 @@ fn split_uninstall_command(command: &str) -> Result<(String, String), String> {
         }
     }
 
+    if let Some((program, args)) = split_unquoted_path_with_extension(trimmed) {
+        return Ok((program, args));
+    }
+
     let mut parts = trimmed.splitn(2, char::is_whitespace);
     let executable = parts.next().unwrap_or_default().trim();
     if executable.is_empty() {
@@ -576,6 +601,35 @@ fn split_uninstall_command(command: &str) -> Result<(String, String), String> {
     let args = parts.next().unwrap_or_default().trim().to_string();
 
     Ok((executable.to_string(), args))
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn split_unquoted_path_with_extension(command: &str) -> Option<(String, String)> {
+    let trimmed = command.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    for extension in [".exe", ".msi", ".cmd", ".bat", ".com"] {
+        let mut offset = 0;
+        while let Some(relative) = lower[offset..].find(extension) {
+            let end = offset + relative + extension.len();
+            let boundary = if end >= lower.len() {
+                true
+            } else {
+                lower.as_bytes()[end].is_ascii_whitespace()
+            };
+            if boundary {
+                let executable = trimmed[..end].trim();
+                if !executable.is_empty() {
+                    let args = trimmed[end..].trim().to_string();
+                    return Some((executable.to_string(), args));
+                }
+            }
+            offset = end;
+            if offset >= lower.len() {
+                break;
+            }
+        }
+    }
+    None
 }
 
 #[cfg(target_os = "windows")]
@@ -668,7 +722,7 @@ fn to_wide(value: &str) -> Vec<u16> {
 mod tests {
     use super::{
         extract_uninstall_search_term, rewrite_msiexec_install_to_uninstall,
-        search_uninstall_actions_with_entries, UninstallEntry,
+        search_uninstall_actions_with_entries, split_unquoted_path_with_extension, UninstallEntry,
     };
 
     #[test]
@@ -732,5 +786,15 @@ mod tests {
             rewrite_msiexec_install_to_uninstall("/X {1234-5678}"),
             "/X {1234-5678}"
         );
+    }
+
+    #[test]
+    fn splits_unquoted_executable_path_with_spaces() {
+        let parsed = split_unquoted_path_with_extension(
+            "C:\\Program Files\\Example App\\uninstall.exe /SILENT",
+        )
+        .expect("should parse executable and args");
+        assert_eq!(parsed.0, "C:\\Program Files\\Example App\\uninstall.exe");
+        assert_eq!(parsed.1, "/SILENT");
     }
 }
