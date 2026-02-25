@@ -485,13 +485,18 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
+        let title = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string());
 
         if ext != "lnk" && ext != "exe" {
             continue;
         }
         if ext == "lnk" {
             if let Some(shortcut_target) = resolve_shortcut_target_for_discovery(path) {
-                if is_excluded_windows_kits_shortcut_reference(shortcut_target.as_str()) {
+                if should_exclude_non_app_start_reference(title.as_str(), shortcut_target.as_str())
+                {
                     continue;
                 }
             }
@@ -500,10 +505,6 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
             continue;
         }
 
-        let title = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string_lossy().to_string());
         if is_documentation_like_start_entry_title(&title) {
             continue;
         }
@@ -574,7 +575,7 @@ Get-StartApps | ForEach-Object {
         if title.is_empty() || app_id.is_empty() {
             continue;
         }
-        if is_excluded_windows_kits_shortcut_reference(app_id) {
+        if should_exclude_non_app_start_reference(title, app_id) {
             continue;
         }
         if is_documentation_like_start_entry_title(title) {
@@ -694,6 +695,28 @@ fn resolve_shortcut_target_for_discovery(shortcut_path: &Path) -> Option<String>
     } else {
         Some(fallback)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn should_exclude_non_app_start_reference(title: &str, reference: &str) -> bool {
+    if is_excluded_windows_kits_shortcut_reference(reference) {
+        return true;
+    }
+    if shortcut_resolves_to_web_target(reference) {
+        return true;
+    }
+    if has_non_app_document_extension(reference) {
+        return true;
+    }
+
+    // Extra guard for label-only docs/help shortcuts that might point to local wrappers.
+    if is_documentation_like_start_entry_title(title)
+        && !reference_points_to_executable_reference(reference)
+    {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(target_os = "windows")]
@@ -895,6 +918,47 @@ fn shortcut_resolves_to_web_target(raw: &str) -> bool {
         || lowered.starts_with("msedge:")
         || lowered.starts_with("www.")
         || lowered.contains("://")
+}
+
+#[cfg(target_os = "windows")]
+fn has_non_app_document_extension(value: &str) -> bool {
+    let normalized = normalize_shortcut_target_path(value).to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    [
+        ".url", ".pdf", ".htm", ".html", ".xhtml", ".mht", ".mhtml", ".chm", ".txt", ".md", ".rtf",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml", ".json", ".yaml",
+        ".yml", ".ini", ".log", ".php",
+    ]
+    .iter()
+    .any(|ext| normalized.ends_with(ext))
+}
+
+#[cfg(target_os = "windows")]
+fn reference_points_to_executable_reference(reference: &str) -> bool {
+    let normalized = normalize_shortcut_target_path(reference).to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+
+    if normalized.starts_with("shell:") || normalized.starts_with("ms-") {
+        return true;
+    }
+
+    [
+        ".exe",
+        ".com",
+        ".bat",
+        ".cmd",
+        ".msc",
+        ".ps1",
+        ".vbs",
+        ".appref-ms",
+    ]
+    .iter()
+    .any(|ext| normalized.ends_with(ext))
 }
 
 #[cfg(target_os = "windows")]

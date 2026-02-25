@@ -1478,28 +1478,40 @@ fn should_hide_known_start_menu_doc_sample_entry(item: &crate::model::SearchItem
     if !item.kind.eq_ignore_ascii_case("app") {
         return false;
     }
-    if !item
-        .path
-        .trim()
-        .to_ascii_lowercase()
-        .starts_with("shell:appsfolder\\")
-    {
-        return false;
-    }
 
+    let lower = item.title.trim().to_ascii_lowercase();
     let path_lower = item.path.trim().replace('/', "\\").to_ascii_lowercase();
+    let is_shell_appsfolder = path_lower.starts_with("shell:appsfolder\\");
+
     if path_lower.contains("\\windows kits\\10\\shortcuts\\") && path_lower.ends_with(".url") {
         return true;
     }
+    if has_non_app_document_extension(path_lower.as_str()) {
+        return true;
+    }
+    if is_shell_appsfolder && path_lower.contains("://") {
+        return true;
+    }
 
-    let lower = item.title.trim().to_ascii_lowercase();
     if lower.is_empty() {
         return false;
+    }
+    if has_non_app_document_extension(lower.as_str()) {
+        return true;
     }
 
     let has_docs = lower.contains("documentation") || lower.contains(" docs");
     let has_sample = lower.contains("sample");
     let has_tools_for = lower.contains("tools for");
+    let has_help_content = lower.contains("manual")
+        || lower.contains("faq")
+        || lower.contains("website")
+        || lower.contains("web page")
+        || lower.contains("webpage")
+        || lower.contains("guide")
+        || lower.contains("readme")
+        || lower.contains("release notes")
+        || lower.contains("changelog");
     let has_apps = lower.contains(" app") || lower.contains("apps");
     let has_platform =
         lower.contains("desktop") || lower.contains("uwp") || lower.contains("winui");
@@ -1507,6 +1519,22 @@ fn should_hide_known_start_menu_doc_sample_entry(item: &crate::model::SearchItem
     (has_docs && has_apps)
         || (has_sample && (has_apps || has_platform))
         || (has_tools_for && has_apps && has_platform)
+        || (has_help_content && (path_lower.ends_with(".lnk") || is_shell_appsfolder))
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn has_non_app_document_extension(value: &str) -> bool {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return false;
+    }
+    [
+        ".url", ".pdf", ".htm", ".html", ".xhtml", ".mht", ".mhtml", ".chm", ".txt", ".md", ".rtf",
+        ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv", ".xml", ".json", ".yaml",
+        ".yml", ".ini", ".log", ".php",
+    ]
+    .iter()
+    .any(|ext| normalized.ends_with(ext))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -2859,11 +2887,32 @@ mod tests {
             "Sample Tool",
             "C:\\Tools\\SampleTool.exe",
         );
+        let manual_lnk = SearchItem::new(
+            "app-manual",
+            "app",
+            "User Manual",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Tool\\User Manual.lnk",
+        );
+        let faq_pdf = SearchItem::new(
+            "app-faq",
+            "app",
+            "Tool FAQ",
+            "shell:AppsFolder\\Vendor.ToolFAQ.pdf",
+        );
+        let normal_lnk = SearchItem::new(
+            "app-normal-lnk",
+            "app",
+            "Discord",
+            "C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Discord\\Discord.lnk",
+        );
 
         assert!(should_hide_known_start_menu_doc_sample_entry(&docs));
         assert!(should_hide_known_start_menu_doc_sample_entry(&sample));
+        assert!(should_hide_known_start_menu_doc_sample_entry(&manual_lnk));
+        assert!(should_hide_known_start_menu_doc_sample_entry(&faq_pdf));
         assert!(!should_hide_known_start_menu_doc_sample_entry(&normal));
         assert!(!should_hide_known_start_menu_doc_sample_entry(&non_shell));
+        assert!(!should_hide_known_start_menu_doc_sample_entry(&normal_lnk));
     }
 
     #[test]
