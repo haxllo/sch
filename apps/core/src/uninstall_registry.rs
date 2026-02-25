@@ -208,15 +208,18 @@ fn load_entries() -> Result<Vec<UninstallEntry>, String> {
 
 #[cfg(target_os = "windows")]
 fn execute_entry(entry: &UninstallEntry) -> Result<(), String> {
-    match launch_uninstall_command(entry.display_name.as_str(), entry.uninstall_command.as_str()) {
+    match launch_uninstall_command(
+        entry.display_name.as_str(),
+        entry.uninstall_command.as_str(),
+    ) {
         Ok(()) => Ok(()),
         Err(primary_error) => {
             if let Some(fallback_command) = entry.fallback_uninstall_command.as_deref() {
                 match launch_uninstall_command(entry.display_name.as_str(), fallback_command) {
                     Ok(()) => Ok(()),
-                    Err(fallback_error) => Err(format!(
-                        "{primary_error}; fallback_error={fallback_error}"
-                    )),
+                    Err(fallback_error) => {
+                        Err(format!("{primary_error}; fallback_error={fallback_error}"))
+                    }
                 }
             } else {
                 Err(primary_error)
@@ -253,7 +256,12 @@ fn load_entries_windows() -> Result<Vec<UninstallEntry>, String> {
             normalize_for_search(entry.display_name.as_str()),
             normalize_for_search(entry.publisher.as_str()),
             normalize_for_search(entry.uninstall_command.as_str()),
-            normalize_for_search(entry.fallback_uninstall_command.as_deref().unwrap_or_default()),
+            normalize_for_search(
+                entry
+                    .fallback_uninstall_command
+                    .as_deref()
+                    .unwrap_or_default()
+            ),
         );
         seen.insert(key)
     });
