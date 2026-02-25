@@ -887,11 +887,14 @@ fn is_documentation_like_start_entry_title(title: &str) -> bool {
 
     let has_docs = lower.contains("documentation") || lower.contains(" docs");
     let has_sample = lower.contains("sample");
+    let has_tools_for = lower.contains("tools for");
     let has_app_word = lower.contains(" app") || lower.contains("apps");
     let has_platform = lower.contains("uwp")
         || lower.contains("desktop")
         || lower.contains("winui")
         || lower.contains("windows sdk");
 
-    (has_docs && has_app_word) || (has_sample && (has_app_word || has_platform))
+    (has_docs && has_app_word)
+        || (has_sample && (has_app_word || has_platform))
+        || (has_tools_for && has_app_word && has_platform)
 }

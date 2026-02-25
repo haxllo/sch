@@ -1494,11 +1494,14 @@ fn should_hide_known_start_menu_doc_sample_entry(item: &crate::model::SearchItem
 
     let has_docs = lower.contains("documentation") || lower.contains(" docs");
     let has_sample = lower.contains("sample");
+    let has_tools_for = lower.contains("tools for");
     let has_apps = lower.contains(" app") || lower.contains("apps");
     let has_platform =
         lower.contains("desktop") || lower.contains("uwp") || lower.contains("winui");
 
-    (has_docs && has_apps) || (has_sample && (has_apps || has_platform))
+    (has_docs && has_apps)
+        || (has_sample && (has_apps || has_platform))
+        || (has_tools_for && has_apps && has_platform)
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
