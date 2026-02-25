@@ -46,10 +46,12 @@ Name: "{autodesktop}\SwiftFind"; Filename: "{app}\bin\swiftfind-core.exe"; Param
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
+Name: "startuplaunch"; Description: "Launch at Windows sign-in (can be changed later in config.json)"; GroupDescription: "Startup:"; Flags: unchecked
 
 [Run]
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--ensure-config"; Flags: runhidden
-Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--sync-startup"; Flags: runhidden
+Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--set-launch-at-startup=true"; Flags: runhidden; Tasks: startuplaunch
+Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--set-launch-at-startup=false"; Flags: runhidden; Tasks: not startuplaunch
 Filename: "{app}\bin\swiftfind-core.exe"; Parameters: "--background"; Description: "Launch SwiftFind now"; Flags: runhidden nowait postinstall skipifsilent
 
 [UninstallRun]

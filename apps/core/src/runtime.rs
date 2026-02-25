@@ -141,6 +141,7 @@ pub enum RuntimeCommand {
     Restart,
     EnsureConfig,
     SyncStartup,
+    SetLaunchAtStartup(bool),
     DiagnosticsBundle,
 }
 
@@ -162,6 +163,20 @@ impl Default for RuntimeOptions {
 pub fn parse_cli_args(args: &[String]) -> Result<RuntimeOptions, String> {
     let mut options = RuntimeOptions::default();
     for arg in args {
+        if let Some(value) = arg.strip_prefix("--set-launch-at-startup=") {
+            let enabled = match value.trim().to_ascii_lowercase().as_str() {
+                "true" | "1" | "yes" | "on" => true,
+                "false" | "0" | "no" | "off" => false,
+                _ => {
+                    return Err(format!(
+                        "invalid value for --set-launch-at-startup: {value} (expected true/false)"
+                    ));
+                }
+            };
+            options.command = RuntimeCommand::SetLaunchAtStartup(enabled);
+            continue;
+        }
+
         match arg.as_str() {
             "--background" => options.background = true,
             "--foreground" => options.background = false,
@@ -173,7 +188,7 @@ pub fn parse_cli_args(args: &[String]) -> Result<RuntimeOptions, String> {
             "--diagnostics-bundle" => options.command = RuntimeCommand::DiagnosticsBundle,
             "--help" | "-h" => {
                 return Err(
-                    "usage: swiftfind-core [--background|--foreground] [--status|--quit|--restart|--ensure-config|--sync-startup|--diagnostics-bundle]".to_string(),
+                    "usage: swiftfind-core [--background|--foreground] [--status|--quit|--restart|--ensure-config|--sync-startup|--set-launch-at-startup=true|false|--diagnostics-bundle]".to_string(),
                 )
             }
             unknown => return Err(format!("unknown argument: {unknown}")),
@@ -209,6 +224,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
         RuntimeCommand::Restart => return command_restart(),
         RuntimeCommand::EnsureConfig => return command_ensure_config(),
         RuntimeCommand::SyncStartup => return command_sync_startup(),
+        RuntimeCommand::SetLaunchAtStartup(enabled) => {
+            return command_set_launch_at_startup(enabled);
+        }
         RuntimeCommand::DiagnosticsBundle => return command_diagnostics_bundle(),
         RuntimeCommand::Run => {}
     }
@@ -547,6 +565,24 @@ fn command_sync_startup() -> Result<(), RuntimeError> {
         log_info("[swiftfind-core] startup sync is unsupported on this platform");
         Ok(())
     }
+}
+
+fn command_set_launch_at_startup(enabled: bool) -> Result<(), RuntimeError> {
+    let mut cfg = config::load(None)?;
+    cfg.launch_at_startup = enabled;
+    config::save(&cfg)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let exe = std::env::current_exe()?;
+        crate::startup::set_enabled(enabled, &exe)?;
+    }
+
+    log_info(&format!(
+        "[swiftfind-core] launch_at_startup updated: enabled={} (can be changed in config)",
+        enabled
+    ));
+    Ok(())
 }
 
 fn command_status() -> Result<(), RuntimeError> {
@@ -2639,6 +2675,26 @@ mod tests {
         let options = parse_cli_args(&args).expect("diagnostics command should parse");
         assert_eq!(options.command, RuntimeCommand::DiagnosticsBundle);
         assert!(!options.background);
+    }
+
+    #[test]
+    fn parses_set_launch_at_startup_command() {
+        let args = vec!["--set-launch-at-startup=true".to_string()];
+        let options = parse_cli_args(&args).expect("startup command should parse");
+        assert_eq!(options.command, RuntimeCommand::SetLaunchAtStartup(true));
+        assert!(!options.background);
+
+        let args = vec!["--set-launch-at-startup=false".to_string()];
+        let options = parse_cli_args(&args).expect("startup command should parse");
+        assert_eq!(options.command, RuntimeCommand::SetLaunchAtStartup(false));
+        assert!(!options.background);
+    }
+
+    #[test]
+    fn rejects_invalid_set_launch_at_startup_value() {
+        let args = vec!["--set-launch-at-startup=maybe".to_string()];
+        let error = parse_cli_args(&args).expect_err("invalid value should fail");
+        assert!(error.contains("invalid value for --set-launch-at-startup"));
     }
 
     #[test]

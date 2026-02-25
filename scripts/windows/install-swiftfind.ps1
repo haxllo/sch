@@ -3,6 +3,8 @@ param(
   [switch]$SkipBuild,
   [string]$SourceExe,
   [switch]$StartAfterInstall = $true,
+  [ValidateSet("Ask", "True", "False")]
+  [string]$LaunchAtStartup = "Ask",
   [string]$InstallRoot = "$env:LOCALAPPDATA\Programs\SwiftFind"
 )
 
@@ -102,7 +104,36 @@ $installedExe = Join-Path $binDir "swiftfind-core.exe"
 
 Write-Host "[4/5] Preparing config and startup sync..."
 & $installedExe --ensure-config
-& $installedExe --sync-startup
+
+$enableLaunchAtStartup = $false
+switch ($LaunchAtStartup) {
+  "True" {
+    $enableLaunchAtStartup = $true
+  }
+  "False" {
+    $enableLaunchAtStartup = $false
+  }
+  default {
+    if ([Environment]::UserInteractive) {
+      $answer = Read-Host "Launch SwiftFind automatically at Windows sign-in? (y/N)"
+      if ($answer -match '^(y|yes)$') {
+        $enableLaunchAtStartup = $true
+      }
+    }
+    else {
+      Write-Host "Non-interactive install detected; defaulting launch-at-startup to false."
+    }
+  }
+}
+
+if ($enableLaunchAtStartup) {
+  & $installedExe --set-launch-at-startup=true
+}
+else {
+  & $installedExe --set-launch-at-startup=false
+}
+
+Write-Host "Note: launch-at-startup can be changed later in $env:APPDATA\SwiftFind\config.json"
 
 if ($StartAfterInstall) {
   Write-Host "[5/5] Starting SwiftFind in background..."
