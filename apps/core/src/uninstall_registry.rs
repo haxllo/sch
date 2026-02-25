@@ -1,9 +1,9 @@
 use crate::model::{normalize_for_search, SearchItem};
 use std::cmp::Ordering;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 #[cfg(target_os = "windows")]
 use std::collections::HashSet;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 pub const ACTION_UNINSTALL_PREFIX: &str = "__swiftfind_action_uninstall__:";
 const UNINSTALL_CACHE_TTL: Duration = Duration::from_secs(300);
