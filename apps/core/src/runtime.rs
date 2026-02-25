@@ -361,6 +361,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         let action = overlay_state.on_hotkey(overlay.has_focus());
                         match action {
                             HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
+                                reconcile_suppressed_uninstall_titles(
+                                    &mut suppressed_uninstall_titles,
+                                );
                                 overlay.show_and_focus();
                                 if config.clipboard_enabled {
                                     let _ = clipboard_history::maybe_capture_latest(&config);
@@ -456,7 +459,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             Ok(mut results) => {
                                 dedupe_overlay_results(&mut results);
                                 if !suppressed_uninstall_titles.is_empty() {
-                                    filter_suppressed_uninstall_app_results(
+                                    filter_suppressed_uninstall_results(
                                         &mut results,
                                         &suppressed_uninstall_titles,
                                     );
@@ -1698,7 +1701,7 @@ fn reconcile_suppressed_uninstall_titles(suppressed_uninstall_titles: &mut Vec<S
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn filter_suppressed_uninstall_app_results(
+fn filter_suppressed_uninstall_results(
     results: &mut Vec<crate::model::SearchItem>,
     suppressed_uninstall_titles: &[String],
 ) {
@@ -1716,13 +1719,26 @@ fn filter_suppressed_uninstall_app_results(
     }
 
     results.retain(|item| {
-        if !item.kind.eq_ignore_ascii_case("app") {
+        let title_key = if item.kind.eq_ignore_ascii_case("app") {
+            item.normalized_title().to_string()
+        } else if item.kind.eq_ignore_ascii_case("action")
+            && item
+                .id
+                .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX)
+        {
+            uninstall_target_title_from_action_title(item.title.as_str())
+                .map(|title| crate::model::normalize_for_search(title.as_str()))
+                .unwrap_or_default()
+        } else {
+            return true;
+        };
+        if title_key.is_empty() {
             return true;
         }
-        let title_key = item.normalized_title();
+
         !suppressed_keys
             .iter()
-            .any(|suppressed| uninstall_title_matches(title_key, suppressed.as_str()))
+            .any(|suppressed| uninstall_title_matches(title_key.as_str(), suppressed.as_str()))
     });
 }
 
@@ -2736,7 +2752,7 @@ fn log_warn(message: &str) {
 mod tests {
     use super::{
         adaptive_indexed_seed_limit, can_use_indexed_prefix_cache, candidate_limit_for_query,
-        dedupe_overlay_results, filter_suppressed_uninstall_app_results, launch_overlay_selection,
+        dedupe_overlay_results, filter_suppressed_uninstall_results, launch_overlay_selection,
         maybe_expand_uninstall_quick_shortcut, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, result_limit_for_query,
         search_overlay_results, search_overlay_results_with_session,
@@ -2973,9 +2989,15 @@ mod tests {
     }
 
     #[test]
-    fn suppressed_uninstall_apps_are_filtered_from_results() {
+    fn suppressed_uninstall_results_are_filtered_from_results() {
         let mut results = vec![
             SearchItem::new("app-discord", "app", "Discord", "C:\\Discord\\Discord.exe"),
+            SearchItem::new(
+                "__swiftfind_action_uninstall__:discord",
+                "action",
+                "Uninstall Discord",
+                "Vendor application",
+            ),
             SearchItem::new(
                 "app-vscode",
                 "app",
@@ -2985,10 +3007,13 @@ mod tests {
             SearchItem::new("file-readme", "file", "readme.md", "C:\\repo\\readme.md"),
         ];
         let suppressed = vec!["Discord".to_string()];
-        filter_suppressed_uninstall_app_results(&mut results, &suppressed);
+        filter_suppressed_uninstall_results(&mut results, &suppressed);
 
         assert_eq!(results.len(), 2);
         assert!(results.iter().all(|item| item.id != "app-discord"));
+        assert!(results
+            .iter()
+            .all(|item| item.id != "__swiftfind_action_uninstall__:discord"));
         assert!(results.iter().any(|item| item.id == "app-vscode"));
         assert!(results.iter().any(|item| item.id == "file-readme"));
     }
