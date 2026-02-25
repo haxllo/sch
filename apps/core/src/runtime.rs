@@ -1492,7 +1492,12 @@ fn normalize_path_key(path: &str) -> String {
 
 #[cfg(target_os = "windows")]
 fn overlay_subtitle(item: &crate::model::SearchItem, command_mode: bool) -> String {
-    if command_mode && item.kind.eq_ignore_ascii_case("action") {
+    if command_mode
+        && item.kind.eq_ignore_ascii_case("action")
+        && !item
+            .id
+            .starts_with(crate::uninstall_registry::ACTION_UNINSTALL_PREFIX)
+    {
         return String::new();
     }
     if item.kind.eq_ignore_ascii_case("app") {
