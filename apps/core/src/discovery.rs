@@ -157,7 +157,13 @@ impl DiscoveryProvider for StartMenuAppDiscoveryProvider {
     }
 
     fn change_stamp(&self) -> Option<String> {
-        Some(roots_change_stamp(&self.roots))
+        // Bump when Start menu discovery/filtering behavior changes so incremental
+        // rebuilds do not keep stale cached app entries.
+        const START_MENU_DISCOVERY_SCHEMA_VERSION: &str = "2";
+        Some(format!(
+            "v{START_MENU_DISCOVERY_SCHEMA_VERSION};{}",
+            roots_change_stamp(&self.roots)
+        ))
     }
 }
 

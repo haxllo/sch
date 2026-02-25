@@ -1432,6 +1432,7 @@ fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
     let app_title_keys: std::collections::HashSet<String> = results
         .iter()
         .filter(|item| item.kind.eq_ignore_ascii_case("app"))
+        .filter(|item| !should_hide_known_start_menu_doc_sample_entry(item))
         .filter_map(|item| {
             let key = normalize_title_key(&item.title);
             if key.is_empty() {
@@ -1447,6 +1448,9 @@ fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
 
     results.retain(|item| {
         if item.kind.eq_ignore_ascii_case("app") {
+            if should_hide_known_start_menu_doc_sample_entry(item) {
+                return false;
+            }
             let key = normalize_title_key(&item.title);
             if key.is_empty() {
                 return true;
@@ -1467,6 +1471,34 @@ fn dedupe_overlay_results(results: &mut Vec<crate::model::SearchItem>) {
         }
         seen_other_paths.insert(key)
     });
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn should_hide_known_start_menu_doc_sample_entry(item: &crate::model::SearchItem) -> bool {
+    if !item.kind.eq_ignore_ascii_case("app") {
+        return false;
+    }
+    if !item
+        .path
+        .trim()
+        .to_ascii_lowercase()
+        .starts_with("shell:appsfolder\\")
+    {
+        return false;
+    }
+
+    let lower = item.title.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+
+    let has_docs = lower.contains("documentation") || lower.contains(" docs");
+    let has_sample = lower.contains("sample");
+    let has_apps = lower.contains(" app") || lower.contains("apps");
+    let has_platform =
+        lower.contains("desktop") || lower.contains("uwp") || lower.contains("winui");
+
+    (has_docs && has_apps) || (has_sample && (has_apps || has_platform))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -2463,7 +2495,7 @@ fn execute_action_selection(
             .map_err(|error| format!("open logs folder failed: {error}")),
         ACTION_REBUILD_INDEX_ID => {
             let report = service
-                .rebuild_index_incremental_with_report()
+                .rebuild_index_with_report()
                 .map_err(|error| format!("rebuild index failed: {error}"))?;
             log_info(&format!(
                 "[swiftfind-core] action_rebuild_index indexed={} discovered={} upserted={} removed={}",
@@ -2558,11 +2590,11 @@ mod tests {
         maybe_expand_uninstall_quick_shortcut, next_selection_index, parse_cli_args,
         parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, result_limit_for_query,
         search_overlay_results, search_overlay_results_with_session,
-        should_skip_non_searchable_query, summarize_query_profiles,
-        track_uninstall_title_suppression, uninstall_target_title_from_action_title,
-        IndexedPrefixCache, OverlaySearchSession, RuntimeCommand, RuntimeOptions,
-        INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
-        UNINSTALL_QUERY_RESULT_LIMIT,
+        should_hide_known_start_menu_doc_sample_entry, should_skip_non_searchable_query,
+        summarize_query_profiles, track_uninstall_title_suppression,
+        uninstall_target_title_from_action_title, IndexedPrefixCache, OverlaySearchSession,
+        RuntimeCommand, RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT,
+        INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT, UNINSTALL_QUERY_RESULT_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2791,6 +2823,39 @@ mod tests {
         assert!(results.iter().all(|item| item.id != "app-discord"));
         assert!(results.iter().any(|item| item.id == "app-vscode"));
         assert!(results.iter().any(|item| item.id == "file-readme"));
+    }
+
+    #[test]
+    fn hides_known_start_menu_doc_and_sample_entries() {
+        let docs = SearchItem::new(
+            "app-docs",
+            "app",
+            "Documentation Desktop Apps",
+            "shell:AppsFolder\\Contoso.DocumentationDesktopApps",
+        );
+        let sample = SearchItem::new(
+            "app-sample",
+            "app",
+            "Sample UWP Apps",
+            "shell:AppsFolder\\Contoso.SampleUwpApps",
+        );
+        let normal = SearchItem::new(
+            "app-normal",
+            "app",
+            "Discord",
+            "shell:AppsFolder\\Discord.Discord",
+        );
+        let non_shell = SearchItem::new(
+            "app-nonshell",
+            "app",
+            "Sample Tool",
+            "C:\\Tools\\SampleTool.exe",
+        );
+
+        assert!(should_hide_known_start_menu_doc_sample_entry(&docs));
+        assert!(should_hide_known_start_menu_doc_sample_entry(&sample));
+        assert!(!should_hide_known_start_menu_doc_sample_entry(&normal));
+        assert!(!should_hide_known_start_menu_doc_sample_entry(&non_shell));
     }
 
     #[test]
