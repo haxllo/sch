@@ -132,6 +132,7 @@ mod imp {
     const TIMER_HELP_HOVER: usize = 0xBEF3;
     const TIMER_ICON_CACHE_IDLE: usize = 0xBEF4;
     const TIMER_RESULTS_CONTENT_FADE: usize = 0xBEF5;
+    const TIMER_COMMAND_BADGE_FADE: usize = 0xBEF6;
 
     const OVERLAY_ANIM_MS: u32 = 150;
     const OVERLAY_HIDE_ANIM_MS: u32 = 115;
@@ -189,6 +190,10 @@ mod imp {
     const COMMAND_PREFIX_OPACITY: f32 = 0.60;
     const COMMAND_PREFIX_EMBOLDEN_OPACITY: f32 = 0.40;
     const COMMAND_PREFIX_EMBOLDEN_OFFSET_PX: i32 = 1;
+    const COMMAND_BADGE_TEXT: &str = "u";
+    const COMMAND_BADGE_GAP_FROM_PREFIX: i32 = 4;
+    const COMMAND_BADGE_ANIM_MS: u32 = 110;
+    const COMMAND_BADGE_SLIDE_PX: i32 = 6;
     const HELP_ICON_SIZE: i32 = 14;
     const HELP_ICON_RIGHT_INSET: i32 = 12;
     const HELP_ICON_GAP_FROM_INPUT: i32 = 8;
@@ -407,6 +412,8 @@ mod imp {
         help_config_path: String,
         active_query: String,
         command_mode_input: bool,
+        command_uninstall_quick_mode: bool,
+        command_badge_anim_start: Option<Instant>,
         expanded_rows: i32,
         placeholder_hint: String,
         mode_strip_text: String,
@@ -483,6 +490,8 @@ mod imp {
                 help_config_path: String::new(),
                 active_query: String::new(),
                 command_mode_input: false,
+                command_uninstall_quick_mode: false,
+                command_badge_anim_start: None,
                 expanded_rows: 0,
                 placeholder_hint: String::new(),
                 mode_strip_text: MODE_STRIP_DEFAULT_TEXT.to_string(),
@@ -657,6 +666,7 @@ mod imp {
                 SetWindowTextW(state.edit_hwnd, to_wide(&edit_text).as_ptr());
             }
             apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+            update_uninstall_quick_mode_state(self.hwnd, state);
 
             let caret = edit_text.encode_utf16().count() as isize;
             unsafe {
@@ -760,7 +770,10 @@ mod imp {
         pub fn clear_query_text(&self) {
             if let Some(state) = state_for(self.hwnd) {
                 state.command_mode_input = false;
+                state.command_uninstall_quick_mode = false;
+                state.command_badge_anim_start = None;
                 unsafe {
+                    KillTimer(self.hwnd, TIMER_COMMAND_BADGE_FADE);
                     SetWindowTextW(state.edit_hwnd, to_wide("").as_ptr());
                 }
                 apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
@@ -1512,6 +1525,7 @@ mod imp {
                                 InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                             }
                         }
+                        update_uninstall_quick_mode_state(hwnd, state);
                     }
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
@@ -1728,6 +1742,20 @@ mod imp {
                         }
                     }
                 }
+                if wparam == TIMER_COMMAND_BADGE_FADE {
+                    if let Some(state) = state_for(hwnd) {
+                        let running = command_badge_animation_tick(hwnd, state);
+                        if !running {
+                            unsafe {
+                                KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
+                            }
+                        }
+                    } else {
+                        unsafe {
+                            KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
+                        }
+                    }
+                }
                 0
             }
             WM_CLOSE => {
@@ -1747,6 +1775,7 @@ mod imp {
                     KillTimer(hwnd, TIMER_HELP_HOVER);
                     KillTimer(hwnd, TIMER_ICON_CACHE_IDLE);
                     KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
+                    KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
                 }
                 let state_ptr =
                     unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut OverlayShellState };
@@ -1822,6 +1851,7 @@ mod imp {
                         state.placeholder_hint.clear();
                     }
                     apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+                    update_uninstall_quick_mode_state(parent, state);
                     unsafe {
                         InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                         PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
@@ -2163,9 +2193,120 @@ mod imp {
                 &mut prefix_rect,
                 DT_CENTER | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
             );
+
+            if state.command_uninstall_quick_mode {
+                let progress = command_badge_progress(state);
+                let opacity = (COMMAND_PREFIX_OPACITY * progress).clamp(0.0, 1.0);
+                let badge_color =
+                    blend_color(state.palette.input_bg, state.palette.text_hint, opacity);
+                let mut badge_rect = RECT {
+                    left: prefix_rect.right + COMMAND_BADGE_GAP_FROM_PREFIX,
+                    top: client.top,
+                    right: (text_rect.left - 2)
+                        .max(prefix_rect.right + COMMAND_BADGE_GAP_FROM_PREFIX + 1),
+                    bottom: client.bottom,
+                };
+                let slide_px = ((1.0 - progress) * COMMAND_BADGE_SLIDE_PX as f32).round() as i32;
+                badge_rect.left += slide_px;
+                badge_rect.right += slide_px;
+                let badge = to_wide(COMMAND_BADGE_TEXT);
+                let badge_font = if state.input_font != 0 {
+                    state.input_font
+                } else {
+                    prefix_font
+                };
+                let prev_badge_font = SelectObject(hdc, badge_font as _);
+                SetTextColor(hdc, badge_color);
+                DrawTextW(
+                    hdc,
+                    badge.as_ptr(),
+                    -1,
+                    &mut badge_rect,
+                    DT_LEFT | DT_SINGLELINE | DT_EDITCONTROL | DT_VCENTER,
+                );
+                SelectObject(hdc, prev_badge_font);
+            }
+
             SelectObject(hdc, old_font);
             ReleaseDC(edit_hwnd, hdc);
         }
+    }
+
+    fn command_badge_progress(state: &OverlayShellState) -> f32 {
+        let Some(start) = state.command_badge_anim_start else {
+            return 1.0;
+        };
+        let elapsed_ms = start.elapsed().as_millis() as f32;
+        (elapsed_ms / COMMAND_BADGE_ANIM_MS as f32).clamp(0.0, 1.0)
+    }
+
+    fn command_badge_animation_tick(hwnd: HWND, state: &mut OverlayShellState) -> bool {
+        if !state.command_uninstall_quick_mode {
+            state.command_badge_anim_start = None;
+            return false;
+        }
+        let Some(start) = state.command_badge_anim_start else {
+            return false;
+        };
+        let elapsed_ms = start.elapsed().as_millis() as u32;
+        unsafe {
+            InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+        }
+        if elapsed_ms >= COMMAND_BADGE_ANIM_MS {
+            state.command_badge_anim_start = None;
+            return false;
+        }
+        let _ = hwnd;
+        true
+    }
+
+    fn update_uninstall_quick_mode_state(hwnd: HWND, state: &mut OverlayShellState) {
+        let active = if state.command_mode_input {
+            let text = read_window_text(state.edit_hwnd);
+            is_uninstall_quick_mode_text(text.as_str())
+        } else {
+            false
+        };
+
+        if active == state.command_uninstall_quick_mode {
+            return;
+        }
+
+        state.command_uninstall_quick_mode = active;
+        if active {
+            state.command_badge_anim_start = Some(Instant::now());
+            unsafe {
+                SetTimer(hwnd, TIMER_COMMAND_BADGE_FADE, ANIM_FRAME_MS as u32, None);
+            }
+        } else {
+            state.command_badge_anim_start = None;
+            unsafe {
+                KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
+            }
+        }
+
+        unsafe {
+            InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+        }
+    }
+
+    fn is_uninstall_quick_mode_text(text: &str) -> bool {
+        let trimmed = text.trim_start();
+        let mut parts = trimmed.split_whitespace();
+        let Some(first) = parts.next() else {
+            return false;
+        };
+        first.eq_ignore_ascii_case("u")
+    }
+
+    fn read_window_text(hwnd: HWND) -> String {
+        let length = unsafe { GetWindowTextLengthW(hwnd) };
+        if length <= 0 {
+            return String::new();
+        }
+        let mut buffer = vec![0_u16; (length as usize) + 1];
+        let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        String::from_utf16_lossy(&buffer[..(copied as usize)])
     }
 
     fn hide_input_caret(edit_hwnd: HWND) {
@@ -3577,6 +3718,8 @@ mod imp {
             state.suppress_next_hover_sync = false;
             state.results_content_anim_start = None;
             state.command_mode_input = false;
+            state.command_uninstall_quick_mode = false;
+            state.command_badge_anim_start = None;
             state.placeholder_hint.clear();
             unsafe {
                 apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
@@ -3588,6 +3731,7 @@ mod imp {
             KillTimer(hwnd, TIMER_WINDOW_ANIM);
             KillTimer(hwnd, TIMER_HELP_HOVER);
             KillTimer(hwnd, TIMER_RESULTS_CONTENT_FADE);
+            KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
             SetLayeredWindowAttributes(hwnd, 0, OVERLAY_ALPHA_OPAQUE, LWA_ALPHA);
             ShowWindow(hwnd, SW_HIDE);
         }

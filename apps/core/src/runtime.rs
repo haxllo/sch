@@ -404,7 +404,9 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
                     OverlayEvent::QueryChanged(query) => {
                         let mut query = query;
-                        if let Some(expanded) = maybe_expand_uninstall_quick_shortcut(&query) {
+                        if let Some(expanded) =
+                            maybe_expand_uninstall_quick_shortcut(&query, last_query.as_str())
+                        {
                             overlay.set_query_text(&expanded);
                             query = expanded;
                         }
@@ -2021,11 +2023,14 @@ fn result_limit_for_query(base_limit: usize, parsed_query: &ParsedQuery) -> usiz
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-fn maybe_expand_uninstall_quick_shortcut(query: &str) -> Option<String> {
+fn maybe_expand_uninstall_quick_shortcut(query: &str, last_query: &str) -> Option<String> {
     let raw = query.trim_start();
     let remainder = raw.strip_prefix('>')?;
     if remainder.eq_ignore_ascii_case("u") {
-        return Some(">u ".to_string());
+        let last_trimmed = last_query.trim();
+        if last_trimmed.is_empty() || last_trimmed == ">" {
+            return Some(">u ".to_string());
+        }
     }
     None
 }
@@ -2429,12 +2434,13 @@ fn log_warn(message: &str) {
 mod tests {
     use super::{
         adaptive_indexed_seed_limit, can_use_indexed_prefix_cache, candidate_limit_for_query,
-        dedupe_overlay_results, launch_overlay_selection, next_selection_index, parse_cli_args,
-        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, result_limit_for_query,
-        search_overlay_results, search_overlay_results_with_session,
-        should_skip_non_searchable_query, summarize_query_profiles, IndexedPrefixCache,
-        OverlaySearchSession, RuntimeCommand, RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT,
-        INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT, UNINSTALL_QUERY_RESULT_LIMIT,
+        dedupe_overlay_results, launch_overlay_selection, maybe_expand_uninstall_quick_shortcut,
+        next_selection_index, parse_cli_args, parse_status_diagnostics_snapshot,
+        parse_tasklist_pid_lines, result_limit_for_query, search_overlay_results,
+        search_overlay_results_with_session, should_skip_non_searchable_query,
+        summarize_query_profiles, IndexedPrefixCache, OverlaySearchSession, RuntimeCommand,
+        RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
+        UNINSTALL_QUERY_RESULT_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
     use crate::config::{Config, SearchMode};
@@ -2604,6 +2610,19 @@ mod tests {
         let non_uninstall = ParsedQuery::parse(">web rust", true);
         let non_limit = result_limit_for_query(20, &non_uninstall);
         assert_eq!(non_limit, 20);
+    }
+
+    #[test]
+    fn quick_uninstall_shortcut_expands_only_on_initial_u() {
+        assert_eq!(
+            maybe_expand_uninstall_quick_shortcut(">u", ">"),
+            Some(">u ".to_string())
+        );
+        assert_eq!(maybe_expand_uninstall_quick_shortcut(">u", ">u"), None);
+        assert_eq!(
+            maybe_expand_uninstall_quick_shortcut(">u", ">u something"),
+            None
+        );
     }
 
     #[test]
