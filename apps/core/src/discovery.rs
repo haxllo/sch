@@ -508,10 +508,12 @@ Get-StartApps | ForEach-Object {
 fn dedupe_apps_by_title(items: Vec<SearchItem>) -> Vec<SearchItem> {
     let mut by_title: HashMap<String, SearchItem> = HashMap::new();
     for item in items {
-        let key = crate::model::normalize_for_search(item.title.trim());
-        if key.is_empty() {
-            continue;
-        }
+        let title_key = crate::model::normalize_for_search(item.title.trim());
+        let key = if title_key.is_empty() {
+            format!("path:{}", normalize_id_path(&item.path))
+        } else {
+            title_key
+        };
 
         match by_title.get(&key) {
             Some(existing) if app_quality_rank(existing) >= app_quality_rank(&item) => {}
