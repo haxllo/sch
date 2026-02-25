@@ -39,7 +39,7 @@ mod imp {
         ImageList_GetIcon, DRAWITEMSTRUCT, EM_SETSEL, MEASUREITEMSTRUCT, ODS_SELECTED,
     };
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SetFocus, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
+        SetFocus, VK_BACK, VK_DOWN, VK_ESCAPE, VK_RETURN, VK_UP,
     };
     use windows_sys::Win32::UI::Shell::{
         ExtractIconExW, FindExecutableW, HlinkResolveShortcutToString, SHGetFileInfoW,
@@ -187,6 +187,7 @@ mod imp {
     const COMMAND_PREFIX_GAP: i32 = 12;
     const COMMAND_PREFIX_LEFT_SHIFT: i32 = 20;
     const COMMAND_PREFIX_INPUT_PAD: i32 = 16;
+    const COMMAND_BADGE_INPUT_PAD: i32 = 12;
     const COMMAND_PREFIX_OPACITY: f32 = 0.60;
     const COMMAND_PREFIX_EMBOLDEN_OPACITY: f32 = 0.40;
     const COMMAND_PREFIX_EMBOLDEN_OFFSET_PX: i32 = 1;
@@ -644,6 +645,13 @@ mod imp {
             };
 
             if state.command_mode_input {
+                if state.command_uninstall_quick_mode {
+                    let suffix = text.trim_start();
+                    if suffix.is_empty() {
+                        return ">u".to_string();
+                    }
+                    return format!(">u {suffix}");
+                }
                 text.insert(0, '>');
             }
             text
@@ -655,18 +663,41 @@ mod imp {
             };
 
             let raw = query;
-            let (command_mode, edit_text) = if let Some(rest) = raw.strip_prefix('>') {
+            let (command_mode, mut edit_text) = if let Some(rest) = raw.strip_prefix('>') {
                 (true, rest.to_string())
             } else {
                 (false, raw.to_string())
             };
+            let mut uninstall_quick_mode = false;
+            if command_mode {
+                let trimmed = edit_text.trim_start();
+                if let Some(after_prefix) = trimmed
+                    .strip_prefix('u')
+                    .or_else(|| trimmed.strip_prefix('U'))
+                {
+                    let boundary_ok = after_prefix.is_empty()
+                        || after_prefix
+                            .chars()
+                            .next()
+                            .map(|ch| ch.is_whitespace())
+                            .unwrap_or(false);
+                    if boundary_ok {
+                        uninstall_quick_mode = true;
+                        edit_text = after_prefix.trim_start().to_string();
+                    }
+                }
+            }
 
             state.command_mode_input = command_mode;
             unsafe {
                 SetWindowTextW(state.edit_hwnd, to_wide(&edit_text).as_ptr());
             }
-            apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
-            update_uninstall_quick_mode_state(self.hwnd, state);
+            set_uninstall_quick_mode(self.hwnd, state, uninstall_quick_mode, true);
+            apply_edit_text_rect(
+                state.edit_hwnd,
+                state.command_mode_input,
+                state.command_uninstall_quick_mode,
+            );
 
             let caret = edit_text.encode_utf16().count() as isize;
             unsafe {
@@ -770,13 +801,15 @@ mod imp {
         pub fn clear_query_text(&self) {
             if let Some(state) = state_for(self.hwnd) {
                 state.command_mode_input = false;
-                state.command_uninstall_quick_mode = false;
-                state.command_badge_anim_start = None;
                 unsafe {
-                    KillTimer(self.hwnd, TIMER_COMMAND_BADGE_FADE);
                     SetWindowTextW(state.edit_hwnd, to_wide("").as_ptr());
                 }
-                apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+                set_uninstall_quick_mode(self.hwnd, state, false, false);
+                apply_edit_text_rect(
+                    state.edit_hwnd,
+                    state.command_mode_input,
+                    state.command_uninstall_quick_mode,
+                );
             }
         }
 
@@ -1525,7 +1558,6 @@ mod imp {
                                 InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                             }
                         }
-                        update_uninstall_quick_mode_state(hwnd, state);
                     }
                     unsafe {
                         PostMessageW(hwnd, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
@@ -1744,7 +1776,7 @@ mod imp {
                 }
                 if wparam == TIMER_COMMAND_BADGE_FADE {
                     if let Some(state) = state_for(hwnd) {
-                        let running = command_badge_animation_tick(hwnd, state);
+                        let running = command_badge_animation_tick(state);
                         if !running {
                             unsafe {
                                 KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
@@ -1841,6 +1873,21 @@ mod imp {
                 handle_wheel_input(state, wparam);
                 return 0;
             }
+            if message == WM_KEYDOWN
+                && hwnd == state.edit_hwnd
+                && wparam as u16 == VK_BACK
+                && state.command_uninstall_quick_mode
+            {
+                let edit_empty = unsafe { GetWindowTextLengthW(state.edit_hwnd) } <= 0;
+                if edit_empty {
+                    set_uninstall_quick_mode(parent, state, false, false);
+                    unsafe {
+                        InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+                        PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
+                    }
+                    return 0;
+                }
+            }
             if message == windows_sys::Win32::UI::WindowsAndMessaging::WM_CHAR
                 && (hwnd == state.edit_hwnd || hwnd == state.list_hwnd)
             {
@@ -1850,13 +1897,34 @@ mod imp {
                     if state.command_mode_input && !state.placeholder_hint.is_empty() {
                         state.placeholder_hint.clear();
                     }
-                    apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
-                    update_uninstall_quick_mode_state(parent, state);
+                    if !state.command_mode_input {
+                        set_uninstall_quick_mode(parent, state, false, false);
+                    }
+                    apply_edit_text_rect(
+                        state.edit_hwnd,
+                        state.command_mode_input,
+                        state.command_uninstall_quick_mode,
+                    );
                     unsafe {
                         InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                         PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
                     }
                     return 0;
+                }
+                if hwnd == state.edit_hwnd
+                    && state.command_mode_input
+                    && !state.command_uninstall_quick_mode
+                    && matches!(wparam as u32, 'u' as u32 | 'U' as u32)
+                {
+                    let edit_empty = unsafe { GetWindowTextLengthW(state.edit_hwnd) } <= 0;
+                    if edit_empty {
+                        set_uninstall_quick_mode(parent, state, true, true);
+                        unsafe {
+                            InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
+                            PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
+                        }
+                        return 0;
+                    }
                 }
                 // Suppress default control beep for handled launcher keys.
                 // Enter submits through WM_KEYDOWN -> SWIFTFIND_WM_SUBMIT.
@@ -2059,6 +2127,7 @@ mod imp {
                 client.bottom - client.top,
                 line_height,
                 state.command_mode_input,
+                state.command_uninstall_quick_mode,
             );
         }
         if text_rect.right <= text_rect.left {
@@ -2121,6 +2190,7 @@ mod imp {
                 client.bottom - client.top,
                 line_height,
                 true,
+                state.command_uninstall_quick_mode,
             );
         }
         if text_rect.right <= text_rect.left {
@@ -2240,7 +2310,7 @@ mod imp {
         (elapsed_ms / COMMAND_BADGE_ANIM_MS as f32).clamp(0.0, 1.0)
     }
 
-    fn command_badge_animation_tick(hwnd: HWND, state: &mut OverlayShellState) -> bool {
+    fn command_badge_animation_tick(state: &mut OverlayShellState) -> bool {
         if !state.command_uninstall_quick_mode {
             state.command_badge_anim_start = None;
             return false;
@@ -2256,27 +2326,29 @@ mod imp {
             state.command_badge_anim_start = None;
             return false;
         }
-        let _ = hwnd;
         true
     }
 
-    fn update_uninstall_quick_mode_state(hwnd: HWND, state: &mut OverlayShellState) {
-        let active = if state.command_mode_input {
-            let text = read_window_text(state.edit_hwnd);
-            is_uninstall_quick_mode_text(text.as_str())
-        } else {
-            false
-        };
-
-        if active == state.command_uninstall_quick_mode {
+    fn set_uninstall_quick_mode(
+        hwnd: HWND,
+        state: &mut OverlayShellState,
+        enabled: bool,
+        animate: bool,
+    ) {
+        let enabled = enabled && state.command_mode_input;
+        if enabled == state.command_uninstall_quick_mode {
             return;
         }
 
-        state.command_uninstall_quick_mode = active;
-        if active {
-            state.command_badge_anim_start = Some(Instant::now());
+        state.command_uninstall_quick_mode = enabled;
+        if enabled {
+            state.command_badge_anim_start = if animate { Some(Instant::now()) } else { None };
             unsafe {
-                SetTimer(hwnd, TIMER_COMMAND_BADGE_FADE, ANIM_FRAME_MS as u32, None);
+                if animate {
+                    SetTimer(hwnd, TIMER_COMMAND_BADGE_FADE, ANIM_FRAME_MS as u32, None);
+                } else {
+                    KillTimer(hwnd, TIMER_COMMAND_BADGE_FADE);
+                }
             }
         } else {
             state.command_badge_anim_start = None;
@@ -2285,28 +2357,14 @@ mod imp {
             }
         }
 
+        apply_edit_text_rect(
+            state.edit_hwnd,
+            state.command_mode_input,
+            state.command_uninstall_quick_mode,
+        );
         unsafe {
             InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
         }
-    }
-
-    fn is_uninstall_quick_mode_text(text: &str) -> bool {
-        let trimmed = text.trim_start();
-        let mut parts = trimmed.split_whitespace();
-        let Some(first) = parts.next() else {
-            return false;
-        };
-        first.eq_ignore_ascii_case("u")
-    }
-
-    fn read_window_text(hwnd: HWND) -> String {
-        let length = unsafe { GetWindowTextLengthW(hwnd) };
-        if length <= 0 {
-            return String::new();
-        }
-        let mut buffer = vec![0_u16; (length as usize) + 1];
-        let copied = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
-        String::from_utf16_lossy(&buffer[..(copied as usize)])
     }
 
     fn hide_input_caret(edit_hwnd: HWND) {
@@ -3722,7 +3780,11 @@ mod imp {
             state.command_badge_anim_start = None;
             state.placeholder_hint.clear();
             unsafe {
-                apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+                apply_edit_text_rect(
+                    state.edit_hwnd,
+                    state.command_mode_input,
+                    state.command_uninstall_quick_mode,
+                );
                 ShowWindow(state.help_tip_hwnd, SW_HIDE);
                 InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
             }
@@ -3803,7 +3865,11 @@ mod imp {
                 INPUT_HEIGHT,
                 1,
             );
-            apply_edit_text_rect(state.edit_hwnd, state.command_mode_input);
+            apply_edit_text_rect(
+                state.edit_hwnd,
+                state.command_mode_input,
+                state.command_uninstall_quick_mode,
+            );
             if status_visible {
                 update_status_alignment(state, no_results_inline);
                 let (status_left, status_width) = if no_results_inline {
@@ -3901,7 +3967,11 @@ mod imp {
         }
     }
 
-    fn apply_edit_text_rect(edit_hwnd: HWND, command_mode_input: bool) {
+    fn apply_edit_text_rect(
+        edit_hwnd: HWND,
+        command_mode_input: bool,
+        command_uninstall_quick_mode: bool,
+    ) {
         let mut client: RECT = unsafe { std::mem::zeroed() };
         unsafe {
             GetClientRect(edit_hwnd, &mut client);
@@ -3913,7 +3983,13 @@ mod imp {
         }
 
         let line_height = input_line_height_for_edit(edit_hwnd, 0);
-        let text_rect = compute_input_text_rect(width, height, line_height, command_mode_input);
+        let text_rect = compute_input_text_rect(
+            width,
+            height,
+            line_height,
+            command_mode_input,
+            command_uninstall_quick_mode,
+        );
 
         unsafe {
             SendMessageW(
@@ -3950,6 +4026,7 @@ mod imp {
         height: i32,
         line_height: i32,
         command_mode_input: bool,
+        command_uninstall_quick_mode: bool,
     ) -> RECT {
         let line_height = line_height.clamp(14, (height - 2).max(14));
         let centered_top = ((height - line_height) / 2).max(0) + INPUT_TEXT_SHIFT_Y;
@@ -3960,8 +4037,16 @@ mod imp {
         } else {
             0
         };
+        let quick_badge_left_pad = if command_mode_input && command_uninstall_quick_mode {
+            COMMAND_BADGE_INPUT_PAD
+        } else {
+            0
+        };
         let mut text_rect = RECT {
-            left: INPUT_TEXT_LEFT_INSET + INPUT_TEXT_SHIFT_X + prefix_left_pad,
+            left: INPUT_TEXT_LEFT_INSET
+                + INPUT_TEXT_SHIFT_X
+                + prefix_left_pad
+                + quick_badge_left_pad,
             top,
             right: width - INPUT_TEXT_RIGHT_INSET + INPUT_TEXT_SHIFT_X,
             bottom: top + line_height,
