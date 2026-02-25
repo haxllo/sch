@@ -27,7 +27,7 @@ impl From<std::io::Error> for StartupError {
 }
 
 #[cfg(target_os = "windows")]
-const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_SUBKEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 #[cfg(target_os = "windows")]
 const VALUE_NAME: &str = "SwiftFind";
 const STARTUP_ARG: &str = "--background";
@@ -60,44 +60,135 @@ pub fn startup_command_for_executable(executable_path: &Path) -> Result<String, 
 
 #[cfg(target_os = "windows")]
 pub fn is_enabled() -> Result<bool, StartupError> {
-    let output = std::process::Command::new("reg")
-        .args(["query", RUN_KEY, "/v", VALUE_NAME])
-        .output()?;
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, KEY_QUERY_VALUE,
+    };
 
-    Ok(output.status.success())
+    let subkey = to_wide(RUN_SUBKEY);
+    let value_name = to_wide(VALUE_NAME);
+    let mut key = std::ptr::null_mut();
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            KEY_QUERY_VALUE,
+            &mut key,
+        )
+    };
+
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(false);
+    }
+    if status != ERROR_SUCCESS {
+        return Err(registry_error("query run key", status));
+    }
+
+    let mut value_type = 0_u32;
+    let mut size = 0_u32;
+    let status = unsafe {
+        RegQueryValueExW(
+            key,
+            value_name.as_ptr(),
+            std::ptr::null(),
+            &mut value_type,
+            std::ptr::null_mut(),
+            &mut size,
+        )
+    };
+    unsafe {
+        RegCloseKey(key);
+    }
+
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(false);
+    }
+    if status != ERROR_SUCCESS {
+        return Err(registry_error("query run value", status));
+    }
+
+    Ok(true)
 }
 
 #[cfg(target_os = "windows")]
 pub fn set_enabled(enabled: bool, executable_path: &Path) -> Result<(), StartupError> {
+    use windows_sys::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS};
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegDeleteValueW, RegOpenKeyExW, RegSetValueExW,
+        HKEY_CURRENT_USER, KEY_SET_VALUE, REG_SZ,
+    };
+
+    let subkey = to_wide(RUN_SUBKEY);
+    let value_name = to_wide(VALUE_NAME);
+
     if enabled {
         let value = startup_command_for_executable(executable_path)?;
-        let output = std::process::Command::new("reg")
-            .args([
-                "add", RUN_KEY, "/v", VALUE_NAME, "/t", "REG_SZ", "/d", &value, "/f",
-            ])
-            .output()?;
-        if output.status.success() {
-            return Ok(());
+        let mut key = std::ptr::null_mut();
+        let status = unsafe {
+            RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                subkey.as_ptr(),
+                0,
+                std::ptr::null(),
+                0,
+                KEY_SET_VALUE,
+                std::ptr::null(),
+                &mut key,
+                std::ptr::null_mut(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(registry_error("create/open run key", status));
         }
-        return Err(StartupError::Command(
-            String::from_utf8_lossy(&output.stderr).trim().to_string(),
-        ));
-    }
 
-    let output = std::process::Command::new("reg")
-        .args(["delete", RUN_KEY, "/v", VALUE_NAME, "/f"])
-        .output()?;
+        let value_wide = to_wide(&value);
+        let status = unsafe {
+            RegSetValueExW(
+                key,
+                value_name.as_ptr(),
+                0,
+                REG_SZ,
+                value_wide.as_ptr() as *const u8,
+                (value_wide.len() * std::mem::size_of::<u16>()) as u32,
+            )
+        };
+        unsafe {
+            RegCloseKey(key);
+        }
 
-    if output.status.success() {
+        if status != ERROR_SUCCESS {
+            return Err(registry_error("set run value", status));
+        }
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
-    if stderr.contains("unable to find") || stderr.contains("cannot find") {
+    let mut key = std::ptr::null_mut();
+    let status = unsafe {
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            KEY_SET_VALUE,
+            &mut key,
+        )
+    };
+    if status == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    if status != ERROR_SUCCESS {
+        return Err(registry_error("open run key for delete", status));
+    }
+
+    let status = unsafe { RegDeleteValueW(key, value_name.as_ptr()) };
+    unsafe {
+        RegCloseKey(key);
+    }
+    if status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND {
         return Ok(());
     }
 
-    Err(StartupError::Command(stderr.trim().to_string()))
+    Err(registry_error("delete run value", status))
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -108,4 +199,14 @@ pub fn is_enabled() -> Result<bool, StartupError> {
 #[cfg(not(target_os = "windows"))]
 pub fn set_enabled(_enabled: bool, _executable_path: &Path) -> Result<(), StartupError> {
     Err(StartupError::UnsupportedPlatform)
+}
+
+#[cfg(target_os = "windows")]
+fn to_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn registry_error(action: &str, status: u32) -> StartupError {
+    StartupError::Command(format!("{action} failed with code {status}"))
 }
