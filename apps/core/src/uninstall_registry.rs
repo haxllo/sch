@@ -65,6 +65,19 @@ pub fn execute_uninstall_action(action_id: &str) -> Result<(), String> {
     execute_entry(&target)
 }
 
+pub fn is_display_name_registered(display_name: &str) -> Result<bool, String> {
+    let normalized_query = normalize_for_search(display_name);
+    if normalized_query.is_empty() {
+        return Ok(false);
+    }
+
+    let entries = load_cached_entries(true)?;
+    Ok(entries
+        .iter()
+        .map(|entry| normalize_for_search(entry.display_name.as_str()))
+        .any(|normalized_name| normalized_name == normalized_query))
+}
+
 fn search_uninstall_actions_with_entries(
     search_term: &str,
     limit: usize,

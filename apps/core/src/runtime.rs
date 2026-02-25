@@ -334,6 +334,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
 
         let max_results = config.max_results as usize;
         let mut current_results: Vec<crate::model::SearchItem> = Vec::new();
+        let mut suppressed_uninstall_titles: Vec<String> = Vec::new();
         let mut selected_index = 0_usize;
         let mut last_query = String::new();
         let mut search_session = OverlaySearchSession::default();
@@ -374,6 +375,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     }
                     OverlayEvent::ExternalShow => {
                         overlay_state.set_visible(overlay.is_visible());
+                        reconcile_suppressed_uninstall_titles(&mut suppressed_uninstall_titles);
                         overlay.show_and_focus();
                         if config.clipboard_enabled {
                             let _ = clipboard_history::maybe_capture_latest(&config);
@@ -437,6 +439,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                         ) {
                             Ok(mut results) => {
                                 dedupe_overlay_results(&mut results);
+                                if !suppressed_uninstall_titles.is_empty() {
+                                    filter_suppressed_uninstall_app_results(
+                                        &mut results,
+                                        &suppressed_uninstall_titles,
+                                    );
+                                }
                                 current_results = results;
                                 selected_index = 0;
                                 if current_results.is_empty() {
@@ -524,6 +532,12 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             selected_index,
                         ) {
                             Ok(()) => {
+                                if selected_is_uninstall {
+                                    track_uninstall_title_suppression(
+                                        &mut suppressed_uninstall_titles,
+                                        selected.title.as_str(),
+                                    );
+                                }
                                 overlay.set_status_text("");
                                 if !selected_is_uninstall {
                                     overlay.hide_now();
@@ -1492,6 +1506,112 @@ fn normalize_path_key(path: &str) -> String {
     normalized
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn track_uninstall_title_suppression(
+    suppressed_uninstall_titles: &mut Vec<String>,
+    action_title: &str,
+) {
+    let Some(target_title) = uninstall_target_title_from_action_title(action_title) else {
+        return;
+    };
+    if suppressed_uninstall_titles
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(target_title.as_str()))
+    {
+        return;
+    }
+    suppressed_uninstall_titles.push(target_title);
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn reconcile_suppressed_uninstall_titles(suppressed_uninstall_titles: &mut Vec<String>) {
+    if suppressed_uninstall_titles.is_empty() {
+        return;
+    }
+
+    suppressed_uninstall_titles.retain(|title| {
+        match crate::uninstall_registry::is_display_name_registered(title.as_str()) {
+            Ok(still_registered) => !still_registered,
+            Err(error) => {
+                log_warn(&format!(
+                    "[swiftfind-core] uninstall suppression registry check failed for '{}': {}",
+                    title, error
+                ));
+                true
+            }
+        }
+    });
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn filter_suppressed_uninstall_app_results(
+    results: &mut Vec<crate::model::SearchItem>,
+    suppressed_uninstall_titles: &[String],
+) {
+    if results.is_empty() || suppressed_uninstall_titles.is_empty() {
+        return;
+    }
+
+    let suppressed_keys: Vec<String> = suppressed_uninstall_titles
+        .iter()
+        .map(|title| crate::model::normalize_for_search(title.as_str()))
+        .filter(|key| !key.is_empty())
+        .collect();
+    if suppressed_keys.is_empty() {
+        return;
+    }
+
+    results.retain(|item| {
+        if !item.kind.eq_ignore_ascii_case("app") {
+            return true;
+        }
+        let title_key = item.normalized_title();
+        !suppressed_keys
+            .iter()
+            .any(|suppressed| uninstall_title_matches(title_key, suppressed.as_str()))
+    });
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn uninstall_target_title_from_action_title(action_title: &str) -> Option<String> {
+    let trimmed = action_title.trim();
+    if trimmed.len() <= "Uninstall ".len() {
+        return None;
+    }
+    if !trimmed
+        .get(.."Uninstall ".len())
+        .map(|prefix| prefix.eq_ignore_ascii_case("Uninstall "))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let target = trimmed["Uninstall ".len()..].trim();
+    if target.is_empty() {
+        None
+    } else {
+        Some(target.to_string())
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn uninstall_title_matches(app_title_key: &str, suppressed_key: &str) -> bool {
+    if app_title_key.is_empty() || suppressed_key.is_empty() {
+        return false;
+    }
+    if app_title_key == suppressed_key {
+        return true;
+    }
+
+    if suppressed_key.len() >= 6
+        && (app_title_key.starts_with(suppressed_key) || suppressed_key.starts_with(app_title_key))
+    {
+        return true;
+    }
+
+    suppressed_key.len() >= 10 && app_title_key.contains(suppressed_key)
+}
+
 #[cfg(target_os = "windows")]
 fn overlay_subtitle(item: &crate::model::SearchItem, command_mode: bool) -> String {
     if command_mode
@@ -2434,12 +2554,14 @@ fn log_warn(message: &str) {
 mod tests {
     use super::{
         adaptive_indexed_seed_limit, can_use_indexed_prefix_cache, candidate_limit_for_query,
-        dedupe_overlay_results, launch_overlay_selection, maybe_expand_uninstall_quick_shortcut,
-        next_selection_index, parse_cli_args, parse_status_diagnostics_snapshot,
-        parse_tasklist_pid_lines, result_limit_for_query, search_overlay_results,
-        search_overlay_results_with_session, should_skip_non_searchable_query,
-        summarize_query_profiles, IndexedPrefixCache, OverlaySearchSession, RuntimeCommand,
-        RuntimeOptions, INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
+        dedupe_overlay_results, filter_suppressed_uninstall_app_results, launch_overlay_selection,
+        maybe_expand_uninstall_quick_shortcut, next_selection_index, parse_cli_args,
+        parse_status_diagnostics_snapshot, parse_tasklist_pid_lines, result_limit_for_query,
+        search_overlay_results, search_overlay_results_with_session,
+        should_skip_non_searchable_query, summarize_query_profiles,
+        track_uninstall_title_suppression, uninstall_target_title_from_action_title,
+        IndexedPrefixCache, OverlaySearchSession, RuntimeCommand, RuntimeOptions,
+        INDEXED_PREFIX_CACHE_MAX_SEED_LIMIT, INDEXED_PREFIX_CACHE_MIN_SEED_LIMIT,
         UNINSTALL_QUERY_RESULT_LIMIT,
     };
     use crate::action_registry::{ACTION_DIAGNOSTICS_BUNDLE_ID, ACTION_WEB_SEARCH_PREFIX};
@@ -2623,6 +2745,52 @@ mod tests {
             maybe_expand_uninstall_quick_shortcut(">u", ">u something"),
             None
         );
+    }
+
+    #[test]
+    fn uninstall_action_title_extracts_target_name() {
+        assert_eq!(
+            uninstall_target_title_from_action_title("Uninstall Discord"),
+            Some("Discord".to_string())
+        );
+        assert_eq!(
+            uninstall_target_title_from_action_title("uninstall   Visual Studio Code  "),
+            Some("Visual Studio Code".to_string())
+        );
+        assert_eq!(
+            uninstall_target_title_from_action_title("Open Discord"),
+            None
+        );
+    }
+
+    #[test]
+    fn uninstall_title_suppression_tracks_uniques() {
+        let mut suppressed = Vec::new();
+        track_uninstall_title_suppression(&mut suppressed, "Uninstall Discord");
+        track_uninstall_title_suppression(&mut suppressed, "uninstall discord");
+        track_uninstall_title_suppression(&mut suppressed, "Open Discord");
+        assert_eq!(suppressed, vec!["Discord".to_string()]);
+    }
+
+    #[test]
+    fn suppressed_uninstall_apps_are_filtered_from_results() {
+        let mut results = vec![
+            SearchItem::new("app-discord", "app", "Discord", "C:\\Discord\\Discord.exe"),
+            SearchItem::new(
+                "app-vscode",
+                "app",
+                "Visual Studio Code",
+                "C:\\Code\\Code.exe",
+            ),
+            SearchItem::new("file-readme", "file", "readme.md", "C:\\repo\\readme.md"),
+        ];
+        let suppressed = vec!["Discord".to_string()];
+        filter_suppressed_uninstall_app_results(&mut results, &suppressed);
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|item| item.id != "app-discord"));
+        assert!(results.iter().any(|item| item.id == "app-vscode"));
+        assert!(results.iter().any(|item| item.id == "file-readme"));
     }
 
     #[test]
