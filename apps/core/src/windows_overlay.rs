@@ -1882,11 +1882,20 @@ mod imp {
             if message == WM_KEYDOWN
                 && hwnd == state.edit_hwnd
                 && wparam as u16 == VK_BACK
-                && state.command_uninstall_quick_mode
+                && state.command_mode_input
             {
                 let edit_empty = unsafe { GetWindowTextLengthW(state.edit_hwnd) } <= 0;
                 if edit_empty {
-                    set_uninstall_quick_mode(parent, state, false, false);
+                    if state.command_uninstall_quick_mode {
+                        set_uninstall_quick_mode(parent, state, false, false);
+                    } else {
+                        state.command_mode_input = false;
+                        apply_edit_text_rect(
+                            state.edit_hwnd,
+                            state.command_mode_input,
+                            state.command_uninstall_quick_mode,
+                        );
+                    }
                     unsafe {
                         InvalidateRect(state.edit_hwnd, std::ptr::null(), 1);
                         PostMessageW(parent, SWIFTFIND_WM_QUERY_CHANGED, 0, 0);
