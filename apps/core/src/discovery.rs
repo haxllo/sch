@@ -498,7 +498,10 @@ fn discover_start_menu_root(root: &Path) -> Result<Vec<SearchItem>, ProviderErro
 
 #[cfg(target_os = "windows")]
 fn discover_start_apps() -> Result<Vec<SearchItem>, ProviderError> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     let script = r#"
 $ErrorActionPreference = 'Stop'
@@ -510,15 +513,21 @@ Get-StartApps | ForEach-Object {
   }
 }
 "#;
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
+            "-WindowStyle",
+            "Hidden",
             "-Command",
             script,
         ])
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let output = command
         .output()
         .map_err(|error| ProviderError::new(format!("Get-StartApps invocation failed: {error}")))?;
 
@@ -608,7 +617,10 @@ fn discover_windows_search_items(
     show_folders: bool,
 ) -> Result<Vec<SearchItem>, ProviderError> {
     use std::collections::HashSet;
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     let roots_joined = join_windows_paths_for_powershell(roots);
     if roots_joined.is_empty() {
@@ -670,23 +682,27 @@ foreach ($root in $roots) {
 $conn.Close()
 "#;
 
-    let output = Command::new("powershell.exe")
+    let mut command = Command::new("powershell.exe");
+    command
         .args([
             "-NoProfile",
             "-NonInteractive",
             "-ExecutionPolicy",
             "Bypass",
+            "-WindowStyle",
+            "Hidden",
             "-Command",
             script,
         ])
         .env("SWIFTFIND_WS_ROOTS", roots_joined)
         .env("SWIFTFIND_WS_EXCLUDES", excluded_joined)
-        .output()
-        .map_err(|error| {
-            ProviderError::new(format!(
-                "Windows Search provider invocation failed: {error}"
-            ))
-        })?;
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let output = command.output().map_err(|error| {
+        ProviderError::new(format!(
+            "Windows Search provider invocation failed: {error}"
+        ))
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
