@@ -1914,7 +1914,7 @@ mod imp {
                 if hwnd == state.edit_hwnd
                     && state.command_mode_input
                     && !state.command_uninstall_quick_mode
-                    && matches!(wparam as u32, 'u' as u32 | 'U' as u32)
+                    && ((wparam as u32) == 'u' as u32 || (wparam as u32) == 'U' as u32)
                 {
                     let edit_empty = unsafe { GetWindowTextLengthW(state.edit_hwnd) } <= 0;
                     if edit_empty {
