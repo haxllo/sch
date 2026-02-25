@@ -78,7 +78,7 @@ pub fn search_actions_with_mode(
         }
 
         let remaining = limit.saturating_sub(out.len());
-        if remaining > 0 {
+        if remaining > 0 && cfg.uninstall_actions_enabled {
             let uninstall_actions = search_uninstall_actions(trimmed_query, remaining);
             out.extend(uninstall_actions);
             if out.len() >= limit {

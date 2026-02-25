@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-pub const CURRENT_CONFIG_VERSION: u32 = 5;
+pub const CURRENT_CONFIG_VERSION: u32 = 6;
 const LEGACY_IDLE_CACHE_TRIM_MS_V1: u32 = 1200;
 const LEGACY_ACTIVE_MEMORY_TARGET_MB_V1: u16 = 80;
 const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
@@ -19,6 +19,7 @@ const TEMPLATE_REQUIRED_KEYS: &[&str] = &[
     "show_folders",
     "search_mode_default",
     "search_dsl_enabled",
+    "uninstall_actions_enabled",
     "web_search_provider",
     "web_search_custom_template",
     "clipboard_enabled",
@@ -104,6 +105,7 @@ pub struct Config {
     pub hotkey_recommended: Vec<String>,
     pub search_mode_default: SearchMode,
     pub search_dsl_enabled: bool,
+    pub uninstall_actions_enabled: bool,
     pub web_search_provider: WebSearchProvider,
     pub web_search_custom_template: String,
     pub clipboard_enabled: bool,
@@ -145,6 +147,7 @@ impl Default for Config {
             ],
             search_mode_default: SearchMode::All,
             search_dsl_enabled: true,
+            uninstall_actions_enabled: true,
             web_search_provider: WebSearchProvider::Duckduckgo,
             web_search_custom_template: String::new(),
             clipboard_enabled: true,
@@ -376,6 +379,14 @@ pub fn write_user_template(cfg: &Config, path: &Path) -> Result<(), ConfigError>
     );
     text.push_str("  \"search_dsl_enabled\": ");
     text.push_str(if cfg.search_dsl_enabled {
+        "true"
+    } else {
+        "false"
+    });
+    text.push_str(",\n");
+    text.push_str("  // Enable command mode uninstall actions (e.g. > uninstall appname)\n");
+    text.push_str("  \"uninstall_actions_enabled\": ");
+    text.push_str(if cfg.uninstall_actions_enabled {
         "true"
     } else {
         "false"
@@ -716,6 +727,11 @@ fn apply_migrations(cfg: &mut Config, raw: &str) -> bool {
             cfg.show_folders = Config::default().show_folders;
             changed = true;
         }
+    }
+
+    if source_version < 6 && !raw_has_key(raw, "uninstall_actions_enabled") {
+        cfg.uninstall_actions_enabled = Config::default().uninstall_actions_enabled;
+        changed = true;
     }
 
     if TEMPLATE_REQUIRED_KEYS
