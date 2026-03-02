@@ -2246,11 +2246,12 @@ fn should_ignore_hotkey_due_to_fullscreen(cfg: &Config) -> bool {
 
 #[cfg(target_os = "windows")]
 fn is_foreground_window_fullscreen() -> bool {
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetForegroundWindow, GetWindowRect, IsIconic, IsWindowVisible, RECT,
+        GetForegroundWindow, GetWindowRect, IsIconic, IsWindowVisible,
     };
 
     let foreground = unsafe { GetForegroundWindow() };
