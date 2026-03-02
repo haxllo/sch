@@ -154,6 +154,50 @@ pub fn set_meta(db: &Connection, key: &str, value: &str) -> Result<(), StoreErro
     Ok(())
 }
 
+pub fn record_query_selection(
+    db: &Connection,
+    query_norm: &str,
+    mode: &str,
+    item_id: &str,
+    selected_at_epoch_secs: i64,
+) -> Result<(), StoreError> {
+    db.execute(
+        "INSERT INTO item_query_memory (query_norm, mode, item_id, selected_count, last_selected_epoch_secs)
+         VALUES (?1, ?2, ?3, 1, ?4)
+         ON CONFLICT(query_norm, mode, item_id) DO UPDATE SET
+         selected_count = MIN(item_query_memory.selected_count + 1, 1000),
+         last_selected_epoch_secs = excluded.last_selected_epoch_secs",
+        params![query_norm, mode, item_id, selected_at_epoch_secs],
+    )?;
+    Ok(())
+}
+
+pub fn list_query_selections(
+    db: &Connection,
+    query_norm: &str,
+    mode: &str,
+    limit: usize,
+) -> Result<Vec<(String, u32, i64)>, StoreError> {
+    if query_norm.trim().is_empty() || mode.trim().is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut stmt = db.prepare(
+        "SELECT item_id, selected_count, last_selected_epoch_secs
+         FROM item_query_memory
+         WHERE query_norm = ?1 AND mode = ?2
+         ORDER BY selected_count DESC, last_selected_epoch_secs DESC
+         LIMIT ?3",
+    )?;
+    let mut rows = stmt.query(params![query_norm, mode, limit as i64])?;
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        out.push((row.get(0)?, row.get(1)?, row.get(2)?));
+    }
+    Ok(out)
+}
+
 fn init_schema(conn: &Connection) -> Result<(), StoreError> {
     let current_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
 
@@ -163,9 +207,12 @@ fn init_schema(conn: &Connection) -> Result<(), StoreError> {
     if current_version < 2 {
         migration_v2(conn)?;
     }
+    if current_version < 3 {
+        migration_v3(conn)?;
+    }
 
-    if current_version < 2 {
-        conn.pragma_update(None, "user_version", 2_i64)?;
+    if current_version < 3 {
+        conn.pragma_update(None, "user_version", 3_i64)?;
     }
 
     Ok(())
@@ -193,6 +240,26 @@ fn migration_v2(conn: &Connection) -> Result<(), StoreError> {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         )",
+        [],
+    )?;
+    Ok(())
+}
+
+fn migration_v3(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS item_query_memory (
+            query_norm TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            selected_count INTEGER NOT NULL DEFAULT 0,
+            last_selected_epoch_secs INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(query_norm, mode, item_id)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_item_query_memory_lookup
+         ON item_query_memory(query_norm, mode, selected_count DESC, last_selected_epoch_secs DESC)",
         [],
     )?;
     Ok(())

@@ -75,3 +75,17 @@ fn persists_meta_values_across_reopen() {
     drop(reopened);
     std::fs::remove_file(&db_path).unwrap();
 }
+
+#[test]
+fn stores_and_reads_query_selection_memory() {
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    swiftfind_core::index_store::record_query_selection(&db, "vim", "all", "app:a", 100).unwrap();
+    swiftfind_core::index_store::record_query_selection(&db, "vim", "all", "app:a", 200).unwrap();
+    swiftfind_core::index_store::record_query_selection(&db, "vim", "all", "app:b", 150).unwrap();
+
+    let rows = swiftfind_core::index_store::list_query_selections(&db, "vim", "all", 10).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].0, "app:a");
+    assert_eq!(rows[0].1, 2);
+    assert_eq!(rows[0].2, 200);
+}

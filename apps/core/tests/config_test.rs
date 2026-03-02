@@ -28,6 +28,7 @@ fn accepts_default_config() {
     assert_eq!(cfg.index_max_items_total, 120_000);
     assert_eq!(cfg.index_max_items_per_root, 40_000);
     assert_eq!(cfg.index_max_items_per_query_seed, 5_000);
+    assert!(cfg.ignore_hotkeys_on_fullscreen);
     assert!(
         cfg.index_db_path.to_string_lossy().contains("swiftfind")
             || cfg.index_db_path.to_string_lossy().contains("SwiftFind")
@@ -180,6 +181,7 @@ fn writes_user_template_with_comments_and_loads_it() {
     assert!(raw.contains("\"index_max_items_total\":"));
     assert!(raw.contains("\"index_max_items_per_root\":"));
     assert!(raw.contains("\"index_max_items_per_query_seed\":"));
+    assert!(raw.contains("\"ignore_hotkeys_on_fullscreen\": true"));
     if cfg.discovery_exclude_roots.is_empty() {
         assert!(raw.contains("\"discovery_exclude_roots\": []"));
     } else {
@@ -254,6 +256,7 @@ fn migrates_legacy_config_and_preserves_user_values() {
     assert_eq!(loaded.index_max_items_total, 120_000);
     assert_eq!(loaded.index_max_items_per_root, 40_000);
     assert_eq!(loaded.index_max_items_per_query_seed, 5_000);
+    assert!(loaded.ignore_hotkeys_on_fullscreen);
 
     let updated_raw = std::fs::read_to_string(&config_path).unwrap();
     assert!(updated_raw.contains("\"hotkey\": \"Ctrl+Alt+P\""));
@@ -268,6 +271,7 @@ fn migrates_legacy_config_and_preserves_user_values() {
     assert!(updated_raw.contains("\"index_max_items_total\": 120000"));
     assert!(updated_raw.contains("\"index_max_items_per_root\": 40000"));
     assert!(updated_raw.contains("\"index_max_items_per_query_seed\": 5000"));
+    assert!(updated_raw.contains("\"ignore_hotkeys_on_fullscreen\": true"));
 
     let backups: Vec<_> = std::fs::read_dir(&config_dir)
         .unwrap()

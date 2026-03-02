@@ -259,11 +259,13 @@ impl CoreService {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
-            return Ok(crate::search::search_with_filter(
+            let query_boosts = self.query_personalization_boosts(query, filter.mode)?;
+            return Ok(crate::search::search_with_filter_with_boosts(
                 &guard,
                 query,
                 effective_limit,
                 filter,
+                Some(&query_boosts),
             ));
         }
 
@@ -281,11 +283,13 @@ impl CoreService {
             merge_seed_candidates(&mut seed_items, db_candidates);
         }
 
-        Ok(crate::search::search_with_filter(
+        let query_boosts = self.query_personalization_boosts(query, filter.mode)?;
+        Ok(crate::search::search_with_filter_with_boosts(
             &seed_items,
             query,
             effective_limit,
             filter,
+            Some(&query_boosts),
         ))
     }
 
@@ -307,6 +311,15 @@ impl CoreService {
     }
 
     pub fn launch(&self, target: LaunchTarget<'_>) -> Result<(), ServiceError> {
+        self.launch_with_query_context(target, None, None)
+    }
+
+    pub fn launch_with_query_context(
+        &self,
+        target: LaunchTarget<'_>,
+        query: Option<&str>,
+        mode: Option<SearchMode>,
+    ) -> Result<(), ServiceError> {
         match target {
             LaunchTarget::Path(path) => launch_path(path).map_err(ServiceError::from),
             LaunchTarget::Id(id) => {
@@ -315,6 +328,9 @@ impl CoreService {
                 match launch_path(&item.path) {
                     Ok(()) => {
                         self.record_successful_launch(&item)?;
+                        if let (Some(query), Some(mode)) = (query, mode) {
+                            self.record_query_selection_hint(query, mode, &item.id)?;
+                        }
                         Ok(())
                     }
                     Err(error) if should_prune_after_launch_error(&item, &error) => {
@@ -326,6 +342,29 @@ impl CoreService {
                 }
             }
         }
+    }
+
+    pub fn record_query_selection_hint(
+        &self,
+        query: &str,
+        mode: SearchMode,
+        item_id: &str,
+    ) -> Result<(), ServiceError> {
+        let query_norm = crate::model::normalize_for_search(query);
+        if query_norm.is_empty() {
+            return Ok(());
+        }
+        if matches!(mode, SearchMode::Actions | SearchMode::Clipboard) {
+            return Ok(());
+        }
+        index_store::record_query_selection(
+            &self.db,
+            &query_norm,
+            search_mode_key(mode),
+            item_id,
+            now_epoch_secs(),
+        )?;
+        Ok(())
     }
 
     pub fn rebuild_index(&self) -> Result<usize, ServiceError> {
@@ -615,6 +654,31 @@ impl CoreService {
         Ok(out)
     }
 
+    fn query_personalization_boosts(
+        &self,
+        query: &str,
+        mode: SearchMode,
+    ) -> Result<HashMap<String, i64>, ServiceError> {
+        let query_norm = crate::model::normalize_for_search(query);
+        if query_norm.is_empty() || matches!(mode, SearchMode::Actions | SearchMode::Clipboard) {
+            return Ok(HashMap::new());
+        }
+
+        let rows =
+            index_store::list_query_selections(&self.db, &query_norm, search_mode_key(mode), 64)?;
+        let now = now_epoch_secs();
+        let mut boosts = HashMap::with_capacity(rows.len());
+        for (item_id, selected_count, last_selected_epoch_secs) in rows {
+            let usage_boost = (selected_count.min(12) as i64) * 280;
+            let recency_boost = query_memory_recency_boost(last_selected_epoch_secs, now);
+            let total = (usage_boost + recency_boost).clamp(0, 5_000);
+            if total > 0 {
+                boosts.insert(item_id, total);
+            }
+        }
+        Ok(boosts)
+    }
+
     fn refresh_cache_from_store(&self) -> Result<(), ServiceError> {
         let config_snapshot = self.config_snapshot();
         let latest_full = index_store::list_items(&self.db)?;
@@ -844,6 +908,32 @@ fn should_use_app_cache(filter: &SearchFilter) -> bool {
 
 fn should_use_db_query_seed(filter: &SearchFilter, query: &str) -> bool {
     !query.trim().is_empty() && matches!(filter.mode, SearchMode::All | SearchMode::Files)
+}
+
+fn search_mode_key(mode: SearchMode) -> &'static str {
+    match mode {
+        SearchMode::All => "all",
+        SearchMode::Apps => "apps",
+        SearchMode::Files => "files",
+        SearchMode::Actions => "actions",
+        SearchMode::Clipboard => "clipboard",
+    }
+}
+
+fn query_memory_recency_boost(last_selected_epoch_secs: i64, now_epoch_secs: i64) -> i64 {
+    if last_selected_epoch_secs <= 0 || now_epoch_secs <= 0 {
+        return 0;
+    }
+    let age_secs = now_epoch_secs.saturating_sub(last_selected_epoch_secs);
+    if age_secs <= 86_400 {
+        900
+    } else if age_secs <= 7 * 86_400 {
+        550
+    } else if age_secs <= 30 * 86_400 {
+        220
+    } else {
+        0
+    }
 }
 
 fn merge_seed_candidates(seed_items: &mut Vec<SearchItem>, extra: Vec<SearchItem>) {

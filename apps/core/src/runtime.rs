@@ -399,7 +399,16 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                 match event {
                     OverlayEvent::Hotkey(_) => {
                         log_info("[swiftfind-core] hotkey_event received");
-                        overlay_state.set_visible(overlay.is_visible());
+                        let overlay_visible = overlay.is_visible();
+                        overlay_state.set_visible(overlay_visible);
+                        if !overlay_visible
+                            && should_ignore_hotkey_due_to_fullscreen(&runtime_config)
+                        {
+                            log_info(
+                                "[swiftfind-core] hotkey ignored because fullscreen app is active",
+                            );
+                            return;
+                        }
                         let action = overlay_state.on_hotkey(overlay.has_focus());
                         match action {
                             HotkeyAction::ShowAndFocus | HotkeyAction::FocusExisting => {
@@ -716,6 +725,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                             &plugin_registry,
                             &current_results,
                             selected_index,
+                            last_query.as_str(),
                         ) {
                             Ok(()) => {
                                 overlay.set_status_text("");
@@ -1574,6 +1584,7 @@ fn write_diagnostics_bundle(cfg: &config::Config) -> Result<std::path::PathBuf, 
         "plugins_enabled": cfg.plugins_enabled,
         "plugin_paths_count": cfg.plugin_paths.len(),
         "plugins_safe_mode": cfg.plugins_safe_mode,
+        "ignore_hotkeys_on_fullscreen": cfg.ignore_hotkeys_on_fullscreen,
         "idle_cache_trim_ms": cfg.idle_cache_trim_ms,
         "active_memory_target_mb": cfg.active_memory_target_mb,
         "index_max_items_total": cfg.index_max_items_total,
@@ -2227,6 +2238,59 @@ fn acquire_single_instance_guard() -> Result<Option<SingleInstanceGuard>, String
 #[cfg(target_os = "windows")]
 fn to_wide(value: &str) -> Vec<u16> {
     value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(target_os = "windows")]
+fn should_ignore_hotkey_due_to_fullscreen(cfg: &Config) -> bool {
+    if !cfg.ignore_hotkeys_on_fullscreen {
+        return false;
+    }
+    is_foreground_window_fullscreen()
+}
+
+#[cfg(target_os = "windows")]
+fn is_foreground_window_fullscreen() -> bool {
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowRect, IsIconic, IsWindowVisible, RECT,
+    };
+
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.is_null() {
+        return false;
+    }
+    if unsafe { IsWindowVisible(foreground) } == 0 || unsafe { IsIconic(foreground) } != 0 {
+        return false;
+    }
+
+    let monitor = unsafe { MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST) };
+    if monitor.is_null() {
+        return false;
+    }
+
+    let mut monitor_info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        rcMonitor: RECT::default(),
+        rcWork: RECT::default(),
+        dwFlags: 0,
+    };
+    if unsafe { GetMonitorInfoW(monitor, &mut monitor_info as *mut MONITORINFO) } == 0 {
+        return false;
+    }
+
+    let mut rect = RECT::default();
+    if unsafe { GetWindowRect(foreground, &mut rect as *mut RECT) } == 0 {
+        return false;
+    }
+
+    let fuzz = 2;
+    let covers_left = rect.left <= monitor_info.rcMonitor.left + fuzz;
+    let covers_top = rect.top <= monitor_info.rcMonitor.top + fuzz;
+    let covers_right = rect.right >= monitor_info.rcMonitor.right - fuzz;
+    let covers_bottom = rect.bottom >= monitor_info.rcMonitor.bottom - fuzz;
+    covers_left && covers_top && covers_right && covers_bottom
 }
 
 #[cfg(target_os = "windows")]
@@ -3044,6 +3108,7 @@ fn launch_overlay_selection(
     plugins: &PluginRegistry,
     results: &[crate::model::SearchItem],
     selected_index: usize,
+    query_text: &str,
 ) -> Result<(), String> {
     if results.is_empty() {
         return Err("no result selected".to_string());
@@ -3064,8 +3129,10 @@ fn launch_overlay_selection(
         return clipboard_history::copy_result_to_clipboard(cfg, &selected.id);
     }
 
+    let parsed_query = ParsedQuery::parse(query_text.trim(), cfg.search_dsl_enabled);
+    let mode = resolved_mode_for_query(cfg, &parsed_query);
     service
-        .launch(LaunchTarget::Id(&selected.id))
+        .launch_with_query_context(LaunchTarget::Id(&selected.id), Some(query_text), Some(mode))
         .map_err(|error| format!("launch failed: {error}"))
 }
 
@@ -3268,7 +3335,7 @@ mod tests {
         let plugins = PluginRegistry::default();
         let results = search_overlay_results(&service, &cfg, &plugins, &parsed, 20)
             .expect("search should succeed");
-        launch_overlay_selection(&service, &cfg, &plugins, &results, 0)
+        launch_overlay_selection(&service, &cfg, &plugins, &results, 0, "launch target")
             .expect("launch should succeed");
 
         std::fs::remove_file(&launch_path).expect("temp launch file should be removed");
@@ -3297,7 +3364,7 @@ mod tests {
         let results = vec![item];
         let cfg = Config::default();
         let plugins = PluginRegistry::default();
-        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 0)
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 0, "missing")
             .expect_err("launch should fail");
 
         assert!(error.contains("launch failed:"));
@@ -3311,7 +3378,7 @@ mod tests {
 
         let cfg = Config::default();
         let plugins = PluginRegistry::default();
-        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 1)
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &results, 1, "out")
             .expect_err("selection should fail");
 
         assert!(error.contains("selected index out of range"));
@@ -3324,7 +3391,7 @@ mod tests {
 
         let cfg = Config::default();
         let plugins = PluginRegistry::default();
-        let error = launch_overlay_selection(&service, &cfg, &plugins, &[], 0)
+        let error = launch_overlay_selection(&service, &cfg, &plugins, &[], 0, "")
             .expect_err("empty selection should fail");
 
         assert_eq!(error, "no result selected");

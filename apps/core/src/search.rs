@@ -2,6 +2,7 @@ use crate::config::SearchMode;
 use crate::model::{normalize_for_search, SearchItem};
 use crate::query_dsl::TimeFilterWindow;
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -101,6 +102,16 @@ pub fn search_with_filter(
     limit: usize,
     filter: &SearchFilter,
 ) -> Vec<SearchItem> {
+    search_with_filter_with_boosts(items, query, limit, filter, None)
+}
+
+pub fn search_with_filter_with_boosts(
+    items: &[SearchItem],
+    query: &str,
+    limit: usize,
+    filter: &SearchFilter,
+    personalization_boosts: Option<&HashMap<String, i64>>,
+) -> Vec<SearchItem> {
     if limit == 0 || items.is_empty() {
         return Vec::new();
     }
@@ -113,8 +124,18 @@ pub fn search_with_filter(
         .iter()
         .filter(|item| matches_visibility(item, filter))
         .filter_map(|item| {
+            let personalization_boost = personalization_boosts
+                .and_then(|boosts| boosts.get(item.id.as_str()))
+                .copied()
+                .unwrap_or(0);
             let score = if fast_path {
-                score_item_fast(item, &normalized_query, now_epoch_secs, app_intent_query)
+                score_item_fast(
+                    item,
+                    &normalized_query,
+                    now_epoch_secs,
+                    app_intent_query,
+                    personalization_boost,
+                )
             } else {
                 score_item(
                     item,
@@ -122,6 +143,7 @@ pub fn search_with_filter(
                     now_epoch_secs,
                     filter,
                     app_intent_query,
+                    personalization_boost,
                 )
             };
             score.map(|score| ScoredItem {
@@ -172,6 +194,7 @@ fn score_item_fast(
     normalized_query: &str,
     now_epoch_secs: i64,
     app_intent_query: bool,
+    personalization_boost: i64,
 ) -> Option<TextScore> {
     let text_score = score_text(item.normalized_title(), normalized_query)?;
     let lexical_signal_bonus = word_boundary_and_acronym_bonus(&item.title, normalized_query);
@@ -186,7 +209,8 @@ fn score_item_fast(
             + app_intent_bonus
             + source_bonus
             + recency_bonus
-            + frequency_bonus,
+            + frequency_bonus
+            + personalization_boost,
         kind: text_score.kind,
     })
 }
@@ -197,6 +221,7 @@ fn score_item(
     now_epoch_secs: i64,
     filter: &SearchFilter,
     app_intent_query: bool,
+    personalization_boost: i64,
 ) -> Option<TextScore> {
     if !matches_mode(item, filter.mode) {
         return None;
@@ -247,7 +272,8 @@ fn score_item(
             + source_bonus
             + mode_bonus
             + recency_bonus
-            + frequency_bonus,
+            + frequency_bonus
+            + personalization_boost,
         kind: text_score.kind,
     })
 }

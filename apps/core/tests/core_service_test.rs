@@ -1,6 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use std::sync::{Arc, Mutex};
+use swiftfind_core::config::SearchMode;
 use swiftfind_core::core_service::{CoreService, LaunchTarget, ServiceError};
 use swiftfind_core::discovery::{DiscoveryProvider, ProviderError};
 use swiftfind_core::model::SearchItem;
@@ -438,6 +439,56 @@ fn service_search_order_is_deterministic_for_mixed_ties() {
 
     std::fs::remove_file(app_path).unwrap();
     std::fs::remove_file(file_path).unwrap();
+}
+
+#[test]
+fn query_personalization_boosts_selected_item_for_same_query() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let path_a = std::env::temp_dir().join(format!("swiftfind-personal-a-{unique}.exe"));
+    let path_b = std::env::temp_dir().join(format!("swiftfind-personal-b-{unique}.exe"));
+    std::fs::write(&path_a, b"a").unwrap();
+    std::fs::write(&path_b, b"b").unwrap();
+
+    let config = test_config();
+    let db = swiftfind_core::index_store::open_memory().unwrap();
+    let service = CoreService::with_connection(config, db).unwrap();
+
+    service
+        .upsert_item(&SearchItem::new(
+            "app:a",
+            "app",
+            "Vim Alpha",
+            path_a.to_string_lossy().as_ref(),
+        ))
+        .unwrap();
+    service
+        .upsert_item(&SearchItem::new(
+            "app:b",
+            "app",
+            "Vim Beta",
+            path_b.to_string_lossy().as_ref(),
+        ))
+        .unwrap();
+
+    let baseline = service.search("vim", 10).unwrap();
+    let baseline_top = baseline[0].id.clone();
+    let boosted_target = if baseline_top == "app:a" {
+        "app:b"
+    } else {
+        "app:a"
+    };
+
+    service
+        .record_query_selection_hint("vim", SearchMode::All, boosted_target)
+        .unwrap();
+    let boosted = service.search("vim", 10).unwrap();
+    assert_eq!(boosted[0].id, boosted_target);
+
+    std::fs::remove_file(path_a).unwrap();
+    std::fs::remove_file(path_b).unwrap();
 }
 
 struct StampedProvider {
