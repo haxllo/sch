@@ -99,6 +99,7 @@ struct BackgroundIndexRefresh {
     result: Arc<Mutex<Option<Result<crate::core_service::IndexRefreshReport, String>>>>,
     cache_applied: bool,
     initial_cache_empty: bool,
+    pending_discovery_reindex: bool,
     started_at: Instant,
 }
 
@@ -390,7 +391,11 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                     &mut config_watcher,
                     &mut background_index_refresh,
                 );
-                maybe_apply_background_index_refresh(&service, &mut background_index_refresh);
+                maybe_apply_background_index_refresh(
+                    &service,
+                    &mut background_index_refresh,
+                    &runtime_config,
+                );
                 match event {
                     OverlayEvent::Hotkey(_) => {
                         log_info("[swiftfind-core] hotkey_event received");
@@ -423,6 +428,7 @@ pub fn run_with_options(options: RuntimeOptions) -> Result<(), RuntimeError> {
                                 maybe_apply_background_index_refresh(
                                     &service,
                                     &mut background_index_refresh,
+                                    &runtime_config,
                                 );
                             }
                         }
@@ -2251,12 +2257,17 @@ fn start_background_index_refresh(
         result,
         cache_applied: false,
         initial_cache_empty,
+        pending_discovery_reindex: false,
         started_at: Instant::now(),
     }
 }
 
 #[cfg(target_os = "windows")]
-fn maybe_apply_background_index_refresh(service: &CoreService, state: &mut BackgroundIndexRefresh) {
+fn maybe_apply_background_index_refresh(
+    service: &CoreService,
+    state: &mut BackgroundIndexRefresh,
+    runtime_config: &Config,
+) {
     if state.cache_applied {
         return;
     }
@@ -2314,6 +2325,13 @@ fn maybe_apply_background_index_refresh(service: &CoreService, state: &mut Backg
     }
 
     state.cache_applied = true;
+
+    if state.pending_discovery_reindex {
+        log_info(
+            "[swiftfind-core] discovery settings queued during indexing; starting pending reindex",
+        );
+        *state = start_background_index_refresh(runtime_config, false);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -2649,6 +2667,7 @@ fn maybe_apply_runtime_config_reload(
                 || next_config.index_max_items_per_root != previous.index_max_items_per_root
                 || next_config.index_max_items_per_query_seed
                     != previous.index_max_items_per_query_seed;
+            let mut discovery_reindex_queued = false;
             *runtime_config = next_config;
             *max_results = runtime_config.max_results as usize;
 
@@ -2680,14 +2699,14 @@ fn maybe_apply_runtime_config_reload(
                         "[swiftfind-core] provider reconfigure failed after config reload: {error}"
                     ));
                 } else {
-                    let can_start_reindex = background_index_refresh.cache_applied
-                        || background_index_refresh.completed.load(Ordering::Acquire);
-                    if can_start_reindex {
+                    if background_index_refresh.cache_applied {
                         *background_index_refresh =
                             start_background_index_refresh(runtime_config, false);
                         log_info("[swiftfind-core] discovery settings changed; background reindex started");
                     } else {
-                        log_warn("[swiftfind-core] discovery settings changed while indexing already in progress");
+                        background_index_refresh.pending_discovery_reindex = true;
+                        discovery_reindex_queued = true;
+                        log_info("[swiftfind-core] discovery settings changed while indexing is active; reindex queued");
                     }
                 }
             }
@@ -2709,7 +2728,11 @@ fn maybe_apply_runtime_config_reload(
             ));
 
             if discovery_config_changed {
-                overlay.set_status_text("Discovery settings updated; reindexing...");
+                if discovery_reindex_queued {
+                    overlay.set_status_text("Discovery settings queued; reindex starts next");
+                } else {
+                    overlay.set_status_text("Discovery settings updated; reindexing...");
+                }
             } else if index_db_path_changed {
                 overlay.set_status_text("Restart required to apply index path changes");
             } else if hotkey_changed {
