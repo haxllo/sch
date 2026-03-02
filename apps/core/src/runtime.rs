@@ -2269,15 +2269,30 @@ fn is_foreground_window_fullscreen() -> bool {
 
     let mut monitor_info = MONITORINFO {
         cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        rcMonitor: RECT::default(),
-        rcWork: RECT::default(),
+        rcMonitor: RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
+        rcWork: RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        },
         dwFlags: 0,
     };
     if unsafe { GetMonitorInfoW(monitor, &mut monitor_info as *mut MONITORINFO) } == 0 {
         return false;
     }
 
-    let mut rect = RECT::default();
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
     if unsafe { GetWindowRect(foreground, &mut rect as *mut RECT) } == 0 {
         return false;
     }
